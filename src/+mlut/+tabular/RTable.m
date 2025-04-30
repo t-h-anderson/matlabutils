@@ -1,4 +1,4 @@
-classdef RTable < mlut.RTabular
+classdef RTable < mlut.tabular.RTabular
     % Robust table
 
     methods
@@ -13,14 +13,14 @@ classdef RTable < mlut.RTabular
 
     methods (Static)
         function obj = empty()
-            obj = mlut.RTable(table());
+            obj = mlut.tabular.RTable(table());
         end
     end
 
     methods (Static)
 
         function obj = create(varargin)
-            obj = mlut.RTable(varargin{:});
+            obj = mlut.tabular.RTable(varargin{:});
         end
 
         function tbl = tabularEmpty(varargin)
@@ -28,7 +28,7 @@ classdef RTable < mlut.RTabular
         end
 
         function tbl = tabular(varargin)
-            args = mlut.RTabular.cellstring2char(varargin);
+            args = mlut.tabular.RTabular.cellstring2char(varargin);
             tbl = table(args{:});
         end
 

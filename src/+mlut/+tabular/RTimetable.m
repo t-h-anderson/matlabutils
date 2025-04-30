@@ -1,4 +1,4 @@
-classdef RTimetable < mlut.RTabular
+classdef RTimetable < mlut.tabular.RTabular
     
     methods
         function obj = CycleData(tbl)
@@ -19,7 +19,7 @@ classdef RTimetable < mlut.RTabular
 
     methods (Static)
         function obj = empty()
-            obj = mlut.RTimetable(timetable('Size', [0,0], 'VariableTypes', [], 'RowTimes', seconds(nan(0,0))));
+            obj = mlut.tabular.RTimetable(timetable('Size', [0,0], 'VariableTypes', [], 'RowTimes', seconds(nan(0,0))));
         end
 
     end
@@ -27,7 +27,7 @@ classdef RTimetable < mlut.RTabular
     methods (Static)
 
         function obj = create(varargin)
-            obj = mlut.RTimetable(varargin{:});
+            obj = mlut.tabular.RTimetable(varargin{:});
         end
 
         function tbl = tabularEmpty(varargin)
@@ -35,7 +35,7 @@ classdef RTimetable < mlut.RTabular
         end
 
         function tbl = tabular(varargin)
-            args = mlut.RTabular.cellstring2char(varargin);
+            args = mlut.tabular.RTabular.cellstring2char(varargin);
             tbl = timetable(args{:});
         end
 

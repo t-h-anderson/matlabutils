@@ -1,4 +1,6 @@
 function col = hashColour(inp)
+% col = hashColour(str)
+% Creates a (quasi) unique colour from an input string
 
 str = string(keyHash(inp));
 

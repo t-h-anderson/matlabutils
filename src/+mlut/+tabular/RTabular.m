@@ -17,7 +17,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
             end
 
             % Allow class to be created from another tabular
-            if isa(tbl, "mlut.RTabular")
+            if isa(tbl, "mlut.tabular.RTabular")
                 tbl = tbl.DataTable;
             end
             
@@ -191,7 +191,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                 idx = ismember(obj.DataTable.Properties.VariableNames, colName);
 
                 obj.DataTable(:, idx) = [];
-            elseif isa(rhs, "mlut.RTabular")
+            elseif isa(rhs, "mlut.tabular.RTabular")
                 [obj.DataTable.(indexOp)] = rhs.DataTable.Variables;
             else
                 if numel(rhs) == 1
@@ -231,7 +231,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
             % can make sure they are unique at the end
             knownNames = string.empty(1,0);
             for ix = 1:numCatArrays
-                if isa(varargin{ix},'mlut.RTabular')
+                if isa(varargin{ix},'mlut.tabular.RTabular')
                     % Get the table out - means we can mix the
                     % concatenation of tables and RATs
                     tbl = varargin{ix}.DataTable;
@@ -341,7 +341,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                     tblA.Properties.VariableNames);
 
                 % Create a subtable of the right datatypes for the RH table
-                typesA = mlut.RTabular.dataTypes(tblA);
+                typesA = mlut.tabular.RTabular.dataTypes(tblA);
                 subTblB = obj.makeNewColsLike(tblB, nnz(idxRight), string(tblA.Properties.VariableNames(idxRight)));
 
                 cols = string(subTblB.Properties.VariableNames);
@@ -357,7 +357,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                 tblB = [tblB, subTblB];
 
                 % Ditto, LH table
-                typesB = mlut.RTabular.dataTypes(tblB);
+                typesB = mlut.tabular.RTabular.dataTypes(tblB);
                 subTblA = obj.makeNewColsLike(tblA, nnz(idxLeft), string(tblB.Properties.VariableNames(idxLeft)));
 
                 cols = string(subTblA.Properties.VariableNames);
