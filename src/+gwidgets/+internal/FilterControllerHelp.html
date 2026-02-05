@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Table Filter Instructions</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #fafbfc;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      padding: 32px 24px;
+      line-height: 1.6;
+    }
+    h2 {
+      color: #2d3a4b;
+      margin-top: 0;
+    }
+    h3 {
+      color: #385170;
+      margin-bottom: 8px;
+    }
+    ul {
+      margin-top: 0;
+      padding-left: 26px;
+    }
+    code {
+      background: #f4f6f8;
+      color: #2b3a4b;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 1em;
+    }
+    li {
+      margin-bottom: 10px;
+    }
+    .icon {
+      margin-right: 6px;
+      font-size: 1.1em;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🗂️ How to Use the Table Filter</h2>
+    <p>
+      The table filter allows you to filter the rows of your table data using various operators. You can combine logical and relational operators to create row filters.
+    </p>
+
+    <h3>1. Comparisions <span class="icon">🔗</span></h3>
+    <ul>
+      <li><strong>=</strong> (equal to): <code>Group = B</code></li>
+      <li><strong>?=</strong> (approx. equal to): <code>Date ?= 01-Jan-2024</code></li>
+      <li><strong>~=</strong> (not equal to): <code>Date ~= 01-Jan-2024</code></li>
+      <li><strong>&gt;</strong> (greater than): <code>Score &gt; 60</code></li>
+      <li><strong>&lt;</strong> (less than): <code>Age &lt; 30</code></li>
+      <li><strong>&gt;=</strong> (greater than or equal to): <code>Score &gt;= 80</code></li>
+      <li><strong>&lt;=</strong> (less than or equal to): <code>Date &lt;= 01-Jan-2024</code></li>      
+      <li><strong>|</strong> (or): <code>Date = 01-Jan-2024|01-Jan-2025</code></li>
+      <li><strong>(repeat)</strong> (and): <code>Date = 01-Jan-2024 = 01-Jan-2025</code></li>
+    </ul>
+
+    <h3>2. Logical Operators <span class="icon">🧩</span></h3>
+    <ul>
+      <li>
+        <strong>&amp;</strong> (and): Combine multiple queries (all must be true).<br>
+        <code>Score&gt;60 &amp; Status=Active</code>
+      </li>
+      <li>
+        <strong>; </strong> (or): Combine multiple queries (at least one must be true).<br>
+        <code>Score&gt;60 ; Status=Active</code>
+        </li>
+    </ul>
+
+    <h3>4. Example Filters <span class="icon">📖</span></h3>
+    <ul>
+      <li><span class="icon">📖</span><code>Score &gt; 75; Department=IT|Finance</code></li>
+      <li><span class="icon">📖</span><code>Age &lt; 30; Active=true</code></li>
+      <li><span class="icon">📖</span><code>Score &gt; 60; Score &lt; 80</code></li>
+    </ul>
+
+    <h3>5. Tips <span class="icon">📝</span></h3>
+    <ul>
+      <li><span class="icon">💡</span>String values should not be wrapped in quotes: <code>Status = Active</code></li>
+      <li><span class="icon">💡</span>Multiple conditions are separated using amperands (&amp; for and) and semi-colons (; for or): <code>Score &gt; 80; Age &lt; 40; Status = Manager</code></li>
+      <li><span class="icon">💡</span>Brackets are not supported, and condition are applied left to right.</code></li>
+      <li><span class="icon">💡️</span>Spaces are optional and are ignored by the filterable table.</li>
+      <li><span class="">💡</span>Valid filters are saved in the dropdown menu for reuse.</li>
+      <li><span class="">💡</span>If unrecognized syntax is used, you will see a question mark icon (⚡) next to the filter condition causing the error.</li>
+      <li><span class="">💡</span>If unrecognized or non-unique column is specified, you will see a question mark icon (❓) next to the filter condition causing the error.</li>  
+    </ul>
+  </div>
+</body>
+</html>
