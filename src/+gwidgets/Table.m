@@ -1989,10 +1989,6 @@ classdef Table < gwidgets.internal.Reparentable
                 this.GroupedDataToVisibleMap = data2visible;
                 this.GroupedVisibleToDataMap = updatedVisible2data;
 
-                % Mark the groups as closed without "closing them" and
-                % triggering another update
-                this.UpdateManager.addSuppression("ClosedGroups", Times=1);
-                this.ClosedGroups = this.Groups;
             end
 
         end
@@ -2117,7 +2113,7 @@ classdef Table < gwidgets.internal.Reparentable
     end
 
     % Internal callbacks
-    methods (Access = protected)
+    methods (Access = private)
 
         function onCellClicked_(this, displayIdx)
             arguments
@@ -2240,7 +2236,7 @@ classdef Table < gwidgets.internal.Reparentable
 
     end
 
-    methods (Access = private)
+    methods (Access = {?matlab.unittest.TestCase, ?gwidgets.Table})
 
         function onCellClicked(this, ~, e)
             % Do internal cell clicked action
