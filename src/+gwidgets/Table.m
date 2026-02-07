@@ -309,7 +309,7 @@ classdef Table < gwidgets.internal.Reparentable
             if isempty(val)
                 this.DataColumnEditable_ = val;
             else
-                this.DataColumnEditable_ = false(size(this.VisibleColumnNames));
+                this.DataColumnEditable_ = false(size(this.DataColumnNames));
                 this.DataColumnEditable_(this.ColumnVisible) = val;
             end
             if this.UpdateManager.doRun("DataColumnEditable")
@@ -366,7 +366,7 @@ classdef Table < gwidgets.internal.Reparentable
             if isempty(val)
                 this.DataColumnSortable = val;
             else
-                tmp = false(size(this.VisibleColumnNames));
+                tmp = false(size(this.DataColumnNames));
                 tmp(this.ColumnVisible) = val;
                 this.DataColumnSortable = tmp;
             end
@@ -535,7 +535,7 @@ classdef Table < gwidgets.internal.Reparentable
                         if any(idxFail)
                             failSelection = strjoin(selection(idxFail), ",");
                             limits = destSize;
-                            error("GraphicsWidgets:Table:SelectionOutsideLimits", "Selection " + failSelection + "outsize limits " + limits);
+                            error("GraphicsWidgets:Table:SelectionOutsideLimits", "Selection " + failSelection + " outsize limits " + limits);
                         end
 
                 end
@@ -1181,12 +1181,11 @@ classdef Table < gwidgets.internal.Reparentable
                         dMapIdxRange = dMapIdxRange - iGroup;
                     end
 
-                    idx = ismissing(d2vMap);
-                    tmpMap = d2vMap(~idx);
-                    tmp = tmpMap(dMapIdxRange);
+
+                    idx = ismember(d2vMap, vMapIdxRange);
+                    tmp = d2vMap(idx);
                     tmp(orderIdx) = tmp;
-                    tmpMap(dMapIdxRange) = tmp;
-                    d2vMap(~idx) = tmpMap;
+                    d2vMap(idx) = tmp;
 
                     tmp = v2dMap(vMapIdxRange);
                     v2dMap(vMapIdxRange) = tmp(orderIdx);
@@ -1679,8 +1678,9 @@ classdef Table < gwidgets.internal.Reparentable
             try
                 this.DisplayTable.Selection = selection;
             catch ME
-                this.IsSettingSelectionProgrammatically = false;
-                rethrow(ME);
+                % May fail if the data has changed shape so the selection
+                % is not longer valid
+                this.DisplayTable.Selection = [];
             end
             this.IsSettingSelectionProgrammatically = false;
 
@@ -1849,7 +1849,7 @@ classdef Table < gwidgets.internal.Reparentable
             if ~isempty(this.ColumnNames)
                 data.Properties.VariableNames = this.ColumnNames;
             end
-            [data, idx, success] = this.FilterController.applyFilter(data, this.Filter);
+            [data, idx] = this.FilterController.applyFilter(data, this.Filter);
 
             % Underlying data should use actual data names
             data.Properties.VariableNames = this.DataColumnNames;
@@ -1862,8 +1862,6 @@ classdef Table < gwidgets.internal.Reparentable
 
             this.FilteredData = data;
             this.RowFilterIndices = idx;
-
-            this.clearSelection();
             
         end
 
@@ -2073,7 +2071,7 @@ classdef Table < gwidgets.internal.Reparentable
 
             end
             
-            groupedData = cell2table(groupedData, VariableName=vars);
+            groupedData = cell2table(groupedData, VariableNames=vars);
            
             this.VisibleData = groupedData;
 
