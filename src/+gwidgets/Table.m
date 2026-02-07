@@ -1616,7 +1616,7 @@ classdef Table < gwidgets.internal.Reparentable
 
                 % Map columns
                 % Remove hidden and group columns, reorder if necessary
-                visibleCols = this.VisibleColumnNames;
+                visibleCols = this.VisibleDataColumnNames;
                 visibleCols(ismember(visibleCols, this.GroupingVariable)) = [];
                 dataCols = this.DataColumnNames;
                 for i = 1:numel(colIdxs)
@@ -2102,7 +2102,11 @@ classdef Table < gwidgets.internal.Reparentable
 
                 index = thisStyle.indices(this);
                 if thisStyle.SelectionMode == gwidgets.internal.table.SelectionMode.Data
-                    index = this.dataSelectionToDisplaySelection(index, thisStyle.Target);
+                    try
+                        index = this.dataSelectionToDisplaySelection(index, thisStyle.Target);
+                    catch
+                        index = [];
+                    end
                 end
                 this.DisplayTable.addStyle(style, target, index);
             end

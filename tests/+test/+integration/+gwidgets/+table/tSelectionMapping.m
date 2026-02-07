@@ -214,8 +214,6 @@ classdef tSelectionMapping < test.WithExampleTables
             displayRow = t.DisplaySelection;
             testCase.verifyGreaterThan(displayRow, 0)
             
-            % Change sort to ascending
-            t.SortDirection = "Descend";
             testCase.verifyNotEqual(t.DisplaySelection, t.Selection) % Position changed
             testCase.verifyEqual(t.Selection, 2) % Data selection unchanged
             testCase.verifyEqual(t.DisplaySelection, 4) % Data selection unchanged
@@ -259,5 +257,21 @@ classdef tSelectionMapping < test.WithExampleTables
             t.SelectionType = "column";
             testCase.verifyEqual(t.Selection, zeros(1,0))
         end
+
+        function tSort_VerifyMaps(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.SortDirection = "Descend";
+            t.ColumnSortable = true;
+            t.SortByColumn = "Numerical";
+
+            % Verify maps are correct
+            for i = 1:5
+                visIdx = t.SortedDataToVisibleMap(i);
+                if ~isnan(visIdx)
+                    testCase.verifyEqual(t.SortedVisibleToDataMap(visIdx), i)
+                end
+            end
+        end
+        
     end
 end
