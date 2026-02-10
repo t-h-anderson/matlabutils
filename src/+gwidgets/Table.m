@@ -60,6 +60,7 @@ classdef Table < gwidgets.internal.Reparentable
     properties
         CellSelectionCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
         CellClickedCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
+        CellDoubleClickCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
         CellEditCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
         DisplayDataChangedCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
     end
@@ -77,7 +78,9 @@ classdef Table < gwidgets.internal.Reparentable
             % Enable suppression of updates
             this.UpdateManager = gwidgets.internal.UpdateManager();
 
-            set(this, namedArgs)
+            set(this, namedArgs);
+
+            this.Selection = []; % Enforces correct inital selection shape
 
             % Support creation with filtering and grouping set
             this.doUpdateSequence();
@@ -1171,25 +1174,13 @@ classdef Table < gwidgets.internal.Reparentable
                     data(groupIdxs, :) = data(groupIdxsReordered, :);
 
                     % Update the maps
-                    vMapIdxRange = groupIdxs;
-
-                    dMapIdxRange = vMapIdxRange;
-                    if this.IsGroupTable
-                        % If it's a grouping table, 
-                        % the mapping doesn't contain the group headers so
-                        % correct for this
-                        dMapIdxRange = dMapIdxRange - iGroup;
-                    end
-
-
-                    idx = ismember(d2vMap, vMapIdxRange);
+                    idx = ismember(d2vMap, groupIdxs);
                     tmp = d2vMap(idx);
                     tmp(orderIdx) = tmp;
                     d2vMap(idx) = tmp;
 
-                    tmp = v2dMap(vMapIdxRange);
-                    v2dMap(vMapIdxRange) = tmp(orderIdx);
-
+                    tmp = v2dMap(groupIdxs);
+                    v2dMap(groupIdxs) = tmp(orderIdx);
                 end
             end
 
@@ -1342,6 +1333,7 @@ classdef Table < gwidgets.internal.Reparentable
 
             this.DisplayTable = uitable(this.Grid);
             this.DisplayTable.ClickedFcn = @(s,e)this.onCellClicked(s,e);
+            this.DisplayTable.DoubleClickedFcn = @(s,e)this.onCellDoubleClicked(s,e);
             this.DisplayTable.CellSelectionCallback = @(s,e)this.onSelection(s,e);
             this.DisplayTable.CellEditCallback = @(s,e)this.onCellEdit(s,e);
             this.DisplayTable.DisplayDataChangedFcn = @(s,e)this.onDisplayDataChanged(s,e);
@@ -2098,11 +2090,7 @@ classdef Table < gwidgets.internal.Reparentable
 
                 index = thisStyle.indices(this);
                 if thisStyle.SelectionMode == gwidgets.internal.table.SelectionMode.Data
-                    try
-                        index = this.dataSelectionToDisplaySelection(index, thisStyle.Target);
-                    catch
-                        index = [];
-                    end
+                    index = this.dataSelectionToDisplaySelection(index, thisStyle.Target);
                 end
                 this.DisplayTable.addStyle(style, target, index);
             end
@@ -2125,6 +2113,15 @@ classdef Table < gwidgets.internal.Reparentable
             rowIdxs = unique(displayIdx(:,1));
             this.toggleGroupOpenStateViaRowSelection(rowIdxs);
         end
+
+        function onCellDoubleClicked_(this, displayIdx)
+            arguments
+                this (1,1) %#ok<INUSA>
+                displayIdx (:,2) double %#ok<INUSA> % onCellClicked always sends row/col
+            end
+            % Nothing to do - yet
+        end
+
 
         function toggleGroupOpenStateViaRowSelection(this, rowIdx)
             idxHeader = this.VisibleGroupHeaderRowIdx;
@@ -2260,6 +2257,29 @@ classdef Table < gwidgets.internal.Reparentable
 
         end
 
+        function onCellDoubleClicked(this, ~, e)
+
+            % Do internal cell clicked action
+            rowIdx = e.InteractionInformation.DisplayRow';
+            colIdx = e.InteractionInformation.DisplayColumn';
+
+            if ~isempty(rowIdx) % Row index is empty if column is clicked
+                displayIdx = [rowIdx, colIdx];
+                this.onCellDoubleClicked_(displayIdx);
+            else
+                displayIdx = zeros(0,2);
+            end
+
+            % Forward to user specified cell clicked function
+            if ~isempty(this.CellDoubleClickCallback)
+                dataIdx = this.displaySelectionToDataSelection(displayIdx);
+                e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+                s = this;
+                this.CellDoubleClickCallback(s, e);
+            end
+
+        end
+        
         function onSelection(this, s, e)
             % Do internal selection action
             displayIdx = e.Indices;
