@@ -19,6 +19,8 @@ classdef FilterController < gwidgets.internal.Reparentable
         Datepicker (1,:) matlab.ui.control.DatePicker {mustBeScalarOrEmpty}
         ShowCategoriesButton (1,:) matlab.ui.control.Button {mustBeScalarOrEmpty}
         CategoriesPopout (1,:) matlab.ui.container.internal.Popout {mustBeScalarOrEmpty}
+
+        Accordion (1,:) matlab.ui.container.internal.Accordion {mustBeScalarOrEmpty}
         CategoriesListBox (1,:) matlab.ui.control.ListBox {mustBeScalarOrEmpty}
         AllColumnsCheckBox (1,:) matlab.ui.control.CheckBox {mustBeScalarOrEmpty}
         CloseHelpButton (1,:) matlab.ui.control.Button {mustBeScalarOrEmpty}
@@ -47,6 +49,19 @@ classdef FilterController < gwidgets.internal.Reparentable
             delete(this.CategoriesPopout);
             delete(ancestor(this.PopoutHelpParent, "figure"));
             delete(this.PopoutHelpParent);
+        end
+
+        function expand(this, status)
+            arguments
+                this (1,1)
+                status (1,1) logical = true
+            end
+
+            if status
+                this.Accordion.expand();
+            else
+                this.Accordion.collapse();
+            end
         end
 
         function [data, idx, status] = applyFilter(this, data, filter)
@@ -410,10 +425,10 @@ classdef FilterController < gwidgets.internal.Reparentable
             this.Grid = uigridlayout("Parent", this, "RowHeight", "fit", "ColumnWidth", "1x", "Padding", 0);
             
             % Add the card panel for the filter
-            acc = matlab.ui.container.internal.Accordion(...
+            this.Accordion = matlab.ui.container.internal.Accordion(...
                 "Parent", this.Grid);
             accPan = matlab.ui.container.internal.AccordionPanel(...
-                "Parent", acc, ...
+                "Parent", this.Accordion, ...
                 "Title", "Filter Controls", ...
                 "Tooltip", "Show/hide filter controls", ...
                 "Collapsed", true);

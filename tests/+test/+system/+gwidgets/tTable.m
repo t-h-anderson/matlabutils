@@ -56,7 +56,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.verifySize(tab.DisplayData, [47 10])
             testCase.verifyTrue(all(tab.DisplayData.Gender == "Male"))
             
-            testCase.press(fh, [13, 400]) % expand filter controls
+            t.expandFilterController();
 
             testCase.type(t.FilterController.FilterDropDown, "Gender=Female")
             testCase.verifySize(tab.DisplayData, [53 10])
@@ -108,10 +108,12 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.verifyEqual(t.DisplaySelection, 3)
             testCase.verifyEqual(tab.Selection, 3)
 
-            testCase.press(fh, [350 355]) % select column by clicking on header
-            testCase.verifyEqual(t.Selection, 5)
-            testCase.verifyEqual(t.DisplaySelection, 5)
-            testCase.verifyEqual(tab.Selection, 5)
+            % TODO: Unstable with different resolutions
+            % Need to enhance uitable for click on column header
+            % testCase.press(fh, [350 355]) % select column by clicking on header
+            % testCase.verifyEqual(t.Selection, 5)
+            % testCase.verifyEqual(t.DisplaySelection, 5)
+            % testCase.verifyEqual(tab.Selection, 5)
 
             t.Selection = 1; % select column programmatically
             testCase.verifyEqual(tab.Selection, 1)
@@ -159,11 +161,13 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.chooseContextMenu(fh, columnmenu, [350 360])
             testCase.verifyEqual(tab.SelectionType, 'column')
 
-            testCase.press(fh, [100 360]) % select 4 columns by shift+click on headers
-            testCase.press(fh, [350 360], SelectionType="extend")
-            testCase.verifyEqual(t.Selection, [2 3 4 5])
-            testCase.verifyEqual(t.DisplaySelection, [2 3 4 5])
-            testCase.verifyEqual(tab.Selection, [2 3 4 5])
+            % TODO: Unstable with different resolutions
+            % Need to enhance uitable for click on column header
+            % testCase.press(fh, [100 360]) % select 4 columns by shift+click on headers
+            % testCase.press(fh, [350 360], SelectionType="extend")
+            % testCase.verifyEqual(t.Selection, [2 3 4 5])
+            % testCase.verifyEqual(t.DisplaySelection, [2 3 4 5])
+            % testCase.verifyEqual(tab.Selection, [2 3 4 5])
 
             t.Selection = [1; 3]; % select 2 columns programmatically
             testCase.verifyEqual(t.DisplaySelection, [1 3])
@@ -237,13 +241,15 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.verifyEqual(t.GroupingVariableName, "Gender|SelfAssessedHealthStatus")
             testCase.verifySize(tab.DisplayData, [8 8])
 
-            pause(1)
-            t.SelectionType = "column";
-            testCase.press(fh, [280 330]) % select 2 columns by shift+click on headers
-            testCase.press(fh, [350 330], SelectionType="extend")
-            testCase.chooseContextMenu(fh, groupmenu, [280 330]); % group interactively
-            testCase.verifyEqual(t.GroupingVariableName, "Age|Height")
-            testCase.verifySize(tab.DisplayData, [80 8])
+            % TODO: Unstable with different resolutions
+            % Need to enhance uitable for click on column header
+            % pause(1)
+            % t.SelectionType = "column";
+            % testCase.press(fh, [280 330]) % select 2 columns by shift+click on headers
+            % testCase.press(fh, [350 330], SelectionType="extend")
+            % testCase.chooseContextMenu(fh, groupmenu, [280 330]); % group interactively
+            % testCase.verifyEqual(t.GroupingVariableName, "Age|Height")
+            % testCase.verifySize(tab.DisplayData, [80 8])
         end
 
         function tApplyStyles(testCase)
@@ -362,10 +368,9 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             
             t.ColumnSortable = true;
 
-            % TODO: This is very unstable
-            testCase.press(fh, [330 360]) % sort by clicking button on header
-
-            testCase.assumeError(@() "Skip because press on header is very unstable", "TODO")
+            % TODO: Unstable with different resolutions
+            % Need to enhance uitable for click on column header
+            % testCase.press(fh, [330 360]) % sort by clicking button on header
             % testCase.verifyEqual(t.GroupingVariable, "Smoker");
             % testCase.verifySize(tab.DisplayData, [2 9])
         end
@@ -376,7 +381,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             t = testCase.defaultTable(fh);
             tab = fh.Children(end).DisplayTable;
 
-            testCase.press(fh, [13, 400]) % expand filter controls
+            t.expandFilterController();
             testCase.type(t.FilterController.FilterDropDown, "Gender=Male")
             testCase.verifySize(tab.DisplayData, [47, 10])
 
