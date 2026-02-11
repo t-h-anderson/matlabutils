@@ -39,7 +39,7 @@ classdef Table < gwidgets.internal.Reparentable
     properties (Access = private)
         Data_ (:,:) table % Private storage for the data table
         TextColumns (:,:) table % Text columns extracted from data as strings
-        
+
         ColumnNames_ (1,:) string % Private storage for column aliases
         ColumnVisible_ (1,:) logical % Private storage for column visible
 
@@ -91,13 +91,14 @@ classdef Table < gwidgets.internal.Reparentable
             delete(this.CustomContextMenuItems);
             delete(this.ContextMenu);
         end
+
         function reset(this)
 
             data = this.Data_;
 
             % Clear the state of the table, suppressing update till the end
 
-            % All columns are default visible, suppress update to wait for data 
+            % All columns are default visible, suppress update to wait for data
             this.UpdateManager.addSuppression("ColumnVisible", Times=1);
             this.ColumnVisible = true;
 
@@ -152,7 +153,7 @@ classdef Table < gwidgets.internal.Reparentable
                 try
                     this.doUpdateSequence();
                 catch
-                    % Update failed with new data, e.g. caused by change in 
+                    % Update failed with new data, e.g. caused by change in
                     % size of table or data types, so reset the table
                     this.reset();
                 end
@@ -191,7 +192,7 @@ classdef Table < gwidgets.internal.Reparentable
             end
             this.ColumnVisible_ = val;
 
-            if this.UpdateManager.doRun("ColumnVisible") 
+            if this.UpdateManager.doRun("ColumnVisible")
                 this.doUpdateSequence(StartFrom="Display");
             end
         end
@@ -219,7 +220,7 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function set.HiddenColumnNames(this, val)
-            
+
             idx = ismember(val, this.ColumnNames);
             if any(~idx)
                 error("GraphicsWidgets:Table:NonexistentColumnName", "Columns not found: " + strjoin(val(~idx), ", "));
@@ -255,7 +256,7 @@ classdef Table < gwidgets.internal.Reparentable
         function set.ColumnNames(this, val)
             val(val == "") = [];
             if ~isempty(val) ... % empty restores to data names
-                && numel(val) ~= numel(this.DataColumnNames)
+                    && numel(val) ~= numel(this.DataColumnNames)
                 error("GraphicsWidgets:Table:InvalidColumnAliases", ...
                     "Number of column aliases must match number of columns");
             end
@@ -280,7 +281,7 @@ classdef Table < gwidgets.internal.Reparentable
                 val = repelem(val, 1, size(this.Data_, 2));
             end
             if ~isempty(val) ... % empty restores to default
-                && numel(val) ~= numel(this.DataColumnNames)
+                    && numel(val) ~= numel(this.DataColumnNames)
                 error("GraphicsWidgets:Table:DataColumnEditableSize", ...
                     "Size of data column editable must match the underlying data, be scalar (apply to all), or empty (restore to default)");
             end
@@ -304,7 +305,7 @@ classdef Table < gwidgets.internal.Reparentable
                 val = repelem(val, 1, numel(this.VisibleColumnNames));
             end
             if ~isempty(val) ... % empty restores to default
-                && numel(val) ~= numel(this.VisibleColumnNames)
+                    && numel(val) ~= numel(this.VisibleColumnNames)
                 error("GraphicsWidgets:Table:ColumnEditableSize", ...
                     "Size of column editable must match the visible table, be scalar (apply to all), or empty (restore to default)");
             end
@@ -333,7 +334,7 @@ classdef Table < gwidgets.internal.Reparentable
                 val = repelem(val, 1, size(this.Data_, 2));
             end
             if ~isempty(val) ... % empty restores to default
-                && numel(val) ~= numel(this.DataColumnNames)
+                    && numel(val) ~= numel(this.DataColumnNames)
                 error("GraphicsWidgets:Table:DataColumnSortableSize", ...
                     "Size of data column sortable must match the underlying data, be scalar (apply to all), or empty (restore to default)");
             end
@@ -724,7 +725,7 @@ classdef Table < gwidgets.internal.Reparentable
         function val = get.HasToggleShowEmptyGroups(this)
             val = this.HasToggleShowEmptyGroups_;
         end
-        
+
         function set.HasToggleShowEmptyGroups(this, val)
             this.HasToggleShowEmptyGroups_ = val;
             this.addContextMenu();
@@ -784,7 +785,7 @@ classdef Table < gwidgets.internal.Reparentable
     end
 
     properties (Access = protected)
-       ShowRowFilter_ (1,1) logical = false
+        ShowRowFilter_ (1,1) logical = false
     end
 
     properties (SetAccess = private)
@@ -800,6 +801,18 @@ classdef Table < gwidgets.internal.Reparentable
         % Maps after filtering
         FilteredVisibleToDataMap (1,:) double % Mapping from visible rows to data rows
         FilteredDataToVisibleMap (1,:) double % Mapping from data rows to visible rows
+    end
+
+    methods
+
+        function expandFilterController(this, value)
+            arguments
+                this
+                value (1,1) logical = true
+            end
+            this.FilterController.expand(value);
+        end
+
     end
 
     methods % Get/Set
@@ -1015,7 +1028,7 @@ classdef Table < gwidgets.internal.Reparentable
         SortDirection (1,1) string {mustBeMember(SortDirection, ["Ascend", "Descend", "None"])} = "None"
     end
 
-    properties 
+    properties
         SortedVisibleData (:,:) cell % Headers and data after sorting
         SortedGroupHeaderRowIdx (1,:) double % (1,nGroups) Indices of group header rows after sorting
 
@@ -1050,7 +1063,7 @@ classdef Table < gwidgets.internal.Reparentable
             for i = 1:size(idx, 2)
                 id(i) = find(idx(:,i), 1);
             end
-            
+
             this.SortByColumnIdxs_ = id;
             if this.UpdateManager.doRun("SortByColumn")
                 this.doUpdateSequence(StartFrom="Sorting");
@@ -1076,7 +1089,7 @@ classdef Table < gwidgets.internal.Reparentable
             for i = 1:size(idx, 2)
                 id(i) = find(idx(:,i), 1);
             end
-            
+
             this.SortByColumnIdxs_ = id;
             if this.UpdateManager.doRun("SortByColumn")
                 this.doUpdateSequence(StartFrom="Sorting");
@@ -1108,7 +1121,7 @@ classdef Table < gwidgets.internal.Reparentable
             data = this.GroupedVisibleData;
 
             % Pass forwards the data in case we return early
-            this.SortedVisibleData = data; 
+            this.SortedVisibleData = data;
             this.SortedDataToVisibleMap = this.GroupedDataToVisibleMap;
             this.SortedVisibleToDataMap = this.GroupedVisibleToDataMap;
             this.SortedGroupHeaderRowIdx = this.GroupHeaderRowIdx;
@@ -1140,7 +1153,7 @@ classdef Table < gwidgets.internal.Reparentable
             sortByGroupVars = sortBy(ismember(sortBy, groupVars));
             sortByDataVars = sortBy(ismember(sortBy, dataVars));
             dataColIdx = ismember(dataVars, sortBy);
-            
+
             % Sort the content of each group
             d2vMap = this.GroupedDataToVisibleMap;
             v2dMap = this.GroupedVisibleToDataMap;
@@ -1158,7 +1171,7 @@ classdef Table < gwidgets.internal.Reparentable
             if ~isempty(sortByDataVars)
 
                 for iGroup = 1:(numel(groupHeaderRowIdxs)-1)
-                    
+
                     dataStartIdx = groupHeaderRowIdxs(iGroup) + 1;
                     dataEndIdx = groupHeaderRowIdxs(iGroup+1) - 1;
 
@@ -1199,7 +1212,7 @@ classdef Table < gwidgets.internal.Reparentable
                 for iGroup = 1:(numel(groupHeaderRowIdxs)-1)
 
                     % Indices of group, inc. header
-                    groupStartIdx = groupHeaderRowIdxs(iGroup); 
+                    groupStartIdx = groupHeaderRowIdxs(iGroup);
                     groupEndIdx = groupHeaderRowIdxs(iGroup+1) - 1;
                     groupIdxs{iGroup} = groupStartIdx:groupEndIdx;
 
@@ -1224,7 +1237,7 @@ classdef Table < gwidgets.internal.Reparentable
 
                 d2vMap = 0*d2vMap;
                 cumSize = 1;
-                for i = 1:numel(d2vMapGroup)                 
+                for i = 1:numel(d2vMapGroup)
                     d2vMap = d2vMap + d2vMapGroup{i} + (d2vMapGroup{i} ~=0) * (cumSize);
                     cumSize = cumSize + (groupSize(i) + 1);
                 end
@@ -1232,7 +1245,7 @@ classdef Table < gwidgets.internal.Reparentable
                 % Update the row header markers
                 newGroupHeaderIdxs = [0, cumsum(groupSize)] + (1:(numel(groupSize)+1));
                 this.SortedGroupHeaderRowIdx = newGroupHeaderIdxs(1:end-1);
-                
+
                 this.SortedGroupValues = this.SortedGroupValues(orderIdx);
             end
 
@@ -1407,7 +1420,7 @@ classdef Table < gwidgets.internal.Reparentable
                         elseif ~isempty(firstIdx) && firstIdx ~= 1 && ~isempty(this.GroupingVariable)
                             % Restore the group headers in the first
                             % column
-                            if ~isstring(newVal{:, 1}) 
+                            if ~isstring(newVal{:, 1})
                                 if ~iscell(newVal{:, 1})
                                     newVal = convertvars(newVal, 1, "cell");
                                 end
@@ -1437,7 +1450,7 @@ classdef Table < gwidgets.internal.Reparentable
             end
 
             if ~isempty(toUpdate)
-                set(this.DisplayTable, toUpdate{:}); 
+                set(this.DisplayTable, toUpdate{:});
             end
         end
 
@@ -1465,7 +1478,7 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function dataIdxs =  displaySelectionToDataSelection(this, visibleIdxs, type)
-            % displaySelectionToDataSelection Maps display selection to 
+            % displaySelectionToDataSelection Maps display selection to
             %   data selection
             arguments
                 this
@@ -1524,7 +1537,7 @@ classdef Table < gwidgets.internal.Reparentable
             idx = ismissing(rowIdxs) | ismissing(colIdxs);
             rowIdxs(idx) = [];
             colIdxs(idx) = [];
-            
+
             switch type
                 case "cell"
                     rowIdxs = reshape(rowIdxs, [], 1);
@@ -1583,7 +1596,7 @@ classdef Table < gwidgets.internal.Reparentable
             if (checkRowsInRange && ~rowsInRange) ...
                     || (checkColsInRange && ~colsInRange)
                 error("GraphicsWidgets:Table:SelectionOutOfRange", ...
-                        "Selection outside data range");
+                    "Selection outside data range");
             elseif isempty(this.FoldedDataToVisibleMap)
                 % Map not yet initialized - table not rendered yet
                 % Return empty with correct dimensions
@@ -1854,7 +1867,7 @@ classdef Table < gwidgets.internal.Reparentable
 
             this.FilteredData = data;
             this.RowFilterIndices = idx;
-            
+
         end
 
     end
@@ -2058,9 +2071,9 @@ classdef Table < gwidgets.internal.Reparentable
                 end
 
             end
-            
+
             groupedData = cell2table(groupedData, VariableNames=vars);
-           
+
             this.VisibleData = groupedData;
 
             this.UpdateManager.addSuppression("HiddenGroups", Times=1);
@@ -2279,7 +2292,7 @@ classdef Table < gwidgets.internal.Reparentable
             end
 
         end
-        
+
         function onSelection(this, s, e)
             % Do internal selection action
             displayIdx = e.Indices;
@@ -2354,10 +2367,10 @@ classdef Table < gwidgets.internal.Reparentable
                 elseif this.SelectionType == "column"
                     columnIdx = this.DisplaySelection;
                 else
-                    columnIdx = e.InteractionInformation.DisplayColumn();
+                    columnIdx = e.InteractionInformation.DisplayColumn;
                 end
             else
-                columnIdx = e.InteractionInformation.DisplayColumn();
+                columnIdx = e.InteractionInformation.DisplayColumn;
             end
 
             % Convert from alias back to underlying data for grouping
@@ -2410,7 +2423,7 @@ classdef Table < gwidgets.internal.Reparentable
 
             this.UpdateManager.addSuppression("SortDirection", Times=1);
             this.SortDirection = direction;
-            
+
             if ismember(e.InteractionInformation.DisplayRow, this.VisibleGroupHeaderRowIdx)
                 % Sort groups by sorting on group row
                 % TODO: Sort groups and columns
@@ -2430,7 +2443,7 @@ classdef Table < gwidgets.internal.Reparentable
                 vars = this.GroupedDataVariables(colIdx);
 
             end
-            
+
             this.SortByColumn = vars;
 
         end
