@@ -65,10 +65,16 @@ classdef tGrouping < test.WithExampleTables
             testCase.verifyEqual(t.DisplayData.Var1(1), "⮞ false (3/3)")
         end
 
-        function tGroupEmptyTable(testCase)
+        function tGroupEmptyTableOneColumn(testCase)
+            t = gwidgets.Table(Data=table.empty(0,1));
+            t.GroupingVariable = "Var1";
+            testCase.verifyEqual(t.DisplayData, table(string.empty(0,1), 'VariableNames', "Group"))
+            testCase.verifyTrue(t.IsGroupTable)
+        end
+
+        function tGroupEmptyTableMultipleColumns(testCase)
             t = gwidgets.Table(Data=table.empty(0,2));
             t.GroupingVariable = "Var1";
-
             testCase.verifyEqual(t.DisplayData, t.Data(:,2))
             testCase.verifyTrue(t.IsGroupTable)
         end

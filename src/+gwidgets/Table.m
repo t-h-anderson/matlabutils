@@ -1408,27 +1408,38 @@ classdef Table < gwidgets.internal.Reparentable
                             % restored if the first column is removed
                             vghri = this.VisibleGroupHeaderRowIdx;
                             rowHeaders = newVal{vghri, 1};
-                        end
-
-                        % Remove hidden columns
-                        newVal = newVal(:, idx);
-
-                        if isempty(firstIdx) && ~isempty(this.GroupingVariable)
-                            % Retain group headers if all columns are hidden
-                            newVal = table(repelem("Hidden Item", height(newVal), 1), 'VariableNames', "Group");
-                            newVal{vghri, 1} = num2cell(rowHeaders);
-                        elseif ~isempty(firstIdx) && firstIdx ~= 1 && ~isempty(this.GroupingVariable)
-                            % Restore the group headers in the first
-                            % column
-                            if ~isstring(newVal{:, 1})
-                                if ~iscell(newVal{:, 1})
-                                    newVal = convertvars(newVal, 1, "cell");
-                                end
-                                newVal{vghri, 1} = num2cell(rowHeaders);
-                            else
-                                newVal{vghri, 1} = rowHeaders;
+                            if isempty(rowHeaders)
+                                % When there are no groups and the table is
+                                % empty, the row header array has the wrong
+                                % size (0,0), rather than (0,1)
+                                rowHeaders = string.empty(0,1);
                             end
 
+                            if isempty(firstIdx)
+                                % Retain group headers if all columns are hidden
+                                newVal = table(repelem("Hidden Item", height(newVal), 1), 'VariableNames', "Group");
+                                newVal{vghri, 1} = num2cell(rowHeaders);
+                            else
+                                % Restore the group headers in the first
+                                % column
+
+                                % Remove hidden columns
+                                newVal = newVal(:, idx);
+
+                                if ~isstring(newVal{:, 1})
+                                    if ~iscell(newVal{:, 1})
+                                        newVal = convertvars(newVal, 1, "cell");
+                                    end
+                                    newVal{vghri, 1} = num2cell(rowHeaders);
+                                else
+                                    newVal{vghri, 1} = rowHeaders;
+                                end
+
+                            end
+
+                        else
+                            % Remove hidden columns
+                            newVal = newVal(:, idx);
                         end
 
                     end
