@@ -5,53 +5,21 @@
     body { margin: 0; overflow: hidden; background: transparent; }
   </style>
   <script>
-  // Minimal diagnostic version — no window.parent access.
-  // Purpose: verify the basic JS <-> MATLAB channel works before adding
-  // any DOM observation logic.  Check the MATLAB command window for output.
-
-  var htmlComponent = null;
+  // Absolute minimal test — no window.parent, no ResizeObserver.
+  // Just verifies that setup() is called and that both outbound channels
+  // (CustomEvent/HTMLEventReceivedFcn AND Data/DataChangedFcn) work.
 
   function setup(component) {
-    htmlComponent = component;
 
-    // Step 1: confirm setup() was called and the channel is open.
-    htmlComponent.dispatchEvent(
+    // Channel A: CustomEvent -> HTMLEventReceivedFcn
+    component.dispatchEvent(
       new CustomEvent("BridgeDiag", {
-        detail: { stage: "setup", detail: "setup() called OK" }
+        detail: { stage: "setup", detail: "channel A (CustomEvent)" }
       })
     );
 
-    // Step 2: register the Init listener and fire BridgeReady so MATLAB
-    // knows it can now safely send Init.
-    htmlComponent.addEventListener("Init", function (event) {
-      htmlComponent.dispatchEvent(
-        new CustomEvent("BridgeDiag", {
-          detail: {
-            stage: "initReceived",
-            detail: "tableTag=" + JSON.stringify(event.Data)
-          }
-        })
-      );
-
-      // Step 3: test whether window.parent.document is accessible.
-      var parentAccessible;
-      try {
-        var _ = window.parent.document.body;
-        parentAccessible = "YES";
-      } catch (e) {
-        parentAccessible = "NO — " + e.message;
-      }
-
-      htmlComponent.dispatchEvent(
-        new CustomEvent("BridgeDiag", {
-          detail: { stage: "parentAccess", detail: parentAccessible }
-        })
-      );
-    });
-
-    htmlComponent.dispatchEvent(
-      new CustomEvent("BridgeReady", { detail: {} })
-    );
+    // Channel B: Data property -> DataChangedFcn
+    component.Data = { stage: "setup", detail: "channel B (Data)" };
   }
   </script>
 </head>
