@@ -24,6 +24,7 @@
   var tableTag       = null;
   var htmlComponent  = null;
   var attachAttempts = 0;
+  var observedCols   = [];  // elements the ResizeObserver is currently watching
 
   function findColumns() {
     var parentDoc;
@@ -57,11 +58,15 @@
 
   function applyColumnWidths(widths) {
     // widths: numeric array — positive = px, negative = auto (remove constraint)
+    var mode = widths.every(function(w) { return w >= 0; }) ? "pixel" :
+               widths.every(function(w) { return w <  0; }) ? "auto"  : "mixed";
+    console.log("[Bridge] applyColumnWidths: mode=" + mode + " widths=[" + widths.join(", ") + "]");
     var cols = findColumns();
     if (cols.length !== widths.length) {
       // Column count mismatch (e.g. mid-visibility-toggle). Reattach and wait.
+      console.log("[Bridge] applyColumnWidths: col count mismatch (have " + cols.length + ", want " + widths.length + ") — scheduling reattach");
       attachAttempts = 0;
-      setTimeout(attachObserver, RETRY_INTERVAL);
+      setTimeout(function() { attachObserver("mismatch"); }, RETRY_INTERVAL);
       return;
     }
 
@@ -145,21 +150,32 @@
       }
     }
 
-    // Re-anchor the ResizeObserver to the current DOM elements. MATLAB may
-    // re-render column headers (new <TH> nodes) when switching between auto
-    // and pixel widths, which would leave the observer watching detached
-    // elements. This is safe: publishWidths() is a no-op while paused, so
-    // there is no spurious ColumnWidthChanged echo.
-    attachObserver();
+    // Re-anchor the ResizeObserver to the current DOM elements.
+    // MATLAB may re-render column headers (new <TH> nodes) asynchronously
+    // after our handler returns, leaving the observer on detached elements.
+    // The sync call handles the case where the DOM is already up-to-date;
+    // the delayed calls catch async re-renders.  All calls are safe while
+    // paused — publishWidths() is a no-op during the pause window.
+    attachObserver("SetWidths-sync");
+    setTimeout(function() { attachObserver("SetWidths-100ms"); }, 100);
+    setTimeout(function() { attachObserver("SetWidths-600ms"); }, RETRY_INTERVAL);
   }
 
   function publishWidths() {
     if (paused) return;
+    // Guard: if the elements we're observing have been detached (MATLAB
+    // re-rendered the DOM), quietly re-anchor and skip this stale publish.
+    if (observedCols.length > 0 && !observedCols[0].isConnected) {
+      console.log("[Bridge] publishWidths: observed cols detached — re-attaching");
+      attachObserver("stale");
+      return;
+    }
     var cols = findColumns();
     if (cols.length === 0) return;
     var widths = cols.map(function(c) {
       return Math.round(c.getBoundingClientRect().width);
     });
+    console.log("[Bridge] publishWidths: [" + widths.join(", ") + "]");
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
   }
 
@@ -168,15 +184,19 @@
     debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
   }
 
-  function attachObserver() {
+  function attachObserver(label) {
     var cols = findColumns();
+    var info = "found=" + cols.length +
+               (cols.length ? " connected=" + cols[0].isConnected : "");
+    console.log("[Bridge] attachObserver(" + (label || "") + "): " + info);
     if (cols.length === 0) {
       attachAttempts++;
       if (attachAttempts < MAX_ATTEMPTS) {
-        setTimeout(attachObserver, RETRY_INTERVAL);
+        setTimeout(function() { attachObserver("retry"); }, RETRY_INTERVAL);
       }
       return;
     }
+    observedCols = cols;
     if (resizeObserver) resizeObserver.disconnect();
     resizeObserver = new ResizeObserver(debouncedPublish);
     cols.forEach(function(col) { resizeObserver.observe(col); });
@@ -187,7 +207,7 @@
 
     htmlComponent.addEventListener("Init", function(event) {
       tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
-      setTimeout(attachObserver, RETRY_INTERVAL);
+      setTimeout(function() { attachObserver("Init"); }, RETRY_INTERVAL);
     });
 
     htmlComponent.addEventListener("Pause", function(event) {
@@ -199,7 +219,7 @@
 
     htmlComponent.addEventListener("Reattach", function() {
       attachAttempts = 0;
-      setTimeout(attachObserver, RETRY_INTERVAL);
+      setTimeout(function() { attachObserver("Reattach"); }, RETRY_INTERVAL);
     });
 
     htmlComponent.addEventListener("SetWidths", function(event) {
