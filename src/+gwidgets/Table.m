@@ -1454,13 +1454,17 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function applyColumnWidthToDisplay(this)
-            % Push the current visible column widths to the display table.
+            % Push the current visible column widths to the display table
+            % AND directly to the DOM via the bridge.
             %
-            % Setting DisplayTable.ColumnWidth causes DOM-level column resize
-            % events, which would otherwise be picked up by the bridge and
-            % incorrectly reported as user-driven changes.  We pause the
-            % bridge for a short window (longer than its debounce delay) to
-            % prevent that feedback loop.
+            % Setting DisplayTable.ColumnWidth alone is insufficient when the
+            % user has manually dragged a column — MATLAB ignores the property
+            % setter in that case.  We send a SetWidths event so the bridge
+            % applies the widths directly to the header elements, bypassing
+            % MATLAB's user-drag override.
+            %
+            % The Pause event is sent first so the ResizeObserver does not
+            % echo the resulting DOM changes back as user-driven resize events.
             this.pauseColumnWidthBridge();
 
             if isempty(this.DataColumnWidth_)
@@ -1468,10 +1472,36 @@ classdef Table < gwidgets.internal.Reparentable
                 if ~isequal(this.DisplayTable.ColumnWidth, "auto")
                     this.DisplayTable.ColumnWidth = "auto";
                 end
+                % Tell bridge to remove all explicit DOM widths (-1 = auto)
+                this.sendWidthsToBridge(-ones(1, sum(this.ColumnVisible)));
             else
                 visWidths = this.DataColumnWidth_(this.ColumnVisible);
                 if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                     this.DisplayTable.ColumnWidth = visWidths;
+                end
+                % Push pixel widths directly to DOM via bridge.
+                % Non-numeric values ("auto", "fit", "1x") map to -1 so JS
+                % removes any explicit width and lets the browser auto-size.
+                this.sendWidthsToBridge(this.widthsToJsArray(visWidths));
+            end
+        end
+
+        function sendWidthsToBridge(this, jsWidths)
+            if ~isempty(this.ColumnWidthBridge_)
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "SetWidths", jsWidths);
+            end
+        end
+
+        function jsWidths = widthsToJsArray(~, visWidths)
+            % Convert a cell array of MATLAB column widths to a numeric
+            % row vector for JSON transport.  Pixel widths pass through;
+            % anything else ("auto", "fit", "1x") becomes -1 so the JS
+            % handler knows to remove the explicit width style.
+            jsWidths = -ones(1, numel(visWidths));
+            for i = 1:numel(visWidths)
+                w = visWidths{i};
+                if isnumeric(w) && isscalar(w) && w > 0
+                    jsWidths(i) = w;
                 end
             end
         end
