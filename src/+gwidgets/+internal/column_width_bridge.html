@@ -157,8 +157,18 @@
         var tableEl = doc.querySelector("[data-tag='" + tableTag + "']");
         if (tableEl) bodyTable = tableEl.querySelector("table.mw-table-body");
       }
-      if (!bodyTable) bodyTable = doc.querySelector("table.mw-table-body");
+      if (!bodyTable) bodyTable = doc.querySelector("table.mw-table");
       if (bodyTable) {
+        // Probe first body cell to see how its width is controlled
+        var firstRow = bodyTable.querySelector("tr");
+        if (firstRow) {
+          var firstCell = firstRow.querySelector("td");
+          if (firstCell) {
+            diag("bodyCell:styleAttr", firstCell.getAttribute("style") || "(none)");
+            diag("bodyCell:computedWidth", getComputedStyle(firstCell).width);
+            diag("bodyCell:computedMinWidth", getComputedStyle(firstCell).minWidth);
+          }
+        }
         var bodyRows = bodyTable.querySelectorAll("tr");
         for (var r = 0; r < bodyRows.length; r++) {
           var cells = bodyRows[r].querySelectorAll("td");
