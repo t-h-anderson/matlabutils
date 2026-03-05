@@ -61,11 +61,58 @@
     debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
   }
 
+  var hasExploredDom = false;
+
+  function exploreDom() {
+    // Runs once to report what is actually in the parent DOM so we can
+    // work out the correct CSS selector and tag attribute name.
+    if (hasExploredDom) return;
+    hasExploredDom = true;
+
+    var parentDoc = window.parent.document;
+
+    // 1. Collect all unique class names that look table/column related.
+    var allEls = parentDoc.querySelectorAll("*");
+    var seen = {};
+    for (var i = 0; i < allEls.length; i++) {
+      allEls[i].classList.forEach(function(cls) { seen[cls] = true; });
+    }
+    var relevant = Object.keys(seen).filter(function(c) {
+      return /col|header|table|row|cell|mw-/i.test(c);
+    });
+    diag("domClasses", relevant.slice(0, 30).join(", ") || "(none)");
+
+    // 2. Report which data-* attributes exist across the first 200 elements
+    //    so we can find which one stores the MATLAB Tag value.
+    var dataAttrs = {};
+    var limit = Math.min(allEls.length, 200);
+    for (var j = 0; j < limit; j++) {
+      var el = allEls[j];
+      for (var k = 0; k < el.attributes.length; k++) {
+        var attr = el.attributes[k];
+        if (attr.name.indexOf("data-") === 0) {
+          dataAttrs[attr.name] = (dataAttrs[attr.name] || 0) + 1;
+        }
+      }
+    }
+    diag("dataAttrs", JSON.stringify(dataAttrs));
+  }
+
+  var attachAttempts = 0;
+  var MAX_ATTACH_ATTEMPTS = 8;
+
   function attachObserver() {
     var cols = findColumns();
     if (cols.length === 0) {
-      diag("attachObserver", "no columns found with '" + COL_SELECTOR + "', retrying...");
-      setTimeout(attachObserver, RETRY_INTERVAL);
+      attachAttempts++;
+      if (attachAttempts === 1) {
+        exploreDom();  // dump DOM info on first failure only
+      }
+      if (attachAttempts < MAX_ATTACH_ATTEMPTS) {
+        setTimeout(attachObserver, RETRY_INTERVAL);
+      } else {
+        diag("attachObserver", "giving up after " + MAX_ATTACH_ATTEMPTS + " attempts — check domClasses output above");
+      }
       return;
     }
     if (resizeObserver) resizeObserver.disconnect();
@@ -91,7 +138,8 @@
     });
 
     htmlComponent.addEventListener("Reattach", function() {
-      diag("reattach", "reattaching observer");
+      attachAttempts = 0;
+      hasExploredDom = false;
       setTimeout(attachObserver, RETRY_INTERVAL);
     });
 
