@@ -132,6 +132,127 @@ classdef tColumns < test.WithExampleTables
                 ["Numerical", "Categorical", "Boolean", "String"])
         end
 
+        % --- Column width tests -----------------------------------------------
+
+        function tDataColumnWidthDefault(testCase)
+            % DataColumnWidth returns one "auto" entry per data column when
+            % no width has been set explicitly.
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 columns
+            testCase.verifyEqual(t.DataColumnWidth, {"auto","auto","auto","auto"})
+        end
+
+        function tSetDataColumnWidth(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+            testCase.verifyEqual(t.DataColumnWidth, {100, 200, 150, 80})
+            testCase.verifyEqual(t.ColumnWidth, {100, 200, 150, 80})
+        end
+
+        function tDataColumnWidthScalarExpands(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = 120;
+            testCase.verifyEqual(t.DataColumnWidth, {120, 120, 120, 120})
+        end
+
+        function tDataColumnWidthWrongSizeErrors(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            fn = @() set(t, "DataColumnWidth", {100, 200});
+            testCase.verifyError(fn, "GraphicsWidgets:Table:DataColumnWidthSize")
+        end
+
+        function tColumnWidthOnlyCoversVisibleColumns(testCase)
+            % ColumnWidth reflects only visible columns; DataColumnWidth
+            % covers all data columns including hidden ones.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+            t.HiddenColumnNames = "Categorical";   % hide col 2
+
+            testCase.verifyEqual(t.ColumnWidth, {100, 150, 80})
+            testCase.verifyEqual(t.DataColumnWidth, {100, 200, 150, 80})
+        end
+
+        function tSetColumnWidthWithHiddenColumns(testCase)
+            % Setting ColumnWidth for the 3 visible columns must not disturb
+            % the stored width for the hidden column.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+            t.HiddenColumnNames = "Categorical";
+
+            t.ColumnWidth = {50, 60, 70};
+
+            % Hidden column width (200) must be preserved
+            testCase.verifyEqual(t.DataColumnWidth, {50, 200, 60, 70})
+            testCase.verifyEqual(t.ColumnWidth, {50, 60, 70})
+        end
+
+        function tColumnWidthPreservedAcrossHideShow(testCase)
+            % Widths set before hiding a column are restored when it is
+            % made visible again.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+
+            % Hide then show column 2
+            t.HiddenColumnNames = "Categorical";
+            t.HiddenColumnNames = string.empty(1,0);
+
+            testCase.verifyEqual(t.ColumnWidth, {100, 200, 150, 80})
+        end
+
+        function tColumnWidthUpdatedInDisplayAfterHide(testCase)
+            % After hiding a column the display table must receive the
+            % correct (shorter) width array.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+
+            t.HiddenColumnNames = "Categorical";
+
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth, {100, 150, 80})
+        end
+
+        function tColumnWidthClearedByEmpty(testCase)
+            % Setting ColumnWidth to [] or {} resets all widths to "auto".
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+            t.ColumnWidth = {};
+
+            % DataColumnWidth now returns per-column "auto" defaults (no explicit widths)
+            testCase.verifyEqual(t.DataColumnWidth, {"auto","auto","auto","auto"})
+            % get.ColumnWidth falls back to the display table default ("auto" scalar)
+            testCase.verifyEqual(t.ColumnWidth, {"auto"})
+        end
+
+        function tDataColumnWidthClearedByReset(testCase)
+            % reset() must clear explicitly stored column widths so they
+            % don't carry over to a table with a different column count.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+
+            % Replace data with a different column count to force reset()
+            t.Data = testCase.stringData();  % 2 columns
+
+            % DataColumnWidth should now reflect defaults for the new column count
+            testCase.verifyEqual(t.DataColumnWidth, {"auto", "auto"})
+            testCase.verifyEqual(t.ColumnWidth, {"auto"})  % display table default
+        end
+
+        function tColumnWidthInputTypes(testCase)
+            % set.ColumnWidth must accept numeric arrays, string arrays,
+            % char, and cell arrays.
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 columns
+
+            t.ColumnWidth = [50, 100];
+            testCase.verifyEqual(t.ColumnWidth, {50, 100})
+
+            t.ColumnWidth = ["auto", "auto"];
+            testCase.verifyEqual(t.ColumnWidth, {"auto", "auto"})
+
+            t.ColumnWidth = 75;  % scalar → expands
+            testCase.verifyEqual(t.ColumnWidth, {75, 75})
+
+            t.ColumnWidth = "auto";  % scalar string → expands
+            testCase.verifyEqual(t.ColumnWidth, {"auto", "auto"})
+        end
+
     end
 
 end

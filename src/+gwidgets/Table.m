@@ -114,6 +114,8 @@ classdef Table < gwidgets.internal.Reparentable
             this.ColumnEditable = [];
             this.UpdateManager.addSuppression("DataColumnSortable", Times=1);
             this.ColumnSortable = [];
+            this.UpdateManager.addSuppression("DataColumnWidth", Times=1);
+            this.DataColumnWidth = {};
 
             % Clear the styling
             this.UpdateManager.addSuppression("UpdateStyle", Times=1);
@@ -167,31 +169,62 @@ classdef Table < gwidgets.internal.Reparentable
 
         function val = get.DataColumnWidth(this)
             val = this.DataColumnWidth_;
+            if isempty(val) && ~isempty(this.DataColumnNames)
+                val = repelem({"auto"}, 1, numel(this.DataColumnNames));
+            end
         end
 
         function set.DataColumnWidth(this, val)
-            this.DisplayTable.ColumnWidth = val;
-            this.DataColumnWidth_ = this.DisplayTable.ColumnWidth;
+            val = gwidgets.Table.normalizeColumnWidths(val);
+            if isscalar(val)
+                val = repelem(val, 1, numel(this.DataColumnNames));
+            end
+            if ~isempty(val) && numel(val) ~= numel(this.DataColumnNames)
+                error("GraphicsWidgets:Table:DataColumnWidthSize", ...
+                    "Size of DataColumnWidth must match the number of data columns, be scalar, or be empty (restore to default)");
+            end
+            this.DataColumnWidth_ = val;
+            if this.UpdateManager.doRun("DataColumnWidth")
+                this.doUpdateSequence(StartFrom="Interaction");
+            end
         end
 
         function val = get.ColumnWidth(this)
-            val = this.DataColumnWidth_;
-            if numel(val) == numel(this.ColumnVisible_)
-                val = val(this.ColumnVisible);
+            if isempty(this.DataColumnWidth_)
+                % No explicit widths set — read the display table's current value
+                val = this.DisplayTable.ColumnWidth;
+                if ~iscell(val)
+                    val = {val};
+                end
+            else
+                val = this.DataColumnWidth_(this.ColumnVisible);
             end
         end
 
         function set.ColumnWidth(this, val)
-            arguments
-                this
-                val (1,:) cell
+            val = gwidgets.Table.normalizeColumnWidths(val);
+
+            if isempty(val)
+                % Empty clears all explicit widths (restores to auto)
+                this.DataColumnWidth_ = {};
+            else
+                if isscalar(val)
+                    val = repelem(val, 1, sum(this.ColumnVisible));
+                end
+                if numel(val) ~= sum(this.ColumnVisible)
+                    error("GraphicsWidgets:Table:ColumnWidthSize", ...
+                        "Size of ColumnWidth must match the number of visible columns, be scalar, or be empty (restore to default)");
+                end
+                % Map visible widths back into the per-data-column array,
+                % preserving any explicitly stored width for hidden columns
+                dataWidths = this.DataColumnWidth;
+                dataWidths(this.ColumnVisible) = val;
+                this.DataColumnWidth_ = dataWidths;
             end
 
-            if isscalar(val)
-                val = repelem(val, 1, numel(this.ColumnVisible_));
+            if this.UpdateManager.doRun("DataColumnWidth")
+                this.doUpdateSequence(StartFrom="Interaction");
             end
-
-            this.DataColumnWidth = val;
         end
 
         function val = get.ColumnVisible(this)
@@ -1393,8 +1426,24 @@ classdef Table < gwidgets.internal.Reparentable
                 "SelectionType" ...
                 ];
             this.updateDisplayTable(vars);
+            this.applyColumnWidthToDisplay();
             this.refreshVisibleSelection();
 
+        end
+
+        function applyColumnWidthToDisplay(this)
+            % Push the current visible column widths to the display table.
+            if isempty(this.DataColumnWidth_)
+                % Widths cleared or never set — restore display to "auto"
+                if ~isequal(this.DisplayTable.ColumnWidth, "auto")
+                    this.DisplayTable.ColumnWidth = "auto";
+                end
+            else
+                visWidths = this.DataColumnWidth_(this.ColumnVisible);
+                if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
+                    this.DisplayTable.ColumnWidth = visWidths;
+                end
+            end
         end
 
         function updateDisplayTable(this, vars)
@@ -2479,6 +2528,24 @@ classdef Table < gwidgets.internal.Reparentable
 
             this.SortByColumn = vars;
 
+        end
+
+    end
+
+    methods (Static, Access = private)
+
+        function val = normalizeColumnWidths(val)
+            % Accept numeric arrays, string arrays, char, or cell.
+            % Returns a cell array (or empty cell if input was empty).
+            if isempty(val)
+                val = {};
+            elseif ~iscell(val)
+                if isnumeric(val)
+                    val = num2cell(val);
+                else
+                    val = cellstr(val);
+                end
+            end
         end
 
     end

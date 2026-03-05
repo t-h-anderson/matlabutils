@@ -80,25 +80,36 @@ classdef tConstructionSetGet < test.WithExampleTables
         end
 
         function tChangeColumnWidth(testCase)
+            % stringData has 2 columns → ColumnWidth always has 2 entries
             t = gwidgets.Table(Data=testCase.stringData());
-            testCase.verifyEqual(t.ColumnWidth, {"auto"})
+            testCase.verifyEqual(t.ColumnWidth, {"auto"})  % uitable default
 
+            % Numeric array — one entry per visible column
             t.ColumnWidth = [10, 20];
             testCase.verifyEqual(t.ColumnWidth, {10, 20})
 
+            % String array
             t.ColumnWidth = ["auto", "auto"];
             testCase.verifyEqual(t.ColumnWidth, {"auto", "auto"})
 
+            % Scalar expands to cover every visible column
             t.ColumnWidth = 10;
-            testCase.verifyEqual(t.ColumnWidth, {10})
+            testCase.verifyEqual(t.ColumnWidth, {10, 10})
 
-            t.ColumnWidth = [1 2 3];
-            testCase.verifyEqual(t.ColumnWidth, {1, 2, 3})
+            % Wrong count → error
+            fn = @() set(t, "ColumnWidth", [1 2 3]);
+            testCase.verifyError(fn, "GraphicsWidgets:Table:ColumnWidthSize")
 
+            % Mixed cell
             t.ColumnWidth = {10, "auto"};
-            testCase.verifyEqual(t.ColumnWidth, {10, 'auto'})
+            testCase.verifyEqual(t.ColumnWidth, {10, "auto"})
 
+            % Scalar string expands
             t.ColumnWidth = "auto";
+            testCase.verifyEqual(t.ColumnWidth, {"auto", "auto"})
+
+            % Empty restores to default (reads from display table)
+            t.ColumnWidth = {};
             testCase.verifyEqual(t.ColumnWidth, {"auto"})
         end
 
