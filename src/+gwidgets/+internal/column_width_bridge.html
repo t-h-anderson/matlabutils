@@ -99,47 +99,85 @@
     });
 
     htmlComponent.addEventListener("SetWidths", function(event) {
+      // Column width in MATLAB's uitable is controlled by min-width and
+      // max-width (set to the same value) on the <TH> elements inside a
+      // display:flex row.  The containing <TABLE> also carries explicit
+      // width/min-width/max-width inline styles that must track the column
+      // sum.  We update all three to match the requested pixel widths.
       var widths = event.Data;
       if (!Array.isArray(widths)) return;
       var cols = findColumns();
-      if (cols.length === 0) { diag("SetWidths", "no columns found"); return; }
-
-      // Inspect col[0] to find what actually controls its rendered width.
-      var c = cols[0];
-      var cs = getComputedStyle(c);
-      diag("col0:computedWidth",    cs.width);
-      diag("col0:computedFlex",     cs.flex);
-      diag("col0:computedMinWidth", cs.minWidth);
-      diag("col0:styleAttr",        c.getAttribute("style") || "(none)");
-      diag("col0:tagName",          c.tagName);
-      diag("col0:classList",        c.className);
-
-      // Walk up the parent chain — look for grid-template-columns or flex
-      var el = c.parentElement;
-      var depth = 0;
-      while (el && depth < 6) {
-        var ps = getComputedStyle(el);
-        var info = "tag=" + el.tagName + " cls=" + el.className.slice(0,60);
-        if (ps.display === "grid" || ps.display === "inline-grid") {
-          info += " GRID cols=" + ps.gridTemplateColumns;
-        }
-        if (ps.display === "flex" || ps.display === "inline-flex") {
-          info += " FLEX";
-        }
-        // Any inline style set by MATLAB's drag handler?
-        var inl = el.getAttribute("style");
-        if (inl) info += " style=[" + inl + "]";
-        diag("parent" + depth, info);
-        el = el.parentElement;
-        depth++;
+      if (cols.length !== widths.length) {
+        attachAttempts = 0;
+        setTimeout(attachObserver, RETRY_INTERVAL);
+        return;
       }
 
-      // Also check for CSS custom properties on col[0]
-      var props = ["--column-width", "--width", "--col-width", "--size", "--flex-basis"];
-      props.forEach(function(p) {
-        var v = cs.getPropertyValue(p).trim();
-        if (v) diag("col0:cssVar", p + "=" + v);
-      });
+      // Compute the fixed offset = table width - sum of current column widths.
+      // This accounts for any row-number column, borders, or other fixed
+      // elements that are not part of findColumns().
+      var headerTable = cols[0] ? cols[0].closest("table") : null;
+      var fixedOffset = 0;
+      if (headerTable) {
+        var currentColTotal = 0;
+        for (var i = 0; i < cols.length; i++) {
+          currentColTotal += cols[i].getBoundingClientRect().width;
+        }
+        fixedOffset = Math.round(headerTable.getBoundingClientRect().width - currentColTotal);
+      }
+
+      // Apply min-width + max-width to each header column.
+      var newColTotal = 0;
+      for (var i = 0; i < cols.length; i++) {
+        if (widths[i] < 0) {
+          // "auto": remove explicit constraints and let flex decide
+          cols[i].style.removeProperty("min-width");
+          cols[i].style.removeProperty("max-width");
+          newColTotal += cols[i].getBoundingClientRect().width;
+        } else {
+          cols[i].style.minWidth = widths[i] + "px";
+          cols[i].style.maxWidth = widths[i] + "px";
+          newColTotal += widths[i];
+        }
+      }
+
+      // Update the header table's width to keep the flex row consistent.
+      if (headerTable) {
+        var newTableWidth = Math.round(newColTotal + fixedOffset);
+        headerTable.style.width    = newTableWidth + "px";
+        headerTable.style.minWidth = newTableWidth + "px";
+        headerTable.style.maxWidth = newTableWidth + "px";
+      }
+
+      // Mirror the same changes on body columns so data rows match.
+      // Body columns share the same index order as header columns.
+      var doc = cols[0] ? cols[0].ownerDocument : window.parent.document;
+      var bodyTable = null;
+      if (tableTag) {
+        var tableEl = doc.querySelector("[data-tag='" + tableTag + "']");
+        if (tableEl) bodyTable = tableEl.querySelector("table.mw-table-body");
+      }
+      if (!bodyTable) bodyTable = doc.querySelector("table.mw-table-body");
+      if (bodyTable) {
+        var bodyRows = bodyTable.querySelectorAll("tr");
+        for (var r = 0; r < bodyRows.length; r++) {
+          var cells = bodyRows[r].querySelectorAll("td");
+          for (var i = 0; i < cells.length && i < widths.length; i++) {
+            if (widths[i] < 0) {
+              cells[i].style.removeProperty("min-width");
+              cells[i].style.removeProperty("max-width");
+            } else {
+              cells[i].style.minWidth = widths[i] + "px";
+              cells[i].style.maxWidth = widths[i] + "px";
+            }
+          }
+        }
+        bodyTable.style.width    = (Math.round(newColTotal + fixedOffset)) + "px";
+        bodyTable.style.minWidth = (Math.round(newColTotal + fixedOffset)) + "px";
+        bodyTable.style.maxWidth = (Math.round(newColTotal + fixedOffset)) + "px";
+      }
+
+      diag("SetWidths:done", "cols=" + cols.length + " newTotal=" + newColTotal + " offset=" + fixedOffset + " bodyTable=" + !!bodyTable);
     });
 
     // Signal MATLAB that setup() has run and it is safe to send Init.
