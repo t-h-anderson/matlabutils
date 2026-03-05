@@ -178,6 +178,24 @@
       }
 
       diag("SetWidths:done", "cols=" + cols.length + " newTotal=" + newColTotal + " offset=" + fixedOffset + " bodyTable=" + !!bodyTable);
+
+      // Probe: find all tables in the parent doc to identify the body table
+      if (!bodyTable) {
+        var allTables = doc.querySelectorAll("table");
+        diag("probe:tableCount", allTables.length);
+        for (var t = 0; t < allTables.length; t++) {
+          diag("probe:table" + t, "cls=" + allTables[t].className + " style=[" + (allTables[t].getAttribute("style")||"none") + "]");
+        }
+        // Also check what the header table parent structure looks like
+        if (headerTable) {
+          var sib = headerTable.parentElement;
+          diag("probe:headerTableParent", "tag=" + sib.tagName + " cls=" + sib.className);
+          var siblings = sib.children;
+          for (var s = 0; s < siblings.length; s++) {
+            diag("probe:sibling" + s, "tag=" + siblings[s].tagName + " cls=" + siblings[s].className.slice(0,80));
+          }
+        }
+      }
     });
 
     // Signal MATLAB that setup() has run and it is safe to send Init.
