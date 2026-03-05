@@ -22,6 +22,8 @@
   var mutationObserver  = null;
   var debounceTimer     = null;
   var paused            = false;
+  var autoMode          = false;  // true when all column widths are CSS-auto (-1)
+  var echoSuppressUntil = 0;      // Date.now() ms — suppress publishWidths before this
   var tableTag          = null;
   var htmlComponent     = null;
   var attachAttempts    = 0;
@@ -90,6 +92,18 @@
     var doc = cols.length > 0 ? cols[0].ownerDocument : window.parent.document;
     var allPixel = widths.every(function(w) { return w >= 0; });
     var allAuto  = widths.every(function(w) { return w <  0; });
+
+    // Track mode and set a JS-side echo suppression window.
+    // We cannot rely solely on the Pause event arriving before the first
+    // publishWidths fires: MATLAB's DisplayTable.ColumnWidth setter goes
+    // through its own rendering pipeline and fires our ResizeObserver
+    // ~200 ms before our Pause event is delivered.  The suppression window
+    // below stops any publishWidths that fires within that race.
+    autoMode = allAuto;
+    if (allAuto) {
+      // 400 ms > 200 ms debounce + plausible event-delivery latency.
+      echoSuppressUntil = Date.now() + 400;
+    }
 
     // Fixed offset = table width - sum of column widths (accounts for any
     // non-data columns such as a row-number column). Only meaningful when
@@ -207,6 +221,14 @@
 
   function publishWidths() {
     if (paused) return;
+    // JS-side echo suppression: MATLAB's rendering pipeline fires the
+    // ResizeObserver before our Pause event can arrive, so we keep our own
+    // time-based window.  Any publish within 400 ms of entering auto mode is
+    // treated as a layout-echo, not a genuine user drag.
+    if (Date.now() < echoSuppressUntil) {
+      bridgeLog("[Bridge] publishWidths: suppressed (auto-mode echo window)");
+      return;
+    }
     // Guard: if the elements we're observing have been detached (MATLAB
     // re-rendered the DOM), quietly re-anchor and skip this stale publish.
     if (observedCols.length > 0 && !observedCols[0].isConnected) {
@@ -221,30 +243,28 @@
     });
     bridgeLog("[Bridge] publishWidths: [" + widths.join(", ") + "]");
 
-    // Lock header and body into pixel widths so they stay in sync.
-    // In auto ("1x") mode the columns are flex-auto, so expanding one
-    // header column squishes others and body cells don't track the header
-    // at all (no explicit min-width to anchor to).  Stamping pixel values
-    // here on every user-driven publish keeps the two tables aligned and
-    // prevents the flex layout from redistributing on the next drag.
+    // Stamp measured header widths as explicit pixels on both header <th>
+    // and body <td> elements.  This is safe here because we only reach this
+    // point for genuine user drag events (echoes are suppressed above).
+    //
+    // In auto ("1x") mode the body <td>s have no explicit min-width, so
+    // MATLAB's drag handler cannot anchor them when the user moves the
+    // divider.  Stamping here transitions both tables from flex-auto to
+    // pixel layout on the first drag, keeping them permanently in sync.
+    //
+    // NOTE: We do NOT set the table-level width here.  In auto mode
+    // getBoundingClientRect().width on the <table> returns the full
+    // container width, which would stretch the header past the columns.
+    // MATLAB's applyColumnWidths (via SetWidths) owns table-level widths.
     var headerTable = cols.length > 0 ? cols[0].closest("table") : null;
+    for (var i = 0; i < cols.length; i++) {
+      cols[i].style.minWidth = widths[i] + "px";
+      cols[i].style.maxWidth = widths[i] + "px";
+    }
     if (headerTable) {
-      var colTotal    = widths.reduce(function(a, b) { return a + b; }, 0);
-      var tableWidth  = Math.round(headerTable.getBoundingClientRect().width);
-      var fixedOffset = tableWidth - colTotal;   // row-number column etc.
-      headerTable.style.width    = tableWidth + "px";
-      headerTable.style.minWidth = tableWidth + "px";
-      headerTable.style.maxWidth = tableWidth + "px";
-      for (var i = 0; i < cols.length; i++) {
-        cols[i].style.minWidth = widths[i] + "px";
-        cols[i].style.maxWidth = widths[i] + "px";
-      }
       var doc = cols[0].ownerDocument;
       var bodyTable = findBodyTable(doc);
       if (bodyTable) {
-        bodyTable.style.width    = tableWidth + "px";
-        bodyTable.style.minWidth = tableWidth + "px";
-        bodyTable.style.maxWidth = tableWidth + "px";
         var bodyRows = bodyTable.querySelectorAll("tr");
         for (var r = 0; r < bodyRows.length; r++) {
           var cells = bodyRows[r].querySelectorAll("td");
@@ -255,6 +275,8 @@
         }
       }
     }
+    // First genuine drag while autoMode exits auto mode.
+    autoMode = false;
 
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
   }
