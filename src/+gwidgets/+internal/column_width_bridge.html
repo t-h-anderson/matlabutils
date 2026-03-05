@@ -99,32 +99,47 @@
     });
 
     htmlComponent.addEventListener("SetWidths", function(event) {
-      // MATLAB sends a numeric array: positive values are pixel widths,
-      // -1 means "auto" (remove any explicit width so the browser decides).
       var widths = event.Data;
-      diag("SetWidths:received", "widths=" + JSON.stringify(widths));
-      if (!Array.isArray(widths)) {
-        diag("SetWidths:bail", "not an array: " + typeof widths);
-        return;
-      }
+      if (!Array.isArray(widths)) return;
       var cols = findColumns();
-      diag("SetWidths:cols", "cols.length=" + cols.length + " widths.length=" + widths.length);
-      if (cols.length !== widths.length) {
-        diag("SetWidths:mismatch", "reattaching");
-        attachAttempts = 0;
-        setTimeout(attachObserver, RETRY_INTERVAL);
-        return;
-      }
-      for (var i = 0; i < cols.length; i++) {
-        var prevStyle = cols[i].style.width;
-        if (widths[i] < 0) {
-          cols[i].style.removeProperty("width");
-        } else {
-          cols[i].style.width = widths[i] + "px";
+      if (cols.length === 0) { diag("SetWidths", "no columns found"); return; }
+
+      // Inspect col[0] to find what actually controls its rendered width.
+      var c = cols[0];
+      var cs = getComputedStyle(c);
+      diag("col0:computedWidth",    cs.width);
+      diag("col0:computedFlex",     cs.flex);
+      diag("col0:computedMinWidth", cs.minWidth);
+      diag("col0:styleAttr",        c.getAttribute("style") || "(none)");
+      diag("col0:tagName",          c.tagName);
+      diag("col0:classList",        c.className);
+
+      // Walk up the parent chain — look for grid-template-columns or flex
+      var el = c.parentElement;
+      var depth = 0;
+      while (el && depth < 6) {
+        var ps = getComputedStyle(el);
+        var info = "tag=" + el.tagName + " cls=" + el.className.slice(0,60);
+        if (ps.display === "grid" || ps.display === "inline-grid") {
+          info += " GRID cols=" + ps.gridTemplateColumns;
         }
-        diag("SetWidths:col" + i, "prev=" + prevStyle + " new=" + cols[i].style.width + " bcrW=" + Math.round(cols[i].getBoundingClientRect().width));
+        if (ps.display === "flex" || ps.display === "inline-flex") {
+          info += " FLEX";
+        }
+        // Any inline style set by MATLAB's drag handler?
+        var inl = el.getAttribute("style");
+        if (inl) info += " style=[" + inl + "]";
+        diag("parent" + depth, info);
+        el = el.parentElement;
+        depth++;
       }
-      diag("SetWidths:done", "applied " + cols.length + " widths");
+
+      // Also check for CSS custom properties on col[0]
+      var props = ["--column-width", "--width", "--col-width", "--size", "--flex-basis"];
+      props.forEach(function(p) {
+        var v = cs.getPropertyValue(p).trim();
+        if (v) diag("col0:cssVar", p + "=" + v);
+      });
     });
 
     // Signal MATLAB that setup() has run and it is safe to send Init.
