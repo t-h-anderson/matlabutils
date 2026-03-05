@@ -49,6 +49,10 @@ classdef Table < gwidgets.internal.Reparentable
         DataColumnEditable_ (1,:) logical % Logical array indicating which columns are editable
         DataColumnSortable_ (1,:) logical % Logical array indicating which columns are sortable
 
+        % Column-width bridge
+        DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
+        IsPushingWidthToDisplay_ (1,1) logical = false % True while programmatic widths are being applied
+
         DataColumnWidth_ (1,:) cell % Width of data columns
 
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
@@ -1358,6 +1362,7 @@ classdef Table < gwidgets.internal.Reparentable
         DisplayTable (1,:) matlab.ui.control.Table {mustBeScalarOrEmpty}
 
         HelpPanel (1,:) matlab.ui.container.Panel {mustBeScalarOrEmpty}
+        ColumnWidthBridge_ (1,:) matlab.ui.control.HTML {mustBeScalarOrEmpty}
     end
 
     properties (SetAccess = private)
@@ -1374,7 +1379,7 @@ classdef Table < gwidgets.internal.Reparentable
             p = uipanel("Parent", this, ...
                 "BorderType", "none");
             this.Grid = uigridlayout(p, ...
-                "RowHeight", {"fit", 0, "1x"}, "ColumnWidth", {"1x", 0}, "Padding", 0);
+                "RowHeight", {"fit", 0, "1x", 2}, "ColumnWidth", {"1x", 0}, "Padding", 0);
 
             this.HelpPanel = uipanel(Parent=this.Grid);
             this.HelpPanel.Layout.Column = 2;
@@ -1407,6 +1412,7 @@ classdef Table < gwidgets.internal.Reparentable
             this.DisplayTable.Layout.Row = 3;
 
             this.addContextMenu();
+            this.setupColumnWidthBridge();
             this.doUpdateSequence();
         end
 
@@ -1433,6 +1439,14 @@ classdef Table < gwidgets.internal.Reparentable
 
         function applyColumnWidthToDisplay(this)
             % Push the current visible column widths to the display table.
+            %
+            % Setting DisplayTable.ColumnWidth causes DOM-level column resize
+            % events, which would otherwise be picked up by the bridge and
+            % incorrectly reported as user-driven changes.  We pause the
+            % bridge for a short window (longer than its debounce delay) to
+            % prevent that feedback loop.
+            this.pauseColumnWidthBridge();
+
             if isempty(this.DataColumnWidth_)
                 % Widths cleared or never set — restore display to "auto"
                 if ~isequal(this.DisplayTable.ColumnWidth, "auto")
@@ -1444,6 +1458,25 @@ classdef Table < gwidgets.internal.Reparentable
                     this.DisplayTable.ColumnWidth = visWidths;
                 end
             end
+        end
+
+        function pauseColumnWidthBridge(this)
+            % Tell the bridge to ignore resize events for a short window.
+            % Also set the MATLAB-side flag as a belt-and-braces guard.
+            this.IsPushingWidthToDisplay_ = true;
+            pauseMs = 500; % must exceed the bridge's DEBOUNCE_MS (200 ms)
+            if ~isempty(this.ColumnWidthBridge_)
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Pause", ...
+                    struct("durationMs", pauseMs));
+            end
+            % Clear the MATLAB flag after the same window.
+            t = timer("StartDelay", pauseMs/1000, "ExecutionMode", "singleShot", ...
+                "TimerFcn", @(~,~) this.clearPushingFlag());
+            start(t);
+        end
+
+        function clearPushingFlag(this)
+            this.IsPushingWidthToDisplay_ = false;
         end
 
         function updateDisplayTable(this, vars)
@@ -1541,6 +1574,76 @@ classdef Table < gwidgets.internal.Reparentable
 
         function reactToFigureChanged(this)
             this.reparentContextMenu();
+        end
+
+    end
+
+    % Column-width bridge
+    methods (Access = private)
+
+        function setupColumnWidthBridge(this)
+            % Create a tiny (2 px tall) uihtml component that uses a
+            % ResizeObserver in the figure's web context to detect when the
+            % user drags a column divider and report the new pixel widths
+            % back to MATLAB.  The component lives in row 4 of this.Grid,
+            % which has a fixed height of 2 px so it is effectively invisible.
+
+            % Assign a unique tag to the uitable so the bridge JS can scope
+            % its DOM query to this table specifically (avoids cross-talk
+            % when multiple Table widgets live in the same figure).
+            this.DisplayTableTag_ = "GwidgetsTable_" + mlut.uniqueID();
+            this.DisplayTable.Tag  = this.DisplayTableTag_;
+
+            htmlFile = fullfile(fileparts(mfilename("fullpath")), ...
+                "+internal", "column_width_bridge.html");
+
+            this.ColumnWidthBridge_ = uihtml( ...
+                "Parent",               this.Grid, ...
+                "HTMLSource",           htmlFile, ...
+                "HTMLEventReceivedFcn", @(~,evt) this.onColumnWidthChanged(evt));
+            this.ColumnWidthBridge_.Layout.Row    = 4;
+            this.ColumnWidthBridge_.Layout.Column = 1;
+
+            % Send the table tag to the bridge once it has loaded.  The
+            % bridge will not start observing until it receives this Init
+            % event, so there is no risk of it firing before the tag is set.
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
+                struct("tableTag", this.DisplayTableTag_));
+        end
+
+        function onColumnWidthChanged(this, evt)
+            % Called by the bridge when the user finishes dragging a column
+            % divider.  evt.HTMLEventData.widths is a numeric row vector of
+            % pixel widths for the currently visible columns.
+
+            if ~strcmp(evt.HTMLEventName, "ColumnWidthChanged")
+                return
+            end
+
+            % Ignore events that were triggered by our own programmatic
+            % width updates (applyColumnWidthToDisplay sets this flag).
+            if this.IsPushingWidthToDisplay_
+                return
+            end
+
+            pixelWidths = evt.HTMLEventData.widths;
+            nVisible    = sum(this.ColumnVisible);
+
+            if numel(pixelWidths) ~= nVisible
+                % Column count mismatch — bridge may be observing a stale
+                % set of columns; request a reattach and ignore this event.
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
+                return
+            end
+
+            % Convert pixel widths to a cell array of numbers and store
+            % them without triggering a full display update cycle (the
+            % display already shows the correct widths).
+            newVisWidths = num2cell(pixelWidths);
+
+            dataWidths = this.DataColumnWidth;  % full-width array (auto-filled if empty)
+            dataWidths(this.ColumnVisible) = newVisWidths;
+            this.DataColumnWidth_ = dataWidths;
         end
 
     end
