@@ -736,6 +736,7 @@ classdef Table < gwidgets.internal.Reparentable
         HasChangeGroupingVariable (1,1) logical
         HasToggleShowEmptyGroups (1,1) logical
         HasColumnSorting (1,1) logical
+        HasAutoResizeColumns (1,1) logical
     end
 
     properties (Access = protected)
@@ -745,6 +746,7 @@ classdef Table < gwidgets.internal.Reparentable
         HasChangeGroupingVariable_ (1,1) logical = false
         HasToggleShowEmptyGroups_ (1,1) logical = false
         HasColumnSorting_ (1,1) logical = false
+        HasAutoResizeColumns_ (1,1) logical = false
     end
 
     methods
@@ -794,6 +796,15 @@ classdef Table < gwidgets.internal.Reparentable
 
         function set.HasColumnSorting(this, val)
             this.HasColumnSorting_ = val;
+            this.addContextMenu();
+        end
+
+        function val = get.HasAutoResizeColumns(this)
+            val = this.HasAutoResizeColumns_;
+        end
+
+        function set.HasAutoResizeColumns(this, val)
+            this.HasAutoResizeColumns_ = val;
             this.addContextMenu();
         end
 
@@ -1423,6 +1434,11 @@ classdef Table < gwidgets.internal.Reparentable
                 ];
 
             this.updateDisplayTable(vars);
+
+            % Apply column widths immediately so Data and ColumnWidth stay
+            % in sync — avoids MATLAB rendering the new (shorter) column
+            % list with the old positional widths before updateInteraction runs.
+            this.applyColumnWidthToDisplay();
         end
 
         function updateInteraction(this)
@@ -1985,6 +2001,10 @@ classdef Table < gwidgets.internal.Reparentable
 
             if this.HasToggleFilter
                 uimenu("Parent", this.ContextMenu, "Text", "Show/hide row filter", "MenuSelectedFcn", @(s,e) this.onToggleRowFilterRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+            end
+
+            if this.HasAutoResizeColumns
+                uimenu("Parent", this.ContextMenu, "Text", "Auto-resize columns", "MenuSelectedFcn", @(s,e) this.onAutoResizeColumnsRequest(s,e), "Tag", "GWidgetsTableContextMenu");
             end
 
             for i = 1:numel(this.CustomContextMenuItems)
@@ -2598,6 +2618,11 @@ classdef Table < gwidgets.internal.Reparentable
         function onColumnSelectionRequest(this, ~, ~)
             this.SelectionType = "column";
             this.clearSelection();
+        end
+
+        function onAutoResizeColumnsRequest(this, ~, ~)
+            % Reset all explicit column widths, letting the table auto-size.
+            this.ColumnWidth = {};
         end
 
         function onToggleRowFilterRequest(this, ~, ~)
