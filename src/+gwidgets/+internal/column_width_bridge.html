@@ -25,11 +25,16 @@
   var htmlComponent  = null;
   var attachAttempts = 0;
 
+  function diag(stage, detail) {
+    htmlComponent.Data = { event: "BridgeDiag", stage: stage, detail: String(detail) };
+  }
+
   function findColumns() {
     var parentDoc;
     try {
       parentDoc = window.parent.document;
     } catch (e) {
+      diag("parentAccess", "FAILED: " + e.message);
       return [];
     }
 
@@ -97,22 +102,29 @@
       // MATLAB sends a numeric array: positive values are pixel widths,
       // -1 means "auto" (remove any explicit width so the browser decides).
       var widths = event.Data;
-      if (!Array.isArray(widths)) return;
+      diag("SetWidths:received", "widths=" + JSON.stringify(widths));
+      if (!Array.isArray(widths)) {
+        diag("SetWidths:bail", "not an array: " + typeof widths);
+        return;
+      }
       var cols = findColumns();
+      diag("SetWidths:cols", "cols.length=" + cols.length + " widths.length=" + widths.length);
       if (cols.length !== widths.length) {
-        // Column count has changed (e.g. visibility toggle in flight).
-        // Reattach to the new set of columns and wait for the next SetWidths.
+        diag("SetWidths:mismatch", "reattaching");
         attachAttempts = 0;
         setTimeout(attachObserver, RETRY_INTERVAL);
         return;
       }
       for (var i = 0; i < cols.length; i++) {
+        var prevStyle = cols[i].style.width;
         if (widths[i] < 0) {
           cols[i].style.removeProperty("width");
         } else {
           cols[i].style.width = widths[i] + "px";
         }
+        diag("SetWidths:col" + i, "prev=" + prevStyle + " new=" + cols[i].style.width + " bcrW=" + Math.round(cols[i].getBoundingClientRect().width));
       }
+      diag("SetWidths:done", "applied " + cols.length + " widths");
     });
 
     // Signal MATLAB that setup() has run and it is safe to send Init.
