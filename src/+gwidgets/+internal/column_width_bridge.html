@@ -173,7 +173,10 @@
       paused = true;
       clearTimeout(debounceTimer);
       var duration = (event.Data && event.Data.durationMs) ? event.Data.durationMs : 500;
-      setTimeout(function() { paused = false; }, duration);
+      setTimeout(function() {
+        paused = false;
+        htmlComponent.Data = { event: "BridgeDiag", stage: "pauseExpired", detail: "paused=false" };
+      }, duration);
     });
 
     htmlComponent.addEventListener("Reattach", function() {
