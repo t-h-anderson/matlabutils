@@ -1673,6 +1673,10 @@ classdef Table < gwidgets.internal.Reparentable
                 case "ColumnWidthChanged"
                     this.onColumnWidthChanged(d.widths);
 
+                case "BridgeDiag"
+                    fprintf("%s
+", d.msg);
+
             end
         end
 

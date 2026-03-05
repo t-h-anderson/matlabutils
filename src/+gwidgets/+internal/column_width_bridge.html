@@ -26,6 +26,22 @@
   var attachAttempts = 0;
   var observedCols   = [];  // elements the ResizeObserver is currently watching
 
+  // Diagnostic log queue — batched into a single htmlComponent.Data event
+  // so rapid synchronous calls don't overwrite each other.
+  var diagQueue     = [];
+  var diagFlushTimer = null;
+  function bridgeLog(msg) {
+    console.log(msg);  // still useful if dev tools ever become accessible
+    diagQueue.push(msg);
+    clearTimeout(diagFlushTimer);
+    diagFlushTimer = setTimeout(function() {
+      if (diagQueue.length === 0 || !htmlComponent) return;
+      var out = diagQueue.join("\n");
+      diagQueue = [];
+      htmlComponent.Data = { event: "BridgeDiag", msg: out };
+    }, 10);
+  }
+
   function findColumns() {
     var parentDoc;
     try {
@@ -60,11 +76,11 @@
     // widths: numeric array — positive = px, negative = auto (remove constraint)
     var mode = widths.every(function(w) { return w >= 0; }) ? "pixel" :
                widths.every(function(w) { return w <  0; }) ? "auto"  : "mixed";
-    console.log("[Bridge] applyColumnWidths: mode=" + mode + " widths=[" + widths.join(", ") + "]");
+    bridgeLog("[Bridge] applyColumnWidths: mode=" + mode + " widths=[" + widths.join(", ") + "]");
     var cols = findColumns();
     if (cols.length !== widths.length) {
       // Column count mismatch (e.g. mid-visibility-toggle). Reattach and wait.
-      console.log("[Bridge] applyColumnWidths: col count mismatch (have " + cols.length + ", want " + widths.length + ") — scheduling reattach");
+      bridgeLog("[Bridge] applyColumnWidths: col count mismatch (have " + cols.length + ", want " + widths.length + ") — scheduling reattach");
       attachAttempts = 0;
       setTimeout(function() { attachObserver("mismatch"); }, RETRY_INTERVAL);
       return;
@@ -166,7 +182,7 @@
     // Guard: if the elements we're observing have been detached (MATLAB
     // re-rendered the DOM), quietly re-anchor and skip this stale publish.
     if (observedCols.length > 0 && !observedCols[0].isConnected) {
-      console.log("[Bridge] publishWidths: observed cols detached — re-attaching");
+      bridgeLog("[Bridge] publishWidths: observed cols detached — re-attaching");
       attachObserver("stale");
       return;
     }
@@ -175,7 +191,7 @@
     var widths = cols.map(function(c) {
       return Math.round(c.getBoundingClientRect().width);
     });
-    console.log("[Bridge] publishWidths: [" + widths.join(", ") + "]");
+    bridgeLog("[Bridge] publishWidths: [" + widths.join(", ") + "]");
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
   }
 
@@ -188,7 +204,7 @@
     var cols = findColumns();
     var info = "found=" + cols.length +
                (cols.length ? " connected=" + cols[0].isConnected : "");
-    console.log("[Bridge] attachObserver(" + (label || "") + "): " + info);
+    bridgeLog("[Bridge] attachObserver(" + (label || "") + "): " + info);
     if (cols.length === 0) {
       attachAttempts++;
       if (attachAttempts < MAX_ATTEMPTS) {
