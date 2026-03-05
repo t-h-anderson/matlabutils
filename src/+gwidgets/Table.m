@@ -1673,10 +1673,6 @@ classdef Table < gwidgets.internal.Reparentable
                 case "ColumnWidthChanged"
                     this.onColumnWidthChanged(d.widths);
 
-                case "BridgeDiag"
-                    fprintf("[Bridge] %s: %s
-", d.stage, d.detail);
-
             end
         end
 
@@ -1684,9 +1680,6 @@ classdef Table < gwidgets.internal.Reparentable
             % Called when the user finishes dragging a column divider.
             % pixelWidths is a numeric row vector of pixel widths for the
             % currently visible columns.
-            fprintf("[CWC] called numel=%d nVis=%d isPushing=%d
-", numel(pixelWidths), sum(this.ColumnVisible), this.IsPushingWidthToDisplay_);
-
             if this.IsPushingWidthToDisplay_
                 return
             end

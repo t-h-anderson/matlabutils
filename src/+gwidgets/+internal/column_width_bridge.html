@@ -67,6 +67,7 @@
 
     var doc = cols.length > 0 ? cols[0].ownerDocument : window.parent.document;
     var allPixel = widths.every(function(w) { return w >= 0; });
+    var allAuto  = widths.every(function(w) { return w <  0; });
 
     // Fixed offset = table width - sum of column widths (accounts for any
     // non-data columns such as a row-number column). Only meaningful when
@@ -96,12 +97,21 @@
       }
     }
     // Keep the header <table> width in sync so the flex row fills correctly.
-    // Only update when all columns are explicit — auto columns let CSS decide.
-    if (headerTable && allPixel) {
-      var newTableWidth = Math.round(newColTotal + fixedOffset);
-      headerTable.style.width    = newTableWidth + "px";
-      headerTable.style.minWidth = newTableWidth + "px";
-      headerTable.style.maxWidth = newTableWidth + "px";
+    // For all-pixel: set an explicit table width.
+    // For all-auto: remove any previous explicit table width so MATLAB's
+    //   natural layout governs (without this the table stays pinned to its old
+    //   pixel width, preventing auto columns from reflowing correctly).
+    if (headerTable) {
+      if (allPixel) {
+        var newTableWidth = Math.round(newColTotal + fixedOffset);
+        headerTable.style.width    = newTableWidth + "px";
+        headerTable.style.minWidth = newTableWidth + "px";
+        headerTable.style.maxWidth = newTableWidth + "px";
+      } else if (allAuto) {
+        headerTable.style.removeProperty("width");
+        headerTable.style.removeProperty("min-width");
+        headerTable.style.removeProperty("max-width");
+      }
     }
 
     // --- Body columns ---
@@ -128,8 +138,19 @@
         bodyTable.style.width    = bw + "px";
         bodyTable.style.minWidth = bw + "px";
         bodyTable.style.maxWidth = bw + "px";
+      } else if (allAuto) {
+        bodyTable.style.removeProperty("width");
+        bodyTable.style.removeProperty("min-width");
+        bodyTable.style.removeProperty("max-width");
       }
     }
+
+    // Re-anchor the ResizeObserver to the current DOM elements. MATLAB may
+    // re-render column headers (new <TH> nodes) when switching between auto
+    // and pixel widths, which would leave the observer watching detached
+    // elements. This is safe: publishWidths() is a no-op while paused, so
+    // there is no spurious ColumnWidthChanged echo.
+    attachObserver();
   }
 
   function publishWidths() {
@@ -173,10 +194,7 @@
       paused = true;
       clearTimeout(debounceTimer);
       var duration = (event.Data && event.Data.durationMs) ? event.Data.durationMs : 500;
-      setTimeout(function() {
-        paused = false;
-        htmlComponent.Data = { event: "BridgeDiag", stage: "pauseExpired", detail: "paused=false" };
-      }, duration);
+      setTimeout(function() { paused = false; }, duration);
     });
 
     htmlComponent.addEventListener("Reattach", function() {
