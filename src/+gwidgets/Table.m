@@ -1466,16 +1466,15 @@ classdef Table < gwidgets.internal.Reparentable
             % The Pause event is sent first so the ResizeObserver does not
             % echo the resulting DOM changes back as user-driven resize events.
             if isempty(this.DataColumnWidth_)
-                % Widths cleared or never set — restore display to "auto"
-                % Use a longer pause: the ResizeObserver echo from the
-                % MutationObserver re-attach can arrive up to 800 ms after
-                % SetWidths, so 1200 ms keeps it in the suppression window.
+                % Widths cleared or never set — restore display to "auto".
+                % Pause and SetWidths are sent BEFORE touching DisplayTable so
+                % the JS echo-suppression window is already active when
+                % MATLAB's rendering pipeline fires our ResizeObserver.
                 this.pauseColumnWidthBridge(1200);
+                this.sendWidthsToBridge(-ones(1, sum(this.ColumnVisible)));
                 if ~isequal(this.DisplayTable.ColumnWidth, "auto")
                     this.DisplayTable.ColumnWidth = "auto";
                 end
-                % Tell bridge to remove all explicit DOM widths (-1 = auto)
-                this.sendWidthsToBridge(-ones(1, sum(this.ColumnVisible)));
             else
                 visWidths = this.DataColumnWidth_(this.ColumnVisible);
                 % Push pixel widths directly to DOM via bridge.
@@ -1484,15 +1483,15 @@ classdef Table < gwidgets.internal.Reparentable
                 jsWidths = this.widthsToJsArray(visWidths);
                 allAuto = all(jsWidths < 0);
                 if allAuto
-                    % Same rationale as the isempty case above.
                     this.pauseColumnWidthBridge(1200);
                 else
                     this.pauseColumnWidthBridge();
                 end
+                % Same ordering rationale as above: bridge events before render.
+                this.sendWidthsToBridge(jsWidths);
                 if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                     this.DisplayTable.ColumnWidth = visWidths;
                 end
-                this.sendWidthsToBridge(jsWidths);
             end
         end
 
@@ -1714,7 +1713,23 @@ classdef Table < gwidgets.internal.Reparentable
 
             dataWidths = this.DataColumnWidth;
             dataWidths(this.ColumnVisible) = num2cell(pixelWidths);
+
+            % Guard: if widths are identical to what we already have, this is
+            % an echo from our own applyColumnWidthToDisplay (e.g., the
+            % ResizeObserver re-fired after the SetWidths stamp).  Returning
+            % early breaks the potential update → echo → update loop.
+            if isequal(dataWidths, this.DataColumnWidth_)
+                return
+            end
+
             this.DataColumnWidth_ = dataWidths;
+
+            % Push the new pixel widths to the display so that body cells
+            % (including newly rendered rows from virtual scrolling) pick up
+            % explicit min-width / max-width constraints.  The round-trip also
+            % sets the table-level widths via applyColumnWidths in JS, keeping
+            % header and body tables permanently in sync.
+            this.applyColumnWidthToDisplay();
         end
 
     end

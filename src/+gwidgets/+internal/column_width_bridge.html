@@ -316,6 +316,11 @@
       paused = true;
       clearTimeout(debounceTimer);
       var duration = (event.Data && event.Data.durationMs) ? event.Data.durationMs : 500;
+      // Set the JS-side echo suppression window from here too.
+      // applyColumnWidths() sets it when SetWidths arrives, but Pause is
+      // sent first and typically arrives before the ResizeObserver echo fires.
+      // Belt-and-suspenders: whichever arrives first wins.
+      echoSuppressUntil = Date.now() + duration;
       setTimeout(function() { paused = false; }, duration);
     });
 
