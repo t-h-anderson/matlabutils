@@ -367,6 +367,8 @@ classdef Table < gwidgets.internal.Reparentable
                     "Size of column sortable must match the visible table, be scalar (apply to all), or empty (restore to default)");
             end
 
+            % Suppress inner update — only one update at the end
+            this.UpdateManager.addSuppression("DataColumnSortable", Times=1);
             if isempty(val)
                 this.DataColumnSortable = val;
             else
@@ -539,7 +541,7 @@ classdef Table < gwidgets.internal.Reparentable
                         if any(idxFail)
                             failSelection = strjoin(selection(idxFail), ",");
                             limits = destSize;
-                            error("GraphicsWidgets:Table:SelectionOutsideLimits", "Selection " + failSelection + " outsize limits " + limits);
+                            error("GraphicsWidgets:Table:SelectionOutsideLimits", "Selection " + failSelection + " outside limits " + limits);
                         end
 
                 end
@@ -969,7 +971,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         function set.HiddenGroups(this, val)
             idx = ismember(this.Groups, val);
-            this.HiddenGroups_ = this.Groups(~idx);
+            this.HiddenGroups_ = this.Groups(idx);
             if this.UpdateManager.doRun("HiddenGroups")
                 this.doUpdateSequence(StartFrom="Folding");
             end
@@ -1028,7 +1030,7 @@ classdef Table < gwidgets.internal.Reparentable
         SortDirection (1,1) string {mustBeMember(SortDirection, ["Ascend", "Descend", "None"])} = "None"
     end
 
-    properties
+    properties (GetAccess = ?matlab.unittest.TestCase, SetAccess = private)
         SortedVisibleData (:,:) cell % Headers and data after sorting
         SortedGroupHeaderRowIdx (1,:) double % (1,nGroups) Indices of group header rows after sorting
 
@@ -1829,9 +1831,11 @@ classdef Table < gwidgets.internal.Reparentable
             nGroups = numel(this.Groups);
             nGroupsVisible = numel(this.VisibleGroupHeaderRowIdx);
 
-            % Replace group names with the alias on the label
-            groupingVariableName = this.GroupingVariableName;
-            groupingVariableName = this.translateNames(groupingVariableName);
+            % Replace each grouping variable name with its alias, then join
+            groupingVariableName = strjoin(this.translateNames(this.GroupingVariable_), "|");
+            if isempty(groupingVariableName)
+                groupingVariableName = "";
+            end
 
             if nGroups == nGroupsVisible
                 this.GroupLabel.Text = "Group: " + groupingVariableName + " (" + nGroups + " groups)";
@@ -2328,9 +2332,9 @@ classdef Table < gwidgets.internal.Reparentable
             % Forward to custom cell edit callback
             if ~isempty(this.CellEditCallback)
                 dataIdx = this.displaySelectionToDataSelection(displayIdx, "cell");
-                e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+                editData = gwidgets.internal.table.CellEditData(e, dataIdx);
                 s = this;
-                this.CellEditCallback(s, e);
+                this.CellEditCallback(s, editData);
             end
 
         end

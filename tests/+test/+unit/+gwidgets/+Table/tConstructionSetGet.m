@@ -23,6 +23,7 @@ classdef tConstructionSetGet < test.WithExampleTables
             testCase.verifyEmpty(t.CellSelectionCallback)
             testCase.verifyEmpty(t.CellClickedCallback)
             testCase.verifyEmpty(t.CellEditCallback)
+            testCase.verifyEmpty(t.CellDoubleClickCallback)
             testCase.verifyEmpty(t.DisplayDataChangedCallback)
         end
 
