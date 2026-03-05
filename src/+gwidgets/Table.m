@@ -1598,69 +1598,58 @@ classdef Table < gwidgets.internal.Reparentable
                 "+internal", "column_width_bridge.html");
 
             this.ColumnWidthBridge_ = uihtml( ...
-                "Parent",               this.Grid, ...
-                "HTMLSource",           htmlFile, ...
-                "HTMLEventReceivedFcn", @(~,evt) this.onBridgeEvent(evt), ...
-                "DataChangedFcn",       @(src,~)  fprintf("[ColumnWidthBridge] DataChangedFcn fired: %s\n", jsonencode(src.Data)));
+                "Parent",       this.Grid, ...
+                "HTMLSource",   htmlFile, ...
+                "DataChangedFcn", @(src,~) this.onBridgeData(src));
             this.ColumnWidthBridge_.Layout.Row    = 4;
             this.ColumnWidthBridge_.Layout.Column = 1;
 
             % Do NOT call sendEventToHTMLSource here — the HTML page loads
-            % asynchronously, so setup() may not have run yet.  Instead the
-            % JS fires BridgeReady once setup() completes, and onBridgeEvent
-            % responds by sending Init at that point (see handshake below).
+            % asynchronously.  The JS sets Data = {event:"BridgeReady"} once
+            % setup() completes, and onBridgeData responds with Init.
         end
 
-        function onBridgeEvent(this, evt)
-            % Central dispatcher for all events from the bridge HTML.
-            switch evt.HTMLEventName
+        function onBridgeData(this, src)
+            % Dispatcher: JS -> MATLAB channel uses htmlComponent.Data = {...}
+            % which triggers DataChangedFcn.  Route on the 'event' field.
+            d = src.Data;
+            if ~isstruct(d) || ~isfield(d, "event")
+                return
+            end
+
+            switch d.event
 
                 case "BridgeReady"
-                    % JS setup() has completed — now it is safe to send Init.
-                    % This fixes the race condition where sendEventToHTMLSource
-                    % was called before the JS addEventListener was registered.
+                    % setup() has run — safe to send Init now.
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
 
                 case "BridgeDiag"
-                    % Diagnostic event — print to the command window so we can
-                    % trace the bridge state without needing browser dev-tools.
-                    fprintf("[ColumnWidthBridge] %s: %s\n", ...
-                        evt.HTMLEventData.stage, evt.HTMLEventData.detail);
+                    fprintf("[ColumnWidthBridge] %s: %s\n", d.stage, d.detail);
 
                 case "ColumnWidthChanged"
-                    this.onColumnWidthChanged(evt);
+                    this.onColumnWidthChanged(d.widths);
 
             end
         end
 
-        function onColumnWidthChanged(this, evt)
+        function onColumnWidthChanged(this, pixelWidths)
             % Called when the user finishes dragging a column divider.
-            % evt.HTMLEventData.widths is a numeric row vector of pixel widths
-            % for the currently visible columns.
+            % pixelWidths is a numeric row vector of pixel widths for the
+            % currently visible columns.
 
-            % Ignore events triggered by our own programmatic width updates.
             if this.IsPushingWidthToDisplay_
                 return
             end
 
-            pixelWidths = evt.HTMLEventData.widths;
-            nVisible    = sum(this.ColumnVisible);
-
+            nVisible = sum(this.ColumnVisible);
             if numel(pixelWidths) ~= nVisible
-                % Column count mismatch — bridge may be observing a stale
-                % set of columns; request a reattach and ignore this event.
                 sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
                 return
             end
 
-            % Convert pixel widths to a cell array of numbers and store
-            % them without triggering a full display update cycle (the
-            % display already shows the correct widths).
-            newVisWidths = num2cell(pixelWidths);
-
-            dataWidths = this.DataColumnWidth;  % full-width array (auto-filled if empty)
-            dataWidths(this.ColumnVisible) = newVisWidths;
+            dataWidths = this.DataColumnWidth;
+            dataWidths(this.ColumnVisible) = num2cell(pixelWidths);
             this.DataColumnWidth_ = dataWidths;
         end
 

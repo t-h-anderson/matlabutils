@@ -5,21 +5,98 @@
     body { margin: 0; overflow: hidden; background: transparent; }
   </style>
   <script>
-  // Absolute minimal test — no window.parent, no ResizeObserver.
-  // Just verifies that setup() is called and that both outbound channels
-  // (CustomEvent/HTMLEventReceivedFcn AND Data/DataChangedFcn) work.
+  // ColumnWidthBridge
+  //
+  // JS -> MATLAB : htmlComponent.Data = {event: "...", ...}
+  //               triggers DataChangedFcn in MATLAB
+  //
+  // MATLAB -> JS : sendEventToHTMLSource(comp, eventName, data)
+  //               triggers htmlComponent.addEventListener(eventName, handler)
+
+  var COL_SELECTOR   = ".tabulator-col:not(.tabulator-col-group)";
+  var RETRY_INTERVAL = 600;
+  var DEBOUNCE_MS    = 200;
+
+  var resizeObserver = null;
+  var debounceTimer  = null;
+  var paused         = false;
+  var tableTag       = null;
+  var htmlComponent  = null;
+
+  function diag(stage, detail) {
+    htmlComponent.Data = { event: "BridgeDiag", stage: stage, detail: String(detail) };
+  }
+
+  function findColumns() {
+    var parentDoc;
+    try {
+      parentDoc = window.parent.document;
+    } catch (e) {
+      diag("parentAccess", "FAILED: " + e.message);
+      return [];
+    }
+
+    var scope = parentDoc;
+    if (tableTag) {
+      var tableEl = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
+      scope = tableEl || parentDoc;
+      diag("scopedSearch", tableEl ? "scoped to tag" : "tag not found, using document");
+    }
+
+    return Array.from(scope.querySelectorAll(COL_SELECTOR));
+  }
+
+  function publishWidths() {
+    if (paused) return;
+    var cols = findColumns();
+    if (cols.length === 0) return;
+    var widths = cols.map(function(c) {
+      return Math.round(c.getBoundingClientRect().width);
+    });
+    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
+  }
+
+  function debouncedPublish() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
+  }
+
+  function attachObserver() {
+    var cols = findColumns();
+    if (cols.length === 0) {
+      diag("attachObserver", "no columns found with '" + COL_SELECTOR + "', retrying...");
+      setTimeout(attachObserver, RETRY_INTERVAL);
+      return;
+    }
+    if (resizeObserver) resizeObserver.disconnect();
+    resizeObserver = new ResizeObserver(debouncedPublish);
+    cols.forEach(function(col) { resizeObserver.observe(col); });
+    diag("attachObserver", "OK - observing " + cols.length + " columns");
+  }
 
   function setup(component) {
+    htmlComponent = component;
 
-    // Channel A: CustomEvent -> HTMLEventReceivedFcn
-    component.dispatchEvent(
-      new CustomEvent("BridgeDiag", {
-        detail: { stage: "setup", detail: "channel A (CustomEvent)" }
-      })
-    );
+    htmlComponent.addEventListener("Init", function(event) {
+      tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
+      diag("initReceived", "tableTag=" + tableTag);
+      setTimeout(attachObserver, RETRY_INTERVAL);
+    });
 
-    // Channel B: Data property -> DataChangedFcn
-    component.Data = { stage: "setup", detail: "channel B (Data)" };
+    htmlComponent.addEventListener("Pause", function(event) {
+      paused = true;
+      clearTimeout(debounceTimer);
+      var duration = (event.Data && event.Data.durationMs) ? event.Data.durationMs : 500;
+      setTimeout(function() { paused = false; }, duration);
+    });
+
+    htmlComponent.addEventListener("Reattach", function() {
+      diag("reattach", "reattaching observer");
+      setTimeout(attachObserver, RETRY_INTERVAL);
+    });
+
+    // Signal MATLAB that setup() has run and it is safe to send Init.
+    htmlComponent.Data = { event: "BridgeReady" };
   }
   </script>
 </head>
