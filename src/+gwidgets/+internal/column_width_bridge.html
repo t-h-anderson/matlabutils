@@ -5,154 +5,53 @@
     body { margin: 0; overflow: hidden; background: transparent; }
   </style>
   <script>
-  // ColumnWidthBridge — reads uitable column widths from the parent frame's DOM
-  // and publishes them back to MATLAB when the user resizes a column.
-  //
-  // NOTE: setup() MUST be a global function (window.setup) — MATLAB calls it
-  // by name when the uihtml page loads.  Do NOT wrap it in an IIFE.
-  //
-  // Limitations / things that may need tuning:
-  //   - Requires same-origin access to window.parent.document (true for
-  //     MATLAB uifigure, which serves everything from localhost).
-  //   - The CSS selector '.tabulator-col' targets MATLAB R2022b+ uitables;
-  //     adjust COL_SELECTOR if your version uses different class names.
-  //   - The 'data-tag' attribute is set by MATLAB on the uitable's root DOM
-  //     node; if this changes in a future release, the table won't be scoped.
+  // Minimal diagnostic version — no window.parent access.
+  // Purpose: verify the basic JS <-> MATLAB channel works before adding
+  // any DOM observation logic.  Check the MATLAB command window for output.
 
-  var COL_SELECTOR   = ".tabulator-col:not(.tabulator-col-group)";
-  var RETRY_INTERVAL = 600;   // ms between DOM-search retries
-  var DEBOUNCE_MS    = 200;   // ms to debounce rapid resize events
+  var htmlComponent = null;
 
-  var resizeObserver = null;
-  var debounceTimer  = null;
-  var paused         = false;
-  var tableTag       = null;   // set via 'Init' event from MATLAB
-  var htmlComponent  = null;   // set by setup()
-
-  // ------------------------------------------------------------------ //
-  //  Diagnostics                                                         //
-  // ------------------------------------------------------------------ //
-
-  function diag(stage, detail) {
-    if (!htmlComponent) return;
-    htmlComponent.dispatchEvent(new CustomEvent("BridgeDiag", {
-      detail: { stage: stage, detail: String(detail) }
-    }));
-  }
-
-  // ------------------------------------------------------------------ //
-  //  DOM helpers                                                         //
-  // ------------------------------------------------------------------ //
-
-  function findColumns() {
-    var parentDoc;
-    try {
-      parentDoc = window.parent.document;
-    } catch (e) {
-      diag("parentAccess", "FAILED: " + e.message);
-      return [];
-    }
-
-    var scope = parentDoc;
-    if (tableTag) {
-      var tableEl = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
-      if (tableEl) {
-        scope = tableEl;
-        diag("scopedSearch", "scoped to [data-tag=" + tableTag + "]");
-      } else {
-        diag("scopedSearch", "tag not found, falling back to full document");
-      }
-    }
-
-    return Array.from(scope.querySelectorAll(COL_SELECTOR));
-  }
-
-  // ------------------------------------------------------------------ //
-  //  Publishing                                                          //
-  // ------------------------------------------------------------------ //
-
-  function publishWidths() {
-    if (paused) return;
-    var cols = findColumns();
-    if (cols.length === 0) return;
-    var widths = cols.map(function (c) {
-      return Math.round(c.getBoundingClientRect().width);
-    });
-    htmlComponent.dispatchEvent(
-      new CustomEvent("ColumnWidthChanged", { detail: { widths: widths } })
-    );
-  }
-
-  function debouncedPublish() {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
-  }
-
-  // ------------------------------------------------------------------ //
-  //  Observer attachment                                                 //
-  // ------------------------------------------------------------------ //
-
-  function attachObserver() {
-    var cols = findColumns();
-    if (cols.length === 0) {
-      diag("attachObserver", "no columns found with '" + COL_SELECTOR + "', retrying...");
-      setTimeout(attachObserver, RETRY_INTERVAL);
-      return;
-    }
-
-    if (resizeObserver) resizeObserver.disconnect();
-    resizeObserver = new ResizeObserver(debouncedPublish);
-    cols.forEach(function (col) { resizeObserver.observe(col); });
-    diag("attachObserver", "OK — observing " + cols.length + " columns");
-  }
-
-  // ------------------------------------------------------------------ //
-  //  MATLAB component interface                                          //
-  // ------------------------------------------------------------------ //
-
-  // setup() is called by MATLAB when the uihtml page loads.  It MUST be
-  // defined at the top level (window.setup) so MATLAB can find it.
-  //
-  // Handshake (avoids race condition where Init could arrive before setup()):
-  //   1. JS  → fires BridgeReady as soon as setup() runs
-  //   2. ML  → receives BridgeReady, then calls sendEventToHTMLSource "Init"
-  //   3. JS  → receives Init, starts attachObserver retry loop
-  //
-  // Events JS → MATLAB (via htmlComponent.dispatchEvent CustomEvent):
-  //   BridgeReady        — setup() has completed; MATLAB should now send Init
-  //   BridgeDiag         — {stage, detail} diagnostic string for debugging
-  //   ColumnWidthChanged — user resize detected; {widths: number[]}
-  //
-  // Events MATLAB → JS (via sendEventToHTMLSource):
-  //   Init     — {tableTag: string} scope the DOM query to this uitable
-  //   Pause    — {durationMs: number} suppress events during programmatic update
-  //   Reattach — rebuild the ResizeObserver (e.g. after column count changes)
   function setup(component) {
     htmlComponent = component;
 
+    // Step 1: confirm setup() was called and the channel is open.
+    htmlComponent.dispatchEvent(
+      new CustomEvent("BridgeDiag", {
+        detail: { stage: "setup", detail: "setup() called OK" }
+      })
+    );
+
+    // Step 2: register the Init listener and fire BridgeReady so MATLAB
+    // knows it can now safely send Init.
     htmlComponent.addEventListener("Init", function (event) {
-      tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
-      diag("initReceived", "tableTag=" + tableTag);
-      setTimeout(attachObserver, RETRY_INTERVAL);
+      htmlComponent.dispatchEvent(
+        new CustomEvent("BridgeDiag", {
+          detail: {
+            stage: "initReceived",
+            detail: "tableTag=" + JSON.stringify(event.Data)
+          }
+        })
+      );
+
+      // Step 3: test whether window.parent.document is accessible.
+      var parentAccessible;
+      try {
+        var _ = window.parent.document.body;
+        parentAccessible = "YES";
+      } catch (e) {
+        parentAccessible = "NO — " + e.message;
+      }
+
+      htmlComponent.dispatchEvent(
+        new CustomEvent("BridgeDiag", {
+          detail: { stage: "parentAccess", detail: parentAccessible }
+        })
+      );
     });
 
-    htmlComponent.addEventListener("Pause", function (event) {
-      paused = true;
-      clearTimeout(debounceTimer);
-      var duration = (event.Data && event.Data.durationMs) ? event.Data.durationMs : 500;
-      setTimeout(function () { paused = false; }, duration);
-    });
-
-    htmlComponent.addEventListener("Reattach", function () {
-      diag("reattach", "reattaching observer");
-      setTimeout(attachObserver, RETRY_INTERVAL);
-    });
-
-    // Signal to MATLAB that setup() has completed and it is now safe to
-    // send Init.  This avoids the race condition where sendEventToHTMLSource
-    // was called before this listener was registered.
-    diag("setup", "setup() called — firing BridgeReady");
-    htmlComponent.dispatchEvent(new CustomEvent("BridgeReady", { detail: {} }));
+    htmlComponent.dispatchEvent(
+      new CustomEvent("BridgeReady", { detail: {} })
+    );
   }
   </script>
 </head>
