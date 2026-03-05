@@ -12,7 +12,10 @@ classdef Table < gwidgets.internal.Reparentable
 
         Multiselect (1,1) matlab.lang.OnOffSwitchState % Enable/disable multiple selection
         SelectionType (1,1) string % Type of selection: 'cell', 'row', or 'column'
-        ColumnWidth (1,:) % Column Width, cell - enforced by set method
+        
+        ColumnWidth (1,:) cell % Column Width
+        DataColumnWidth (1,:) cell % Column Width
+
         Selection (:,:) double % Data selection. Either (:,2) for cell or (1,:) otherwise
         DisplaySelection (:,:) double % Display Selection. Either (:,2) for cell or (1,:) otherwise
 
@@ -45,6 +48,8 @@ classdef Table < gwidgets.internal.Reparentable
 
         DataColumnEditable_ (1,:) logical % Logical array indicating which columns are editable
         DataColumnSortable_ (1,:) logical % Logical array indicating which columns are sortable
+
+        DataColumnWidth_ (1,:) cell % Width of data columns
 
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
 
@@ -160,19 +165,33 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
+        function val = get.DataColumnWidth(this)
+            val = this.DataColumnWidth_;
+        end
+
+        function set.DataColumnWidth(this, val)
+            this.DisplayTable.ColumnWidth = val;
+            this.DataColumnWidth_ = this.DisplayTable.ColumnWidth;
+        end
+
         function val = get.ColumnWidth(this)
-            val = convertCharsToStrings(this.DisplayTable.ColumnWidth);
-            if ~iscell(val)
-                val = num2cell(val);
+            val = this.DataColumnWidth_;
+            if numel(val) == numel(this.ColumnVisible_)
+                val = val(this.ColumnVisible);
             end
         end
 
         function set.ColumnWidth(this, val)
-            val = convertCharsToStrings(val);
-            if ~iscell(val)
-                val = num2cell(val);
+            arguments
+                this
+                val (1,:) cell
             end
-            this.DisplayTable.ColumnWidth = val;
+
+            if isscalar(val)
+                val = repelem(val, 1, numel(this.ColumnVisible_));
+            end
+
+            this.DataColumnWidth = val;
         end
 
         function val = get.ColumnVisible(this)
@@ -367,7 +386,6 @@ classdef Table < gwidgets.internal.Reparentable
                     "Size of column sortable must match the visible table, be scalar (apply to all), or empty (restore to default)");
             end
 
-            % Suppress inner update — only one update at the end
             this.UpdateManager.addSuppression("DataColumnSortable", Times=1);
             if isempty(val)
                 this.DataColumnSortable = val;
