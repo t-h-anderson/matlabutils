@@ -25,16 +25,11 @@
   var htmlComponent  = null;
   var attachAttempts = 0;
 
-  function diag(stage, detail) {
-    htmlComponent.Data = { event: "BridgeDiag", stage: stage, detail: String(detail) };
-  }
-
   function findColumns() {
     var parentDoc;
     try {
       parentDoc = window.parent.document;
     } catch (e) {
-      diag("parentAccess", "FAILED: " + e.message);
       return [];
     }
 
@@ -47,6 +42,94 @@
     }
 
     return Array.from(scope.querySelectorAll(COL_SELECTOR));
+  }
+
+  function findBodyTable(doc) {
+    if (tableTag) {
+      var tableEl = doc.querySelector('[data-tag="' + tableTag + '"]');
+      if (tableEl) {
+        var t = tableEl.querySelector("table.mw-table");
+        if (t) return t;
+      }
+    }
+    return doc.querySelector("table.mw-table");
+  }
+
+  function applyColumnWidths(widths) {
+    // widths: numeric array — positive = px, negative = auto (remove constraint)
+    var cols = findColumns();
+    if (cols.length !== widths.length) {
+      // Column count mismatch (e.g. mid-visibility-toggle). Reattach and wait.
+      attachAttempts = 0;
+      setTimeout(attachObserver, RETRY_INTERVAL);
+      return;
+    }
+
+    var doc = cols.length > 0 ? cols[0].ownerDocument : window.parent.document;
+    var allPixel = widths.every(function(w) { return w >= 0; });
+
+    // Fixed offset = table width - sum of column widths (accounts for any
+    // non-data columns such as a row-number column). Only meaningful when
+    // all columns currently have explicit pixel widths.
+    var headerTable = cols.length > 0 ? cols[0].closest("table") : null;
+    var fixedOffset = 0;
+    if (headerTable && allPixel) {
+      var currentColTotal = 0;
+      for (var i = 0; i < cols.length; i++) {
+        currentColTotal += cols[i].getBoundingClientRect().width;
+      }
+      fixedOffset = Math.round(headerTable.getBoundingClientRect().width - currentColTotal);
+    }
+
+    // --- Header columns ---
+    // Width is controlled by matching min-width and max-width on the <TH>
+    // elements inside a display:flex row. Setting style.width has no effect.
+    var newColTotal = 0;
+    for (var i = 0; i < cols.length; i++) {
+      if (widths[i] < 0) {
+        cols[i].style.removeProperty("min-width");
+        cols[i].style.removeProperty("max-width");
+      } else {
+        cols[i].style.minWidth = widths[i] + "px";
+        cols[i].style.maxWidth = widths[i] + "px";
+        newColTotal += widths[i];
+      }
+    }
+    // Keep the header <table> width in sync so the flex row fills correctly.
+    // Only update when all columns are explicit — auto columns let CSS decide.
+    if (headerTable && allPixel) {
+      var newTableWidth = Math.round(newColTotal + fixedOffset);
+      headerTable.style.width    = newTableWidth + "px";
+      headerTable.style.minWidth = newTableWidth + "px";
+      headerTable.style.maxWidth = newTableWidth + "px";
+    }
+
+    // --- Body columns ---
+    // Body cells (td) use the same min-width / max-width mechanism.
+    // Note: with virtual scrolling only visible rows are in the DOM;
+    // newly rendered rows will be patched the next time SetWidths fires.
+    var bodyTable = findBodyTable(doc);
+    if (bodyTable) {
+      var bodyRows = bodyTable.querySelectorAll("tr");
+      for (var r = 0; r < bodyRows.length; r++) {
+        var cells = bodyRows[r].querySelectorAll("td");
+        for (var i = 0; i < cells.length && i < widths.length; i++) {
+          if (widths[i] < 0) {
+            cells[i].style.removeProperty("min-width");
+            cells[i].style.removeProperty("max-width");
+          } else {
+            cells[i].style.minWidth = widths[i] + "px";
+            cells[i].style.maxWidth = widths[i] + "px";
+          }
+        }
+      }
+      if (allPixel) {
+        var bw = Math.round(newColTotal + fixedOffset);
+        bodyTable.style.width    = bw + "px";
+        bodyTable.style.minWidth = bw + "px";
+        bodyTable.style.maxWidth = bw + "px";
+      }
+    }
   }
 
   function publishWidths() {
@@ -99,113 +182,11 @@
     });
 
     htmlComponent.addEventListener("SetWidths", function(event) {
-      // Column width in MATLAB's uitable is controlled by min-width and
-      // max-width (set to the same value) on the <TH> elements inside a
-      // display:flex row.  The containing <TABLE> also carries explicit
-      // width/min-width/max-width inline styles that must track the column
-      // sum.  We update all three to match the requested pixel widths.
+      // MATLAB sends a numeric array: positive values are pixel widths,
+      // negative means "auto" (remove explicit constraints, let CSS decide).
       var widths = event.Data;
       if (!Array.isArray(widths)) return;
-      var cols = findColumns();
-      if (cols.length !== widths.length) {
-        attachAttempts = 0;
-        setTimeout(attachObserver, RETRY_INTERVAL);
-        return;
-      }
-
-      // Compute the fixed offset = table width - sum of current column widths.
-      // This accounts for any row-number column, borders, or other fixed
-      // elements that are not part of findColumns().
-      var headerTable = cols[0] ? cols[0].closest("table") : null;
-      var fixedOffset = 0;
-      if (headerTable) {
-        var currentColTotal = 0;
-        for (var i = 0; i < cols.length; i++) {
-          currentColTotal += cols[i].getBoundingClientRect().width;
-        }
-        fixedOffset = Math.round(headerTable.getBoundingClientRect().width - currentColTotal);
-      }
-
-      // Apply min-width + max-width to each header column.
-      var newColTotal = 0;
-      for (var i = 0; i < cols.length; i++) {
-        if (widths[i] < 0) {
-          // "auto": remove explicit constraints and let flex decide
-          cols[i].style.removeProperty("min-width");
-          cols[i].style.removeProperty("max-width");
-          newColTotal += cols[i].getBoundingClientRect().width;
-        } else {
-          cols[i].style.minWidth = widths[i] + "px";
-          cols[i].style.maxWidth = widths[i] + "px";
-          newColTotal += widths[i];
-        }
-      }
-
-      // Update the header table's width to keep the flex row consistent.
-      if (headerTable) {
-        var newTableWidth = Math.round(newColTotal + fixedOffset);
-        headerTable.style.width    = newTableWidth + "px";
-        headerTable.style.minWidth = newTableWidth + "px";
-        headerTable.style.maxWidth = newTableWidth + "px";
-      }
-
-      // Mirror the same changes on body columns so data rows match.
-      // Body columns share the same index order as header columns.
-      var doc = cols[0] ? cols[0].ownerDocument : window.parent.document;
-      var bodyTable = null;
-      if (tableTag) {
-        var tableEl = doc.querySelector("[data-tag='" + tableTag + "']");
-        if (tableEl) bodyTable = tableEl.querySelector("table.mw-table-body");
-      }
-      if (!bodyTable) bodyTable = doc.querySelector("table.mw-table");
-      if (bodyTable) {
-        // Probe first body cell to see how its width is controlled
-        var firstRow = bodyTable.querySelector("tr");
-        if (firstRow) {
-          var firstCell = firstRow.querySelector("td");
-          if (firstCell) {
-            diag("bodyCell:styleAttr", firstCell.getAttribute("style") || "(none)");
-            diag("bodyCell:computedWidth", getComputedStyle(firstCell).width);
-            diag("bodyCell:computedMinWidth", getComputedStyle(firstCell).minWidth);
-          }
-        }
-        var bodyRows = bodyTable.querySelectorAll("tr");
-        for (var r = 0; r < bodyRows.length; r++) {
-          var cells = bodyRows[r].querySelectorAll("td");
-          for (var i = 0; i < cells.length && i < widths.length; i++) {
-            if (widths[i] < 0) {
-              cells[i].style.removeProperty("min-width");
-              cells[i].style.removeProperty("max-width");
-            } else {
-              cells[i].style.minWidth = widths[i] + "px";
-              cells[i].style.maxWidth = widths[i] + "px";
-            }
-          }
-        }
-        bodyTable.style.width    = (Math.round(newColTotal + fixedOffset)) + "px";
-        bodyTable.style.minWidth = (Math.round(newColTotal + fixedOffset)) + "px";
-        bodyTable.style.maxWidth = (Math.round(newColTotal + fixedOffset)) + "px";
-      }
-
-      diag("SetWidths:done", "cols=" + cols.length + " newTotal=" + newColTotal + " offset=" + fixedOffset + " bodyTable=" + !!bodyTable);
-
-      // Probe: find all tables in the parent doc to identify the body table
-      if (!bodyTable) {
-        var allTables = doc.querySelectorAll("table");
-        diag("probe:tableCount", allTables.length);
-        for (var t = 0; t < allTables.length; t++) {
-          diag("probe:table" + t, "cls=" + allTables[t].className + " style=[" + (allTables[t].getAttribute("style")||"none") + "]");
-        }
-        // Also check what the header table parent structure looks like
-        if (headerTable) {
-          var sib = headerTable.parentElement;
-          diag("probe:headerTableParent", "tag=" + sib.tagName + " cls=" + sib.className);
-          var siblings = sib.children;
-          for (var s = 0; s < siblings.length; s++) {
-            diag("probe:sibling" + s, "tag=" + siblings[s].tagName + " cls=" + siblings[s].className.slice(0,80));
-          }
-        }
-      }
+      applyColumnWidths(widths);
     });
 
     // Signal MATLAB that setup() has run and it is safe to send Init.
