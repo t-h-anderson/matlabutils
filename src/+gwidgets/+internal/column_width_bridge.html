@@ -18,13 +18,14 @@
   var DEBOUNCE_MS    = 200;
   var MAX_ATTEMPTS   = 8;
 
-  var resizeObserver = null;
-  var debounceTimer  = null;
-  var paused         = false;
-  var tableTag       = null;
-  var htmlComponent  = null;
-  var attachAttempts = 0;
-  var observedCols   = [];  // elements the ResizeObserver is currently watching
+  var resizeObserver    = null;
+  var mutationObserver  = null;
+  var debounceTimer     = null;
+  var paused            = false;
+  var tableTag          = null;
+  var htmlComponent     = null;
+  var attachAttempts    = 0;
+  var observedCols      = [];  // elements the ResizeObserver is currently watching
 
   // Diagnostic log queue — batched into a single htmlComponent.Data event
   // so rapid synchronous calls don't overwrite each other.
@@ -167,14 +168,41 @@
     }
 
     // Re-anchor the ResizeObserver to the current DOM elements.
-    // MATLAB may re-render column headers (new <TH> nodes) asynchronously
-    // after our handler returns, leaving the observer on detached elements.
-    // The sync call handles the case where the DOM is already up-to-date;
-    // the delayed calls catch async re-renders.  All calls are safe while
-    // paused — publishWidths() is a no-op during the pause window.
+    // The sync call covers the case where the DOM is already up-to-date.
+    // A MutationObserver then watches for MATLAB to asynchronously replace
+    // the <TH> nodes — if that happens, it triggers a fresh attach.
+    // This replaces the old "delayed attachObserver × 2" approach, which
+    // fired ResizeObserver echoes that arrived after the 500 ms pause had
+    // expired and falsely overwrote "1x" values with pixel values.
     attachObserver("SetWidths-sync");
-    setTimeout(function() { attachObserver("SetWidths-100ms"); }, 100);
-    setTimeout(function() { attachObserver("SetWidths-600ms"); }, RETRY_INTERVAL);
+    setupMutationObserver();
+  }
+
+  function setupMutationObserver() {
+    if (mutationObserver) { mutationObserver.disconnect(); mutationObserver = null; }
+    var cols = findColumns();
+    if (cols.length === 0) return;
+    var headerTable = cols[0].closest("table");
+    if (!headerTable) return;
+
+    mutationObserver = new MutationObserver(function(mutations) {
+      // Only re-anchor when a column-header node was actually removed from
+      // the DOM, which indicates MATLAB replaced the <TH> elements.
+      var rerendered = mutations.some(function(m) {
+        if (m.type !== "childList" || m.removedNodes.length === 0) return false;
+        return Array.from(m.removedNodes).some(function(n) {
+          return n.nodeType === 1 && (
+            (n.classList && n.classList.contains("mw-table-header-column")) ||
+            (n.querySelector && n.querySelector(".mw-table-header-column") !== null)
+          );
+        });
+      });
+      if (rerendered) {
+        bridgeLog("[Bridge] MutationObserver: header re-rendered — re-attaching");
+        setTimeout(function() { attachObserver("mutation"); }, 50);
+      }
+    });
+    mutationObserver.observe(headerTable, { childList: true, subtree: true });
   }
 
   function publishWidths() {
@@ -192,6 +220,42 @@
       return Math.round(c.getBoundingClientRect().width);
     });
     bridgeLog("[Bridge] publishWidths: [" + widths.join(", ") + "]");
+
+    // Lock header and body into pixel widths so they stay in sync.
+    // In auto ("1x") mode the columns are flex-auto, so expanding one
+    // header column squishes others and body cells don't track the header
+    // at all (no explicit min-width to anchor to).  Stamping pixel values
+    // here on every user-driven publish keeps the two tables aligned and
+    // prevents the flex layout from redistributing on the next drag.
+    var headerTable = cols.length > 0 ? cols[0].closest("table") : null;
+    if (headerTable) {
+      var colTotal    = widths.reduce(function(a, b) { return a + b; }, 0);
+      var tableWidth  = Math.round(headerTable.getBoundingClientRect().width);
+      var fixedOffset = tableWidth - colTotal;   // row-number column etc.
+      headerTable.style.width    = tableWidth + "px";
+      headerTable.style.minWidth = tableWidth + "px";
+      headerTable.style.maxWidth = tableWidth + "px";
+      for (var i = 0; i < cols.length; i++) {
+        cols[i].style.minWidth = widths[i] + "px";
+        cols[i].style.maxWidth = widths[i] + "px";
+      }
+      var doc = cols[0].ownerDocument;
+      var bodyTable = findBodyTable(doc);
+      if (bodyTable) {
+        bodyTable.style.width    = tableWidth + "px";
+        bodyTable.style.minWidth = tableWidth + "px";
+        bodyTable.style.maxWidth = tableWidth + "px";
+        var bodyRows = bodyTable.querySelectorAll("tr");
+        for (var r = 0; r < bodyRows.length; r++) {
+          var cells = bodyRows[r].querySelectorAll("td");
+          for (var ci = 0; ci < cells.length && ci < widths.length; ci++) {
+            cells[ci].style.minWidth = widths[ci] + "px";
+            cells[ci].style.maxWidth = widths[ci] + "px";
+          }
+        }
+      }
+    }
+
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
   }
 

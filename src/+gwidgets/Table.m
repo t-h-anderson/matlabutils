@@ -1465,10 +1465,12 @@ classdef Table < gwidgets.internal.Reparentable
             %
             % The Pause event is sent first so the ResizeObserver does not
             % echo the resulting DOM changes back as user-driven resize events.
-            this.pauseColumnWidthBridge();
-
             if isempty(this.DataColumnWidth_)
                 % Widths cleared or never set — restore display to "auto"
+                % Use a longer pause: the ResizeObserver echo from the
+                % MutationObserver re-attach can arrive up to 800 ms after
+                % SetWidths, so 1200 ms keeps it in the suppression window.
+                this.pauseColumnWidthBridge(1200);
                 if ~isequal(this.DisplayTable.ColumnWidth, "auto")
                     this.DisplayTable.ColumnWidth = "auto";
                 end
@@ -1476,13 +1478,21 @@ classdef Table < gwidgets.internal.Reparentable
                 this.sendWidthsToBridge(-ones(1, sum(this.ColumnVisible)));
             else
                 visWidths = this.DataColumnWidth_(this.ColumnVisible);
-                if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
-                    this.DisplayTable.ColumnWidth = visWidths;
-                end
                 % Push pixel widths directly to DOM via bridge.
                 % Non-numeric values ("auto", "fit", "1x") map to -1 so JS
                 % removes any explicit width and lets the browser auto-size.
-                this.sendWidthsToBridge(this.widthsToJsArray(visWidths));
+                jsWidths = this.widthsToJsArray(visWidths);
+                allAuto = all(jsWidths < 0);
+                if allAuto
+                    % Same rationale as the isempty case above.
+                    this.pauseColumnWidthBridge(1200);
+                else
+                    this.pauseColumnWidthBridge();
+                end
+                if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
+                    this.DisplayTable.ColumnWidth = visWidths;
+                end
+                this.sendWidthsToBridge(jsWidths);
             end
         end
 
@@ -1506,11 +1516,19 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function pauseColumnWidthBridge(this)
+        function pauseColumnWidthBridge(this, pauseMs)
             % Tell the bridge to ignore resize events for a short window.
             % Also set the MATLAB-side flag as a belt-and-braces guard.
+            %
+            % pauseMs: duration in ms (default 500).  Use a larger value when
+            %   sending auto widths (-1) because the ResizeObserver echo from
+            %   the re-attached observer can arrive up to 800 ms after SetWidths
+            %   (600 ms delayed-attach + 200 ms debounce).  1200 ms ensures the
+            %   echo is still within the suppression window.
+            if nargin < 2
+                pauseMs = 500;  % must exceed DEBOUNCE_MS (200 ms)
+            end
             this.IsPushingWidthToDisplay_ = true;
-            pauseMs = 500; % must exceed the bridge's DEBOUNCE_MS (200 ms)
             if ~isempty(this.ColumnWidthBridge_)
                 sendEventToHTMLSource(this.ColumnWidthBridge_, "Pause", ...
                     struct("durationMs", pauseMs));
