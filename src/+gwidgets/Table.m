@@ -13,8 +13,8 @@ classdef Table < gwidgets.internal.Reparentable
         Multiselect (1,1) matlab.lang.OnOffSwitchState % Enable/disable multiple selection
         SelectionType (1,1) string % Type of selection: 'cell', 'row', or 'column'
         
-        ColumnWidth (1,:) cell % Column Width
-        DataColumnWidth (1,:) cell % Column Width
+        ColumnWidth (1,:) % Column Width
+        DataColumnWidth (1,:) % Column Width
 
         Selection (:,:) double % Data selection. Either (:,2) for cell or (1,:) otherwise
         DisplaySelection (:,:) double % Display Selection. Either (:,2) for cell or (1,:) otherwise
@@ -2622,7 +2622,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         function onAutoResizeColumnsRequest(this, ~, ~)
             % Reset all explicit column widths, letting the table auto-size.
-            this.ColumnWidth = {};
+            this.ColumnWidth = {"auto"};
         end
 
         function onToggleRowFilterRequest(this, ~, ~)
