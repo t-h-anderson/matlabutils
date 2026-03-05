@@ -19,15 +19,28 @@
   (function () {
     "use strict";
 
-    const COL_SELECTOR     = ".tabulator-col:not(.tabulator-col-group)";
-    const RETRY_INTERVAL   = 600;   // ms between DOM-search retries
-    const DEBOUNCE_MS      = 200;   // ms to debounce rapid resize events
+    const COL_SELECTOR   = ".tabulator-col:not(.tabulator-col-group)";
+    const RETRY_INTERVAL = 600;   // ms between DOM-search retries
+    const DEBOUNCE_MS    = 200;   // ms to debounce rapid resize events
 
     let resizeObserver = null;
     let debounceTimer  = null;
     let paused         = false;
-    let tableTag       = null;      // set via 'Init' event from MATLAB
-    let htmlComponent  = null;      // set by setup()
+    let tableTag       = null;   // set via 'Init' event from MATLAB
+    let htmlComponent  = null;   // set by setup()
+
+    // ------------------------------------------------------------------ //
+    //  Diagnostics                                                         //
+    // ------------------------------------------------------------------ //
+
+    function diag(stage, detail) {
+      // Fires a 'BridgeDiag' event so MATLAB can track exactly which step
+      // succeeded or failed without needing browser dev-tools access.
+      if (!htmlComponent) return;
+      htmlComponent.dispatchEvent(new CustomEvent("BridgeDiag", {
+        detail: { stage: stage, detail: String(detail) }
+      }));
+    }
 
     // ------------------------------------------------------------------ //
     //  DOM helpers                                                         //
@@ -38,8 +51,7 @@
       try {
         parentDoc = window.parent.document;
       } catch (e) {
-        // Cross-origin — cannot access parent frame.
-        console.warn("ColumnWidthBridge: cross-origin parent, cannot access DOM.", e);
+        diag("parentAccess", "FAILED: " + e.message);
         return [];
       }
 
@@ -47,7 +59,12 @@
       let scope = parentDoc;
       if (tableTag) {
         const tableEl = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
-        if (tableEl) scope = tableEl;
+        if (tableEl) {
+          scope = tableEl;
+          diag("scopedSearch", "scoped to [data-tag=" + tableTag + "]");
+        } else {
+          diag("scopedSearch", "tag not found, falling back to full document");
+        }
       }
 
       return Array.from(scope.querySelectorAll(COL_SELECTOR));
@@ -81,7 +98,7 @@
     function attachObserver() {
       const cols = findColumns();
       if (cols.length === 0) {
-        // Table hasn't rendered yet; retry after a short delay.
+        diag("attachObserver", "no columns found with '" + COL_SELECTOR + "', retrying...");
         setTimeout(attachObserver, RETRY_INTERVAL);
         return;
       }
@@ -89,6 +106,7 @@
       if (resizeObserver) resizeObserver.disconnect();
       resizeObserver = new ResizeObserver(debouncedPublish);
       cols.forEach(function (col) { resizeObserver.observe(col); });
+      diag("attachObserver", "OK — observing " + cols.length + " columns");
     }
 
     // ------------------------------------------------------------------ //
@@ -96,25 +114,30 @@
     // ------------------------------------------------------------------ //
 
     // setup() is called automatically by MATLAB when the uihtml page loads.
-    // htmlComponent is injected by the runtime and is used for bidirectional
-    // communication:
-    //   MATLAB → JS : sendEventToHTMLSource(comp, eventName, data)
-    //                 → htmlComponent.addEventListener(eventName, handler)
-    //   JS → MATLAB : htmlComponent.dispatchEvent(new CustomEvent(...))
-    //                 → comp.HTMLEventReceivedFcn fires with event.HTMLEventData
+    //
+    // Handshake (fixes race condition where Init could arrive before setup()):
+    //   1. JS  → fires BridgeReady as soon as setup() runs
+    //   2. ML  → receives BridgeReady, then calls sendEventToHTMLSource "Init"
+    //   3. JS  → receives Init, starts attachObserver retry loop
+    //
+    // Events JS → MATLAB:
+    //   BridgeReady  — setup() has completed; MATLAB should now send Init
+    //   BridgeDiag   — diagnostic string {stage, detail} for debugging
+    //   ColumnWidthChanged — user resize detected; {widths: number[]}
+    //
+    // Events MATLAB → JS (via sendEventToHTMLSource):
+    //   Init     — {tableTag: string} scope the DOM query to this uitable
+    //   Pause    — {durationMs: number} suppress events during programmatic update
+    //   Reattach — rebuild the ResizeObserver (e.g. after column count changes)
     function setup(component) {
       htmlComponent = component;
 
-      // 'Init' — sent by MATLAB after setup() completes.
-      //   data.tableTag : string Tag of the uitable, used to scope DOM queries.
       htmlComponent.addEventListener("Init", function (event) {
         tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
+        diag("initReceived", "tableTag=" + tableTag);
         setTimeout(attachObserver, RETRY_INTERVAL);
       });
 
-      // 'Pause' — sent by MATLAB before it pushes column widths programmatically,
-      // so that the resulting DOM resize events don't feed back as user changes.
-      //   data.durationMs : how long to stay paused (default: 500 ms).
       htmlComponent.addEventListener("Pause", function (event) {
         paused = true;
         clearTimeout(debounceTimer);
@@ -122,11 +145,16 @@
         setTimeout(function () { paused = false; }, duration);
       });
 
-      // 'Reattach' — sent by MATLAB when the table data changes and columns
-      // may have been added/removed, requiring the observer to be rebuilt.
       htmlComponent.addEventListener("Reattach", function () {
+        diag("reattach", "reattaching observer");
         setTimeout(attachObserver, RETRY_INTERVAL);
       });
+
+      // Signal to MATLAB that setup() has completed and it is now safe to
+      // send Init.  This avoids the race condition where sendEventToHTMLSource
+      // was called before this listener was registered.
+      diag("setup", "setup() called — firing BridgeReady");
+      htmlComponent.dispatchEvent(new CustomEvent("BridgeReady", { detail: {} }));
     }
   </script>
 </head>

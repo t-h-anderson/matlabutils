@@ -1600,28 +1600,45 @@ classdef Table < gwidgets.internal.Reparentable
             this.ColumnWidthBridge_ = uihtml( ...
                 "Parent",               this.Grid, ...
                 "HTMLSource",           htmlFile, ...
-                "HTMLEventReceivedFcn", @(~,evt) this.onColumnWidthChanged(evt));
+                "HTMLEventReceivedFcn", @(~,evt) this.onBridgeEvent(evt));
             this.ColumnWidthBridge_.Layout.Row    = 4;
             this.ColumnWidthBridge_.Layout.Column = 1;
 
-            % Send the table tag to the bridge once it has loaded.  The
-            % bridge will not start observing until it receives this Init
-            % event, so there is no risk of it firing before the tag is set.
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
-                struct("tableTag", this.DisplayTableTag_));
+            % Do NOT call sendEventToHTMLSource here — the HTML page loads
+            % asynchronously, so setup() may not have run yet.  Instead the
+            % JS fires BridgeReady once setup() completes, and onBridgeEvent
+            % responds by sending Init at that point (see handshake below).
+        end
+
+        function onBridgeEvent(this, evt)
+            % Central dispatcher for all events from the bridge HTML.
+            switch evt.HTMLEventName
+
+                case "BridgeReady"
+                    % JS setup() has completed — now it is safe to send Init.
+                    % This fixes the race condition where sendEventToHTMLSource
+                    % was called before the JS addEventListener was registered.
+                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
+                        struct("tableTag", this.DisplayTableTag_));
+
+                case "BridgeDiag"
+                    % Diagnostic event — print to the command window so we can
+                    % trace the bridge state without needing browser dev-tools.
+                    fprintf("[ColumnWidthBridge] %s: %s\n", ...
+                        evt.HTMLEventData.stage, evt.HTMLEventData.detail);
+
+                case "ColumnWidthChanged"
+                    this.onColumnWidthChanged(evt);
+
+            end
         end
 
         function onColumnWidthChanged(this, evt)
-            % Called by the bridge when the user finishes dragging a column
-            % divider.  evt.HTMLEventData.widths is a numeric row vector of
-            % pixel widths for the currently visible columns.
+            % Called when the user finishes dragging a column divider.
+            % evt.HTMLEventData.widths is a numeric row vector of pixel widths
+            % for the currently visible columns.
 
-            if ~strcmp(evt.HTMLEventName, "ColumnWidthChanged")
-                return
-            end
-
-            % Ignore events that were triggered by our own programmatic
-            % width updates (applyColumnWidthToDisplay sets this flag).
+            % Ignore events triggered by our own programmatic width updates.
             if this.IsPushingWidthToDisplay_
                 return
             end
