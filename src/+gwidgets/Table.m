@@ -1624,3 +1624,1037 @@ classdef Table < gwidgets.internal.Reparentable
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
 
+                case "ColumnWidthChanged"
+                    this.onColumnWidthChanged(d.widths);
+
+            end
+        end
+
+        function onColumnWidthChanged(this, pixelWidths)
+            % Called when the user finishes dragging a column divider.
+            % pixelWidths is a numeric row vector of pixel widths for the
+            % currently visible columns.
+
+            if this.IsPushingWidthToDisplay_
+                return
+            end
+
+            nVisible = sum(this.ColumnVisible);
+            if numel(pixelWidths) ~= nVisible
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
+                return
+            end
+
+            dataWidths = this.DataColumnWidth;
+            dataWidths(this.ColumnVisible) = num2cell(pixelWidths);
+            this.DataColumnWidth_ = dataWidths;
+        end
+
+    end
+
+    % Selection manipulation
+    methods (Access = protected)
+
+        function clearSelection(this)
+            switch this.SelectionType
+                case "cell"
+                    this.Selection_ = zeros(0,2);
+                otherwise
+                    this.Selection_ = zeros(1,0);
+            end
+        end
+
+        function dataIdxs =  displaySelectionToDataSelection(this, visibleIdxs, type)
+            % displaySelectionToDataSelection Maps display selection to
+            %   data selection
+            arguments
+                this
+                visibleIdxs
+                type (1,1) string {mustBeMember(type, ["cell", "row", "column"])} = this.SelectionType
+            end
+            if isempty(visibleIdxs)
+                dataIdxs = visibleIdxs;
+                return
+            end
+
+            switch type
+                case "cell"
+                    rowIdxs = visibleIdxs(:,1);
+                    colIdxs = visibleIdxs(:,2);
+                case "row"
+                    rowIdxs = visibleIdxs;
+                    colIdxs = zeros(size(rowIdxs));
+                case "column"
+                    colIdxs = visibleIdxs;
+                    rowIdxs = zeros(size(colIdxs));
+                otherwise
+                    error("Selection must be a matrix with two columns for cell selection, or a row vector for column/row selection")
+            end
+
+            % Map rows
+            if ~any(ismissing(rowIdxs)) && any(rowIdxs ~= 0)
+                rowIdxs = this.FoldedVisibleToDataMap(rowIdxs)';
+                noDataIdx = ismissing(rowIdxs);
+
+                rowIdxs(noDataIdx) = NaN;
+                colIdxs(noDataIdx) = NaN;
+            end
+
+            % Map columns
+            % Remove hidden and group columns, reorder if necessary
+            visibleCols = this.VisibleColumnNames;
+            visibleCols(ismember(visibleCols, this.GroupingVariable)) = [];
+            dataCols = this.DataColumnNames;
+
+            for i = 1:numel(colIdxs)
+                colIdx = colIdxs(i);
+                if ~ismissing(colIdx) && colIdx ~= 0
+                    thisCol = visibleCols(colIdx);
+                    idx = find(dataCols == thisCol, 1);
+                    if isempty(idx)
+                        idx = NaN;
+                    end
+                    colIdxs(i) = idx;
+                end
+            end
+
+            % Remove missing selection
+            colIdxs = reshape(colIdxs, [], 1);
+            rowIdxs = reshape(rowIdxs, [], 1);
+            idx = ismissing(rowIdxs) | ismissing(colIdxs);
+            rowIdxs(idx) = [];
+            colIdxs(idx) = [];
+
+            switch type
+                case "cell"
+                    rowIdxs = reshape(rowIdxs, [], 1);
+                    colIdxs = reshape(colIdxs, [], 1);
+                    dataIdxs = [rowIdxs, colIdxs];
+                    if isempty(dataIdxs)
+                        dataIdxs = zeros(0,2);
+                    end
+                case "row"
+                    dataIdxs = reshape(rowIdxs, 1, []);
+                    dataIdxs(dataIdxs==0) = [];
+                case "column"
+                    dataIdxs = reshape(colIdxs, 1, []);
+                    dataIdxs(dataIdxs==0) = [];
+            end
+
+        end
+
+        function visibleIdxs = dataSelectionToDisplaySelection(this, dataIdxs, type)
+            % dataSelectionToDisplaySelection Maps data selection to
+            %   display selection
+            arguments
+                this
+                dataIdxs
+                type (1,1) string {mustBeMember(type, ["cell", "row", "column", "table"])} = this.SelectionType
+            end
+
+            if isempty(dataIdxs)
+                visibleIdxs = dataIdxs;
+                return
+            end
+
+            switch type
+                case "cell"
+                    rowIdxs = dataIdxs(:,1)';
+                    colIdxs = dataIdxs(:,2)';
+                case "row"
+                    assert(isvector(dataIdxs), "GraphicsWidgets:Table:IncorrectSelectionSize", ...
+                        "Selection must be a vector for row selection");
+                    rowIdxs = reshape(dataIdxs, 1, []);
+                    colIdxs = zeros(size(rowIdxs));
+                case "column"
+                    assert(isvector(dataIdxs), "GraphicsWidgets:Table:IncorrectSelectionSize", ...
+                        "Selection must be a vector for column selection");
+                    colIdxs = reshape(dataIdxs, 1, []);
+                    rowIdxs = zeros(size(colIdxs));
+            end
+
+            % Check for out of range indices
+            rowsInRange = all(rowIdxs >= 1 & rowIdxs <= numel(this.FilteredDataToVisibleMap));
+            colsInRange = all(colIdxs >= 1 & colIdxs <= size(this.Data_, 2));
+
+            checkRowsInRange = type ~= "column" && ~any(ismissing(rowIdxs));
+            checkColsInRange = type ~= "row" && ~any(ismissing(colIdxs));
+
+            if (checkRowsInRange && ~rowsInRange) ...
+                    || (checkColsInRange && ~colsInRange)
+                error("GraphicsWidgets:Table:SelectionOutOfRange", ...
+                    "Selection outside data range");
+            elseif isempty(this.FoldedDataToVisibleMap)
+                % Map not yet initialized - table not rendered yet
+                % Return empty with correct dimensions
+                switch type
+                    case "cell"
+                        visibleIdxs = zeros(0,2);
+                    case "row"
+                        visibleIdxs = zeros(1,0);
+                    case "column"
+                        % No change needed as columns not affected by
+                        % folding
+                        visibleIdxs = colIdxs;
+                end
+            else
+                % Map rows
+                if ~any(ismissing(rowIdxs)) && any(rowIdxs ~= 0)
+                    rowIdxs = this.FoldedDataToVisibleMap(rowIdxs);
+                    noDataIdxs = ismissing(rowIdxs);
+                    colIdxs(noDataIdxs) = [];
+                    rowIdxs(noDataIdxs) = [];
+                end
+
+                % Map columns
+                % Remove hidden and group columns, reorder if necessary
+                visibleCols = this.VisibleDataColumnNames;
+                visibleCols(ismember(visibleCols, this.GroupingVariable)) = [];
+                dataCols = this.DataColumnNames;
+                for i = 1:numel(colIdxs)
+                    colIdx = colIdxs(i);
+                    if ~ismissing(colIdx) && colIdx ~= 0
+                        thisCol = dataCols(colIdx);
+                        matchingColIdx = find(visibleCols == thisCol,1);
+                        if isempty(matchingColIdx)
+                            matchingColIdx = NaN;
+                        end
+                        colIdxs(i) = matchingColIdx;
+                    end
+                end
+
+                % Remove missing selection
+                idx = ismissing(rowIdxs) | ismissing(colIdxs);
+                rowIdxs(idx) = [];
+                colIdxs(idx) = [];
+
+                switch type
+                    case "cell"
+                        rowIdxs = reshape(rowIdxs, [], 1);
+                        colIdxs = reshape(colIdxs, [], 1);
+                        visibleIdxs = [rowIdxs, colIdxs];
+                        if isempty(visibleIdxs)
+                            visibleIdxs = zeros(0,2);
+                        end
+                    case "row"
+                        visibleIdxs = rowIdxs;
+                        visibleIdxs(visibleIdxs==0) = [];
+                        if isempty(visibleIdxs)
+                            visibleIdxs = zeros(1,0);
+                        end
+                    case "column"
+                        visibleIdxs = colIdxs;
+                        visibleIdxs(visibleIdxs==0) = [];
+                        if isempty(visibleIdxs)
+                            visibleIdxs = zeros(1,0);
+                        end
+                end
+
+            end
+
+        end
+
+        function refreshVisibleSelection(this)
+            % Only update DisplayTable if it exists and table is initialized
+            if isempty(this.DisplayTable) || isempty(this.FoldedDataToVisibleMap)
+                return
+            end
+
+            selection = this.Selection_;
+            if this.SelectionMode == "Data"
+                selection = this.dataSelectionToDisplaySelection(selection);
+            end
+
+            % Set flag to prevent callback recursion
+            this.IsSettingSelectionProgrammatically = true;
+            try
+                this.DisplayTable.Selection = selection;
+            catch ME
+                % May fail if the data has changed shape so the selection
+                % is not longer valid
+                this.DisplayTable.Selection = [];
+            end
+            this.IsSettingSelectionProgrammatically = false;
+
+            this.forceRefresh();
+        end
+
+    end
+
+    % Graphical update
+    methods (Access = protected)
+
+        function update(~)
+            % We do all the updating manually
+        end
+
+        function doUpdateSequence(this, nvp)
+            arguments
+                this
+                nvp.StartFrom (1,1) string {mustBeMember(nvp.StartFrom, ["Filtering", "Grouping", "Sorting", "Folding", "Display", "Style", "Interaction", "Skip"])} = "Filtering"
+            end
+
+            updating = false;
+            if nvp.StartFrom == "Filtering" || updating
+                this.updateFiltering();
+                updating = true;
+            end
+
+            if nvp.StartFrom == "Grouping" || updating
+                this.updateGrouping();
+                updating = true;
+            end
+
+            if nvp.StartFrom == "Sorting" || updating
+                this.updateSorting();
+                updating = true;
+            end
+
+            if nvp.StartFrom == "Folding" || updating
+                this.updateFolding();
+                updating = true;
+            end
+
+            if nvp.StartFrom == "Display" || updating
+                this.updateDisplayData();
+                updating = true;
+            end
+
+            if nvp.StartFrom == "Style" || updating
+                this.updateStyle();
+                updating = true;
+            end
+
+            if nvp.StartFrom == "Interaction" || updating
+                this.updateInteraction();
+                %updating = true;
+            end
+
+            this.forceRefresh();
+        end
+
+        function addContextMenu(this)
+
+            % Save the custom context menu items
+            for i = 1:numel(this.CustomContextMenuItems)
+                [this.CustomContextMenuItems.Parent] = deal([]);
+                [this.CustomContextMenuItems.Tag] = deal("GWidgetsTableContextMenu");
+            end
+
+            % Delete the existing context menu and remake it to all changes
+            % in state
+            if ~isempty(this.ContextMenu) && isvalid(this.ContextMenu)
+                delete(this.ContextMenu);
+            end
+
+            fh = ancestor(this.DisplayTable, "figure");
+            this.ContextMenu = uicontextmenu("Parent", fh, "Tag", "GWidgetsTableContextMenu");
+
+            if this.HasChangeGroupingVariable || this.HasToggleShowEmptyGroups
+                m = uimenu("Parent", this.ContextMenu, "Text", "Grouping", "Tag", "GWidgetsTableContextMenu");
+                if this.HasChangeGroupingVariable
+                    uimenu("Parent", m, "Text", "Group", "MenuSelectedFcn", @(s,e) this.onGroupByRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                    uimenu("Parent", m, "Text", "Ungroup", "MenuSelectedFcn", @(s,e) this.onUngroupByRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                end
+                if this.HasToggleShowEmptyGroups
+                    uimenu("Parent", m, "Text", "Show/hide empty groups", "MenuSelectedFcn", @(s,e) this.onToggleShowEmptyGroupsRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                end
+            end
+
+            if this.HasColumnSorting && any(this.ColumnSortable)
+                m = uimenu("Parent", this.ContextMenu, "Text", "Sort", "Tag", "GWidgetsTableContextMenu");
+                uimenu("Parent", m, "Text", "Ascending", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "Ascend"), "Tag", "GWidgetsTableContextMenu");
+                uimenu("Parent", m, "Text", "Descending", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "Descend"), "Tag", "GWidgetsTableContextMenu");
+                uimenu("Parent", m, "Text", "None", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "None"), "Tag", "GWidgetsTableContextMenu");
+            end
+
+            if numel(this.SupportedSelectionTypes) > 1
+                m = uimenu("Parent", this.ContextMenu, "Text", "Selection Mode", "Tag", "GWidgetsTableContextMenu");
+                if contains("cell", this.SupportedSelectionTypes)
+                    uimenu("Parent", m, "Text", "Cell", "MenuSelectedFcn", @(s,e) this.onCellSelectionRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                end
+
+                if contains("row", this.SupportedSelectionTypes)
+                    uimenu("Parent", m, "Text", "Row", "MenuSelectedFcn", @(s,e) this.onRowSelectionRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                end
+
+                if contains("column", this.SupportedSelectionTypes)
+                    uimenu("Parent", m, "Text", "Column", "MenuSelectedFcn", @(s,e) this.onColumnSelectionRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                end
+            end
+
+            if this.HasToggleFilter
+                uimenu("Parent", this.ContextMenu, "Text", "Show/hide row filter", "MenuSelectedFcn", @(s,e) this.onToggleRowFilterRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+            end
+
+            for i = 1:numel(this.CustomContextMenuItems)
+                this.CustomContextMenuItems(i).Parent = this.ContextMenu;
+            end
+
+            this.DisplayTable.ContextMenu = this.ContextMenu;
+
+        end
+
+        function reparentContextMenu(this)
+            fh = ancestor(this, "figure");
+            this.ContextMenu.Parent = fh;
+        end
+
+        function updateGroupLabel(this)
+
+            nGroups = numel(this.Groups);
+            nGroupsVisible = numel(this.VisibleGroupHeaderRowIdx);
+
+            % Replace each grouping variable name with its alias, then join
+            groupingVariableName = strjoin(this.translateNames(this.GroupingVariable_), "|");
+            if isempty(groupingVariableName)
+                groupingVariableName = "";
+            end
+
+            if nGroups == nGroupsVisible
+                this.GroupLabel.Text = "Group: " + groupingVariableName + " (" + nGroups + " groups)";
+            else
+                this.GroupLabel.Text = "Group: " + groupingVariableName + " (" + nGroupsVisible + "/" + nGroups + " groups visible)";
+            end
+
+            if groupingVariableName == ""
+                this.Grid.RowHeight{2} = 0;
+            else
+                this.Grid.RowHeight{2} = "fit";
+            end
+        end
+
+        function forceRefresh(~)
+            % Force a refresh
+            pause(0);
+            drawnow limitrate
+        end
+    end
+
+    % Filtering update
+    methods (Access = protected)
+
+        function updateFiltering(this)
+
+            data = this.Data_;
+
+            % Filter based on aliases - lengths can be assumed to be
+            % correct due to set methods
+            if ~isempty(this.ColumnNames)
+                data.Properties.VariableNames = this.ColumnNames;
+            end
+            [data, idx] = this.FilterController.applyFilter(data, this.Filter);
+
+            % Underlying data should use actual data names
+            data.Properties.VariableNames = this.DataColumnNames;
+
+            % Keep track of the mapping to simplify selection mappings
+            this.FilteredVisibleToDataMap = find(idx);
+            tmp = cumsum(idx);
+            tmp(~idx) = NaN;
+            this.FilteredDataToVisibleMap = tmp;
+
+            this.FilteredData = data;
+            this.RowFilterIndices = idx;
+
+        end
+
+    end
+
+    % Grouping update
+    methods (Access = protected)
+
+        function updateGrouping(this)
+            if isempty(this.GroupingVariable)
+                this.GroupedVisibleData = table2cell(this.FilteredData);
+                this.GroupedDataVariables = string(this.FilteredData.Properties.VariableNames);
+                this.Groups = string.empty(1,0);
+                this.GroupHeaderRowIdx = zeros(1,0);
+                this.GroupColumnIdx = zeros(1,0);
+                this.GroupFilteredCount = zeros(1,0);
+                this.GroupIdxs = zeros(1,0);
+
+                this.GroupedDataToVisibleMap = this.FilteredDataToVisibleMap;
+                this.GroupedVisibleToDataMap = this.FilteredVisibleToDataMap;
+            else
+                g = this.GroupingVariable;
+                this.GroupColumnIdx = ismember(this.Data_.Properties.VariableNames, g);
+
+                if numel(g) > 1
+                    allGroupVars = arrayfun(@(x) this.Data_.(x), g, "UniformOutput", false);
+                    allGroupVars = cellfun(@(x) string(x), allGroupVars, 'UniformOutput', false);
+                    allGroupVars = join([allGroupVars{:}], "|", 2);
+                else
+                    % Use all data so filtered groups are known
+                    allGroupVars = this.Data_.(g);
+                end
+
+                if isempty(allGroupVars)
+                    groupIdxs = zeros(1,0);
+                    allGroups = allGroupVars;
+                else
+                    [groupIdxs, allGroups] = findgroups(allGroupVars);
+                end
+
+                this.Groups = allGroups;
+                this.GroupIdxs = groupIdxs;
+
+                if numel(g) > 1
+                    filteredGroupVars = arrayfun(@(x) this.FilteredData.(x), g, "UniformOutput", false);
+                    filteredGroupVars = cellfun(@(x) string(x), filteredGroupVars, 'UniformOutput', false);
+                    filteredGroupVars = join([filteredGroupVars{:}], "|", 2);
+                else
+                    filteredGroupVars = this.FilteredData.(g);
+                end
+
+                tmpData = this.FilteredData;
+
+                idx = ismember(tmpData.Properties.VariableNames, g);
+                groupedDataVariables = string(tmpData.Properties.VariableNames(~idx));
+                tmpData(:, idx) = []; % Remove the group column
+                tmpData = table2cell(tmpData); % Create cell so can manipulate fully
+
+                groupedData = cell(1, 2*numel(allGroups));
+                headerIdx = false(0,1);
+                groupTotalCounts = zeros(0,1);
+                groupFilteredCount = zeros(0,1);
+
+                data2visible = this.FilteredDataToVisibleMap;
+                d2v = find(~ismissing(data2visible));
+                visible2data = this.FilteredVisibleToDataMap;
+                updatedVisible2data = NaN(1, numel(allGroups) + height(tmpData));
+
+                nVisibleRows = 0;
+
+                for i = 1:numel(allGroups)
+                    thisGroup = allGroups(i);
+
+                    thisGroupMemberIdx = ismember(filteredGroupVars, thisGroup);
+                    nInGroup = nnz(thisGroupMemberIdx);
+                    thisGroupDisp = tmpData(thisGroupMemberIdx, :);
+
+                    % Mapping from data to visible rows
+                    nVisibleRows = nVisibleRows + 1; % Row header
+                    visibleRowIdxs = nVisibleRows + (1:nInGroup);
+                    data2visible(d2v(thisGroupMemberIdx)) = visibleRowIdxs;
+
+                    % Mapping from visible to data rows
+                    updatedVisible2data((nVisibleRows+1):(nVisibleRows+nInGroup)) = visible2data(thisGroupMemberIdx);
+                    nVisibleRows = nVisibleRows + nInGroup;
+
+                    % Add the "visible/total" to the group heading
+                    allIdx = ismember(allGroupVars, thisGroup);
+                    nAll = nnz(allIdx);
+
+                    thisGroupHeading = cell(1, size(thisGroupDisp, 2));
+                    thisGroupHeading{1} = string(thisGroup) + " (" + nInGroup + "/" + nAll + ")";
+                    thisGroupData = tmpData(thisGroupMemberIdx, :);
+
+                    % Keep track of the number of items in each group
+                    groupFilteredCount = [groupFilteredCount; nInGroup]; %#ok<AGROW>
+                    if size(thisGroupData, 2) == 0
+                        % No columns except group column so no rows to show
+                        nInGroup = 0;
+                    end
+
+                    % Add to a running total of all the groups + their
+                    % heading row
+                    groupedData{2*i-1} = thisGroupHeading;
+                    groupedData{2*i} = thisGroupData;
+
+                    headerIdx = [headerIdx, true, false(1, nInGroup)]; %#ok<AGROW>
+                    groupTotalCounts = [groupTotalCounts; nAll]; %#ok<AGROW>
+                end
+
+                groupedData = vertcat(groupedData{:});
+
+                if isempty(groupedData)
+                    % Ensure the grouped data has the correct number of
+                    % columns
+                    groupedData = tmpData;
+                end
+
+                this.GroupedVisibleData = groupedData;
+                this.GroupedDataVariables = groupedDataVariables;
+
+                this.GroupHeaderRowIdx = find(headerIdx);
+                this.GroupFilteredCount = groupFilteredCount;
+
+                this.GroupedDataToVisibleMap = data2visible;
+                this.GroupedVisibleToDataMap = updatedVisible2data;
+
+            end
+
+        end
+
+        function updateFolding(this)
+
+            groupedData = this.SortedVisibleData;
+            idxsHeaderRow = this.SortedGroupHeaderRowIdx;
+            idxHeading = [this.SortedGroupHeaderRowIdx, height(groupedData)+1];
+
+            idxVisibleHeaderRowMask = false(1, size(groupedData, 1));
+            idxVisibleHeaderRowMask(idxsHeaderRow) = true;
+
+            visRowToRemove = false(1,height(groupedData));
+
+            this.DisplayGroups = this.SortedGroupValues;
+
+            hiddenGroups = string.empty(1,0);
+            for i = numel(idxsHeaderRow):-1:1
+
+                thisGroup = this.DisplayGroups(i);
+                idxHeaderRow = idxsHeaderRow(i);
+                idxGroupData = (idxHeading(i) + 1):(idxHeading(i+1)-1);
+
+                isHidden = (~this.ShowEmptyGroups && this.GroupFilteredCount(i) == 0);
+
+                if ~isHidden && ~ismember(thisGroup, this.OpenGroups)
+                    % Group is closed, so update the header to show it is
+                    % closed and removed the rows corresponding to the group
+                    groupedData{idxHeaderRow, 1} = "⮞ " + groupedData{idxHeaderRow, 1};
+                    visRowToRemove(idxGroupData) = true;
+
+                elseif ~isHidden
+                    % Group is open, so update the header to show it is
+                    % open
+                    groupedData{idxHeaderRow, 1} = "⮟ " + groupedData{idxHeaderRow, 1};
+                else
+                    % Group is hidden, so remove it from the view
+                    hiddenGroups = [hiddenGroups, thisGroup]; %#ok<AGROW>
+
+                    visRowToRemove(idxGroupData) = true;
+                    visRowToRemove(idxHeaderRow) = true;
+                    this.DisplayGroups(i) = [];
+                end
+
+            end
+
+            groupedData(visRowToRemove, :) = [];
+            idxVisibleHeaderRowMask(visRowToRemove) = [];
+
+            % Update visible to data map
+            visibleToDataMap = this.SortedVisibleToDataMap;
+            visibleToDataMap(visRowToRemove) = [];
+            this.FoldedVisibleToDataMap = visibleToDataMap;
+
+            % Update data to visible map
+            dataToVisibleMap = this.SortedDataToVisibleMap;
+            visRowToRemoveId = find(visRowToRemove); % Headers and groups to remove
+            dataToVisibleMap(ismember(dataToVisibleMap, visRowToRemoveId)) = NaN;
+
+            % Remove row counts from map when rows are hidden
+            if ~isempty(visRowToRemoveId)
+                dataToVisibleMap = dataToVisibleMap - sum(dataToVisibleMap > visRowToRemoveId', 1);
+            end
+
+            this.FoldedDataToVisibleMap = dataToVisibleMap;
+
+            vars = this.Data_.Properties.VariableNames;
+            vars(ismember(vars, this.GroupingVariable_)) = [];
+            if isempty(vars) && ~isempty(this.GroupingVariable)
+                % Only group column remains
+                vars = "Groups";
+                if size(groupedData, 2) == 0
+                    groupedData = num2cell(this.Groups)';
+                end
+
+            end
+
+            groupedData = cell2table(groupedData, VariableNames=vars);
+
+            this.VisibleData = groupedData;
+
+            this.UpdateManager.addSuppression("HiddenGroups", Times=1);
+            this.HiddenGroups = hiddenGroups;
+
+            this.VisibleGroupHeaderRowIdx = find(idxVisibleHeaderRowMask);
+
+            this.updateGroupLabel();
+
+        end
+
+    end
+
+    % Style updates
+    methods (Access = protected)
+
+        function updateStyle(this)
+            this.DisplayTable.removeStyle();
+
+            styles = [this.Styles, this.GroupHeaderStyle];
+
+            for i = 1:numel(styles)
+                thisStyle = styles(i);
+
+                style = thisStyle.Style;
+                target = thisStyle.Target;
+
+                index = thisStyle.indices(this);
+                if thisStyle.SelectionMode == gwidgets.internal.table.SelectionMode.Data
+                    index = this.dataSelectionToDisplaySelection(index, thisStyle.Target);
+                end
+                this.DisplayTable.addStyle(style, target, index);
+            end
+
+            this.forceRefresh();
+        end
+
+    end
+
+    % Internal callbacks
+    methods (Access = private)
+
+        function onCellClicked_(this, displayIdx)
+            arguments
+                this (1,1)
+                displayIdx (:,2) double % onCellClicked always sends row/col
+            end
+
+            % Deal with the group table
+            rowIdxs = unique(displayIdx(:,1));
+            this.toggleGroupOpenStateViaRowSelection(rowIdxs);
+        end
+
+        function onCellDoubleClicked_(this, displayIdx)
+            arguments
+                this (1,1) %#ok<INUSA>
+                displayIdx (:,2) double %#ok<INUSA> % onCellClicked always sends row/col
+            end
+            % Nothing to do - yet
+        end
+
+
+        function toggleGroupOpenStateViaRowSelection(this, rowIdx)
+            idxHeader = this.VisibleGroupHeaderRowIdx;
+            idxHeader = (idxHeader == rowIdx);
+            if any(idxHeader)
+                group = this.DisplayGroups(idxHeader);
+                if ismember(group, this.OpenGroups)
+                    this.OpenGroups(this.OpenGroups == group) = [];
+                else
+                    this.OpenGroups = [this.OpenGroups, group];
+                end
+            end
+        end
+
+        function onSelection_(this, displayIdx, selectionType)
+            arguments
+                this (1,1)
+                displayIdx (:,2) % onSelection always sends row/col
+                selectionType (1,1) string = this.SelectionType
+            end
+
+            % Skip if we're setting the selection programmatically
+            if this.IsSettingSelectionProgrammatically
+                return
+            end
+
+            % Update the display index to match the current selection type
+            switch selectionType
+                case "cell"
+                    if isempty(displayIdx)
+                        displayIdx = zeros(0,2);
+                    end
+                case "row"
+                    displayIdx = unique(displayIdx(:,1));
+                    displayIdx = reshape(displayIdx, 1, []);
+                case "column"
+                    displayIdx = unique(displayIdx(:,2));
+                    displayIdx = reshape(displayIdx, 1, []);
+            end
+
+            this.Selection_ = displayIdx;
+            this.SelectionMode = "Display";
+            this.refreshVisibleSelection();
+
+            % Enable/disable the categories button.
+            % Selection itself done via get/set methods on underlying table
+            if isempty(displayIdx)
+                showCats = false;
+            else
+                switch selectionType
+                    case "cell"
+                        colIdx = unique(displayIdx(:, 2));
+                    case "column"
+                        colIdx = displayIdx;
+                    case "row"
+                        colIdx = [];
+                end
+
+                if ~isscalar(colIdx)
+                    % No cats shown on multiple columns selected
+                    showCats = false;
+                else
+                    c = this.DisplayTable.Data{:, colIdx};
+                    showCats = iscategorical(c);
+                end
+            end
+
+            if showCats
+                this.FilterController.CategoricalVariables = categories(c);
+            else
+                this.FilterController.CategoricalVariables = [];
+            end
+
+        end
+
+        function onCellEdit_(this, displayIdx, value)
+            arguments
+                this (1,1)
+                displayIdx (:,2) % onCellEdit always sends row/col
+                value
+            end
+
+            dataIdx = this.displaySelectionToDataSelection(displayIdx, "cell");
+            this.Data_{dataIdx(1), dataIdx(2)} = value;
+
+            if this.UpdateManager.doRun("Filter")
+                this.doUpdateSequence(StartFrom="Filtering");
+            end
+
+        end
+
+    end
+
+    methods (Access = {?gwidgets.internal.WithWeakListeners})
+
+        function onFilterChanged(this, ~, ~)
+            if this.UpdateManager.doRun("Filter")
+                this.doUpdateSequence(StartFrom="Filtering");
+            end
+        end
+
+        function onFilterHelpRequested(this, ~, ~)
+            this.Grid.ColumnWidth = {"1x", "1x"};
+        end
+
+        function onFilterHelpClosed(this, ~, ~)
+            this.Grid.ColumnWidth = {"1x", 0};
+        end
+
+    end
+
+    methods (Access = {?matlab.unittest.TestCase, ?gwidgets.Table})
+
+        function onCellClicked(this, ~, e)
+            % Do internal cell clicked action
+            rowIdx = e.InteractionInformation.DisplayRow';
+            colIdx = e.InteractionInformation.DisplayColumn';
+
+            if ~isempty(rowIdx) % Row index is empty if column is clicked
+                displayIdx = [rowIdx, colIdx];
+                this.onCellClicked_(displayIdx);
+            else
+                displayIdx = zeros(0,2);
+            end
+
+            % Forward to user specified cell clicked function
+            if ~isempty(this.CellClickedCallback)
+                dataIdx = this.displaySelectionToDataSelection(displayIdx);
+                e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+                s = this;
+                this.CellClickedCallback(s, e);
+            end
+
+        end
+
+        function onCellDoubleClicked(this, ~, e)
+
+            % Do internal cell clicked action
+            rowIdx = e.InteractionInformation.DisplayRow';
+            colIdx = e.InteractionInformation.DisplayColumn';
+
+            if ~isempty(rowIdx) % Row index is empty if column is clicked
+                displayIdx = [rowIdx, colIdx];
+                this.onCellDoubleClicked_(displayIdx);
+            else
+                displayIdx = zeros(0,2);
+            end
+
+            % Forward to user specified cell clicked function
+            if ~isempty(this.CellDoubleClickCallback)
+                dataIdx = this.displaySelectionToDataSelection(displayIdx);
+                e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+                s = this;
+                this.CellDoubleClickCallback(s, e);
+            end
+
+        end
+
+        function onSelection(this, s, e)
+            % Do internal selection action
+            displayIdx = e.Indices;
+            this.onSelection_(displayIdx, s.SelectionType);
+
+            % Forward to custom selection callback
+            if ~isempty(this.CellSelectionCallback)
+                dataIdx = this.displaySelectionToDataSelection(displayIdx, "cell"); % Cell interaction always expectes two columns
+                e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+                s = this;
+                this.CellSelectionCallback(s, e);
+            end
+
+        end
+
+        function onCellEdit(this, ~, e)
+
+            % Do internal cell edit
+            displayIdx = e.Indices;
+            this.onCellEdit_(displayIdx, e.NewData);
+
+            % Forward to custom cell edit callback
+            if ~isempty(this.CellEditCallback)
+                dataIdx = this.displaySelectionToDataSelection(displayIdx, "cell");
+                editData = gwidgets.internal.table.CellEditData(e, dataIdx);
+                s = this;
+                this.CellEditCallback(s, editData);
+            end
+
+        end
+
+        function onDisplayDataChanged(this, s, e)
+
+            if e.Interaction == "sort"
+
+                newSortColumn = e.InteractionVariable;
+                currentSortColumn = this.SortByColumn;
+
+                this.UpdateManager.addSuppression("SortDirection", Times=1);
+                if newSortColumn == currentSortColumn
+                    if this.SortDirection == "None"
+                        this.SortDirection = "Ascend";
+                    elseif this.SortDirection == "Ascend"
+                        this.SortDirection = "Descend";
+                    else
+                        this.SortDirection = "None";
+                    end
+                else
+                    this.SortDirection = "Ascend";
+                end
+
+                this.SortByColumn = e.InteractionVariable;
+            end
+
+            % Forward to custom cell edit callback
+            if ~isempty(this.DisplayDataChangedCallback)
+                this.DisplayDataChangedCallback(s, e);
+            end
+
+        end
+
+        function onUngroupByRequest(this, ~, ~)
+            this.clearSelection();
+            this.GroupingVariable = string.empty(1,0);
+        end
+
+        function onGroupByRequest(this, ~, e)
+
+            if ~isempty(this.DisplaySelection)
+                if this.SelectionType == "cell"
+                    columnIdx = unique(this.DisplaySelection(:, 2));
+                elseif this.SelectionType == "column"
+                    columnIdx = this.DisplaySelection;
+                else
+                    columnIdx = e.InteractionInformation.DisplayColumn;
+                end
+            else
+                columnIdx = e.InteractionInformation.DisplayColumn;
+            end
+
+            % Convert from alias back to underlying data for grouping
+            % TODO: Make util for this
+            groupingVariable = string(this.DisplayTable.Data.Properties.VariableNames(columnIdx));
+            idx = find(ismember(this.ColumnNames, groupingVariable));
+            groupingVariable = string(this.Data_.Properties.VariableNames(idx));
+
+            if isempty(groupingVariable)
+                groupingVariable = string.empty(1,0);
+            end
+
+            this.clearSelection();
+            try
+                this.GroupingVariable = groupingVariable;
+            catch me
+                this.GroupingVariable = string.empty(1,0);
+            end
+        end
+
+    end
+
+    % Context menu callbacks
+    methods (Access = private)
+
+        function onCellSelectionRequest(this, ~, ~)
+            this.SelectionType = "cell";
+            this.clearSelection();
+        end
+
+        function onRowSelectionRequest(this, ~, ~)
+            this.SelectionType = "row";
+            this.clearSelection();
+        end
+
+        function onColumnSelectionRequest(this, ~, ~)
+            this.SelectionType = "column";
+            this.clearSelection();
+        end
+
+        function onToggleRowFilterRequest(this, ~, ~)
+            this.ShowRowFilter = ~this.ShowRowFilter;
+        end
+
+        function onToggleShowEmptyGroupsRequest(this, ~, ~)
+            this.ShowEmptyGroups = ~this.ShowEmptyGroups;
+        end
+
+        function onSortByRequest(this, s, e, direction)
+
+            this.UpdateManager.addSuppression("SortDirection", Times=1);
+            this.SortDirection = direction;
+
+            if ismember(e.InteractionInformation.DisplayRow, this.VisibleGroupHeaderRowIdx)
+                % Sort groups by sorting on group row
+                % TODO: Sort groups and columns
+                vars = this.GroupingVariable;
+            else
+
+                if this.SelectionType == "cell"
+                    colIdx = unique(this.DisplaySelection(:,2));
+                elseif this.SelectionType == "column"
+                    colIdx = unique(this.DisplaySelection);
+                else
+                    % Allow sorting by at least one column when using row
+                    % selection
+                    colIdx = e.InteractionInformation.DisplayColumn;
+                end
+
+                vars = this.GroupedDataVariables(colIdx);
+
+            end
+
+            this.SortByColumn = vars;
+
+        end
+
+    end
+
+    methods (Static, Access = private)
+
+        function val = normalizeColumnWidths(val)
+            % Accept numeric arrays, string arrays, char, or cell.
+            % Returns a cell array (or empty cell if input was empty).
+            if isempty(val)
+                val = {};
+            elseif ~iscell(val)
+                if isnumeric(val)
+                    val = num2cell(val);
+                else
+                    val = cellstr(val);
+                end
+            end
+        end
+
+    end
+
+end
