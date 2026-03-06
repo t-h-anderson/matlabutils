@@ -17,6 +17,7 @@
   var debounceTimer     = null;
   var paused            = false;
   var autoMode          = false;
+  var allPixelMode      = false;  // true only when ALL columns are pixel (no nx/auto)
   var echoSuppressUntil = 0;
   var tableTag          = null;
   var htmlComponent     = null;
@@ -187,7 +188,8 @@
     var allPixel = widths.every(function(w) { return w >= 0; });
     var allAuto  = widths.every(function(w) { return w <  0; });
 
-    autoMode = allAuto;
+    autoMode     = allAuto;
+    allPixelMode = allPixel;
     // Track which columns are nx/auto vs pixel for window-resize detection.
     // Save previous flags so we only remove constraints for columns that WE stamped
     // with pixel values; if a column was already nx/auto, MATLAB manages its own
@@ -380,11 +382,10 @@
     bridgeLog("[Bridge] " + ts() + " syncBodyWithHeader(" + label + "): body BEFORE: " +
               bodyCellStyleStr(bodyTable, cols.length));
 
-    // Only pin the body table to an explicit pixel width in non-autoMode.
-    // In autoMode (all nx/auto columns), the table is proportionally sized by MATLAB
-    // and must stay fluid (percentage-based).  Locking it to a pixel width here would
-    // cause a horizontal scrollbar whenever the window later shrinks below that value.
-    if (headerTable && !autoMode) {
+    // Only pin the body table to an explicit pixel width in allPixelMode.
+    // In autoMode or mixed mode, at least one column is proportional so the table
+    // is fluid — locking it to a pixel width would cause horizontal scroll on resize.
+    if (headerTable && allPixelMode) {
       var hTableWidth = Math.round(headerTable.getBoundingClientRect().width);
       bodyTable.style.width    = hTableWidth + "px";
       bodyTable.style.minWidth = hTableWidth + "px";
@@ -564,8 +565,10 @@
     lastKnownWidths = widths;                   // update baseline for next comparison
 
     bridgeLog("[Bridge] " + ts() + " publishWidths: PUBLISH widths=[" + widths.join(", ") + "]" +
+              " prevW=[" + (prevW ? prevW.join(",") : "null") + "]" +
               " changed=[" + changedIdxs.join(",") + "]" +
-              " autoMode=" + autoMode +
+              " colFlags=[" + colFlags.map(function(f) { return f ? "A" : "P"; }).join(",") + "]" +
+              " autoMode=" + autoMode + " allPixelMode=" + allPixelMode +
               " headerTable=" + tableStyleStr(headerTable));
     bridgeLog("[Bridge] " + ts() + " publishWidths: body BEFORE: " +
               bodyCellStyleStr(bodyTable, cols.length));
@@ -612,10 +615,28 @@
       }
 
       // Opposing changes → drag with space redistribution.
-      // Dragged column = minority direction (fewer cols), largest absolute change.
-      // Strict < so tied counts (1 grows, 1 shrinks) pick the SHRINKING column,
-      // matching the semantic "the constrained column becomes pixel".
-      var minority = posIdxs.length < negIdxs.length ? posIdxs : negIdxs;
+      // Identify the dragged column:
+      //   1. If one direction is all-pixel cols and the other is all-auto/nx cols,
+      //      the PIXEL side is the dragged side (user resized an explicit column;
+      //      the auto col just absorbed the change proportionally).
+      //   2. Otherwise use strict minority (fewer cols); tied counts pick the
+      //      SHRINKING side — "the constrained column becomes pixel".
+      var allPosAuto  = posIdxs.every(function(i) { return  colFlags[i]; });
+      var allNegAuto  = negIdxs.every(function(i) { return  colFlags[i]; });
+      var allPosPixel = posIdxs.every(function(i) { return !colFlags[i]; });
+      var allNegPixel = negIdxs.every(function(i) { return !colFlags[i]; });
+      var minority;
+      if (allPosPixel && allNegAuto) {
+        minority = posIdxs;  // pixel growing, auto shrinking → pixel col is dragged
+      } else if (allNegPixel && allPosAuto) {
+        minority = negIdxs;  // pixel shrinking, auto growing → pixel col is dragged
+      } else {
+        minority = posIdxs.length < negIdxs.length ? posIdxs : negIdxs;
+      }
+      bridgeLog("[Bridge] " + ts() + " publishWidths: mixed-mode drag decision:" +
+                " posIdxs=[" + posIdxs.join(",") + "] allPosPixel=" + allPosPixel + " allPosAuto=" + allPosAuto +
+                " negIdxs=[" + negIdxs.join(",") + "] allNegPixel=" + allNegPixel + " allNegAuto=" + allNegAuto +
+                " minority=[" + minority.join(",") + "]");
       var dragIdx = minority.reduce(function(best, i) {
         return Math.abs(widths[i] - prevW[i]) > Math.abs(widths[best] - prevW[best]) ? i : best;
       }, minority[0]);
@@ -654,6 +675,36 @@
     }
 
     // changedIdxs.length is 0 or 1 — single-column or no-op path.
+
+    // Special case: single auto/nx column changed → window resize of proportional col.
+    // The pixel cols are constrained (min=max) so they didn't change.
+    // Suppress MATLAB notification (it already holds the correct nx weight).
+    if (changedIdxs.length === 1 && colFlags[changedIdxs[0]]) {
+      // Stamp pixel cols only; leave auto col unstamped in header.
+      for (var i = 0; i < cols.length; i++) {
+        if (!colFlags[i]) {
+          cols[i].style.minWidth = widths[i] + "px";
+          cols[i].style.maxWidth = widths[i] + "px";
+        }
+      }
+      // Update body cells for virtual-scroll accuracy.
+      if (bodyTable) {
+        var bodyRowsS = bodyTable.querySelectorAll("tr");
+        for (var rS = 0; rS < bodyRowsS.length; rS++) {
+          var cellsS = bodyRowsS[rS].querySelectorAll("td");
+          for (var ciS = 0; ciS < cellsS.length && ciS < widths.length; ciS++) {
+            cellsS[ciS].style.minWidth = widths[ciS] + "px";
+            cellsS[ciS].style.maxWidth = widths[ciS] + "px";
+          }
+        }
+        bridgeLog("[Bridge] " + ts() + " publishWidths: body AFTER: " +
+                  bodyCellStyleStr(bodyTable, cols.length));
+      }
+      bridgeLog("[Bridge] " + ts() + " publishWidths: mixed single-auto window-resize" +
+                " col=" + changedIdxs[0] + " — suppressed");
+      return;
+    }
+
     // Stamp header: pixel cols + any dragged col; leave other nx cols unstyled.
     for (var i = 0; i < cols.length; i++) {
       if (!colFlags[i] || changedIdxs.indexOf(i) >= 0) {
