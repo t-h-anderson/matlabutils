@@ -233,15 +233,13 @@
               " table=" + tableStyleStr(headerTable) +
               " cols=" + colWidthsFromDOM(cols).join(","));
 
-    // --- Fixed-offset calculation for all-pixel table width ---
-    var fixedOffset = 0;
-    if (headerTable && allPixel) {
-      var currentColTotal = 0;
-      for (var i = 0; i < cols.length; i++) currentColTotal += cols[i].getBoundingClientRect().width;
-      fixedOffset = Math.round(headerTable.getBoundingClientRect().width - currentColTotal);
-    }
-
     // --- Apply header col constraints ---
+    // NOTE: we intentionally do NOT derive a fixedOffset from the current
+    // headerTable.getBoundingClientRect() because that value can be stale (the
+    // previous allPixel SetWidths may have stamped a different px width onto
+    // the table element).  The header table width should equal exactly the sum
+    // of column widths — the scrollbar lives outside both tables in MATLAB's
+    // uitable layout.
     var newColTotal = 0;
     for (var i = 0; i < cols.length; i++) {
       if (widths[i] < 0) {
@@ -258,10 +256,9 @@
     }
     if (headerTable) {
       if (allPixel) {
-        var newTableWidth = Math.round(newColTotal + fixedOffset);
-        headerTable.style.width    = newTableWidth + "px";
-        headerTable.style.minWidth = newTableWidth + "px";
-        headerTable.style.maxWidth = newTableWidth + "px";
+        headerTable.style.width    = newColTotal + "px";
+        headerTable.style.minWidth = newColTotal + "px";
+        headerTable.style.maxWidth = newColTotal + "px";
       } else {
         // allAuto or mixed: let the browser size the header table freely.
         // Only remove pixel values WE set; preserve MATLAB's % widths.
@@ -308,10 +305,9 @@
           }
         }
         if (allPixel) {
-          var bw = Math.round(newColTotal + fixedOffset);
-          bodyTable.style.width    = bw + "px";
-          bodyTable.style.minWidth = bw + "px";
-          bodyTable.style.maxWidth = bw + "px";
+          bodyTable.style.width    = newColTotal + "px";
+          bodyTable.style.minWidth = newColTotal + "px";
+          bodyTable.style.maxWidth = newColTotal + "px";
         } else {
           // mixed: clear any stale explicit px table width; preserve MATLAB's % widths.
           var bw2 = bodyTable.style.width;
@@ -410,15 +406,27 @@
     var doc         = cols[0].ownerDocument;
     var bodyTable   = findBodyTable(doc, headerTable);
 
-    // Detect window resize: all changed columns move in the same direction.
-    // Detect drag: at least one grows while another shrinks (opposing).
+    // Classify as drag vs window resize.
+    //
+    // Drag cases:
+    //   1. Opposing changes: one column grows while another shrinks.
+    //      (Standard internal-divider drag; both adjacent columns change.)
+    //   2. Single PIXEL column changed: pixel cols have min=max constraints,
+    //      so a window resize cannot move them.  Only a user drag can.
+    //      (Covers dragging the right boundary of the rightmost pixel column,
+    //      which extends the table width with no offsetting shrink.)
+    //
+    // Window resize: all changed columns move in the same direction,
+    //   and the changed columns include at least one auto/nx col.
     var hasOpposing = changedIdxs.some(function(i) { return prevW && widths[i] > prevW[i]; }) &&
                       changedIdxs.some(function(i) { return prevW && widths[i] < prevW[i]; });
+    var singlePixelDrag = changedIdxs.length === 1 && !colFlags[changedIdxs[0]];
+    var isDrag = hasOpposing || singlePixelDrag;
 
     // Always stamp body cells so virtual-scroll rows have accurate widths.
     stampBodyCells(bodyTable, widths, cols.length);
 
-    if (!hasOpposing) {
+    if (!isDrag) {
       // Window resize: re-stamp pixel header cols so they don't drift.
       // Do not notify MATLAB — it already has the correct nx values.
       for (var i = 0; i < cols.length; i++) {
