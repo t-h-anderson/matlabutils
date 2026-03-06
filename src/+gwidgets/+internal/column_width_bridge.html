@@ -306,23 +306,29 @@
     var now = Date.now();
     var echoMs = Math.max(0, echoSuppressUntil - now);
 
-    // Auto mode: sync body with header on every ResizeObserver fire, whether
-    // we are in the echo window, still paused, or fully live.
+    // Auto mode: body is synced live in debouncedPublish on every fire.
+    // Here we only need to decide whether to notify MATLAB:
+    //   - echo window or paused → MATLAB is already applying widths; suppress notification.
+    //   - user drag (paused=false, echoMs=0) → notify MATLAB so DataColumnWidth_ updates
+    //     to the dragged pixel widths (transitions out of "1x" mode).
     //
     // The pause prevents MATLAB notification (no ColumnWidthChanged sent),
-    // but the body MUST track the header even inside the pause.  MATLAB's
+    // but the body tracks the header live via debouncedPublish.  MATLAB's
     // own "1x" rendering fires the ResizeObserver within the 1200 ms Pause
     // window but after the 400 ms echo window:
     //   t+0   ms  applyColumnWidths: header 104→82 px; echo window opens (400ms)
     //   t+228 ms  echo sync: body→82 px  (echoMs>0)
     //   t+447 ms  MATLAB renders 1x: header 82→104 px; ResizeObserver fires
-    //   t+650 ms  publishWidths: echoMs=0, paused=true → was SUPPRESSED ← bug
-    //             with this fix: body synced to 104 px                   ← fix
+    //   t+650 ms  publishWidths: echoMs=0, paused=true → suppress (no MATLAB notify)
+    //             body already synced live: body→104 px
     if (autoMode) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode body sync" +
-                " (echoMs=" + echoMs + " paused=" + paused + ")");
-      syncBodyWithHeader(echoMs > 0 ? "echo" : "render-sync");
-      return;   // never notify MATLAB from echo/render paths
+      if (paused || echoMs > 0) {
+        bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode suppressed" +
+                  " (echoMs=" + echoMs + " paused=" + paused + ")");
+        return;
+      }
+      // User drag in auto mode: fall through to notify MATLAB with pixel widths.
+      bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode user drag → notifying MATLAB");
     }
     if (paused) {
       bridgeLog("[Bridge] " + ts() + " publishWidths: SUPPRESSED (paused=true, echoMs=" + echoMs + ")");
@@ -380,11 +386,23 @@
   }
 
   function debouncedPublish() {
+    var echoMs = Math.max(0, echoSuppressUntil - Date.now());
     bridgeLog("[Bridge] " + ts() + " debouncedPublish: ResizeObserver fired" +
               " (debounce " + DEBOUNCE_MS + "ms)" +
               " paused=" + paused +
               " autoMode=" + autoMode +
-              " echoWindowMs=" + Math.max(0, echoSuppressUntil - Date.now()));
+              " echoWindowMs=" + echoMs);
+    if (autoMode) {
+      // Sync body immediately on every fire so it tracks the header live during drag.
+      // This bypasses the debounce delay for visual fidelity.
+      syncBodyWithHeader("drag-live");
+      if (paused || echoMs > 0) {
+        // Echo / MATLAB-render path: body sync is all we need, no MATLAB notification.
+        return;
+      }
+      // User drag in auto mode: body already synced above; fall through to schedule
+      // debounced publishWidths so MATLAB is notified after the drag settles.
+    }
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
   }
