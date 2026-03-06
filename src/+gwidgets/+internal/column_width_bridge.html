@@ -157,28 +157,22 @@
     var bodyTable = findBodyTable(doc);
     if (bodyTable) {
       if (allAuto) {
-        // The header and body are independent <table> elements whose flex
-        // layouts would auto-size columns based on different content.  To
-        // keep them aligned: force a reflow to read the header's auto-sized
-        // widths, then pin the body cells to those values.
-        var autoWidths = cols.map(function(c) {
-          return Math.round(c.getBoundingClientRect().width);
-        });
+        // Just remove any explicit body constraints.  The body sync is
+        // deferred (see below) because we cannot read the true auto-sized
+        // header widths here: MATLAB's own rendering of the "1x" state
+        // completes asynchronously *after* this function returns, so any
+        // getBoundingClientRect() read here would return stale values.
         var bodyRows = bodyTable.querySelectorAll("tr");
         for (var r = 0; r < bodyRows.length; r++) {
           var cells = bodyRows[r].querySelectorAll("td");
-          for (var i = 0; i < cells.length && i < autoWidths.length; i++) {
-            cells[i].style.minWidth = autoWidths[i] + "px";
-            cells[i].style.maxWidth = autoWidths[i] + "px";
+          for (var i = 0; i < cells.length; i++) {
+            cells[i].style.removeProperty("min-width");
+            cells[i].style.removeProperty("max-width");
           }
         }
-        // Match the body table width to the header table width.
-        if (headerTable) {
-          var hTableWidth = Math.round(headerTable.getBoundingClientRect().width);
-          bodyTable.style.width    = hTableWidth + "px";
-          bodyTable.style.minWidth = hTableWidth + "px";
-          bodyTable.style.maxWidth = hTableWidth + "px";
-        }
+        bodyTable.style.removeProperty("width");
+        bodyTable.style.removeProperty("min-width");
+        bodyTable.style.removeProperty("max-width");
       } else {
         var bodyRows = bodyTable.querySelectorAll("tr");
         for (var r = 0; r < bodyRows.length; r++) {
@@ -195,6 +189,22 @@
           bodyTable.style.maxWidth = bw + "px";
         }
       }
+    }
+
+    if (allAuto) {
+      // Deferred body sync — two strategies:
+      //
+      // A) requestAnimationFrame (fires ~1 frame after layout settles):
+      //    catches the initial auto-layout before MATLAB's async render.
+      //
+      // B) publishWidths echo path (fires when the ResizeObserver detects
+      //    TH size changes from MATLAB's render):
+      //    catches any size correction from MATLAB's "1x" rendering pass.
+      //
+      // Both call syncBodyWithHeader(); the later one wins.
+      requestAnimationFrame(function() {
+        if (autoMode) { syncBodyWithHeader("raf"); }
+      });
     }
 
     // Re-anchor the ResizeObserver to the current DOM elements.
@@ -235,14 +245,49 @@
     mutationObserver.observe(headerTable, { childList: true, subtree: true });
   }
 
+  // Read the header's current rendered column widths and pin the body cells
+  // to those values, keeping the two independent flex tables in alignment.
+  function syncBodyWithHeader(label) {
+    var cols = findColumns();
+    if (cols.length === 0) return;
+    var widths = cols.map(function(c) {
+      return Math.round(c.getBoundingClientRect().width);
+    });
+    bridgeLog("[Bridge] syncBodyWithHeader(" + (label||"") + "): [" + widths.join(", ") + "]");
+    var headerTable = cols[0].closest("table");
+    var doc = cols[0].ownerDocument;
+    var bodyTable = findBodyTable(doc);
+    if (!bodyTable) return;
+    if (headerTable) {
+      var hTableWidth = Math.round(headerTable.getBoundingClientRect().width);
+      bodyTable.style.width    = hTableWidth + "px";
+      bodyTable.style.minWidth = hTableWidth + "px";
+      bodyTable.style.maxWidth = hTableWidth + "px";
+    }
+    var bodyRows = bodyTable.querySelectorAll("tr");
+    for (var r = 0; r < bodyRows.length; r++) {
+      var cells = bodyRows[r].querySelectorAll("td");
+      for (var ci = 0; ci < cells.length && ci < widths.length; ci++) {
+        cells[ci].style.minWidth = widths[ci] + "px";
+        cells[ci].style.maxWidth = widths[ci] + "px";
+      }
+    }
+  }
+
   function publishWidths() {
+    var now = Date.now();
+    // Auto-mode echo: sync body with header but do NOT notify MATLAB.
+    // This check is intentionally BEFORE the paused guard — the Pause is
+    // active for 1200 ms, but MATLAB's rendering fires the ResizeObserver
+    // well within that window, and we need the body to track those changes.
+    if (now < echoSuppressUntil && autoMode) {
+      syncBodyWithHeader("echo");
+      return;
+    }
     if (paused) return;
-    // JS-side echo suppression: MATLAB's rendering pipeline fires the
-    // ResizeObserver before our Pause event can arrive, so we keep our own
-    // time-based window.  Any publish within 400 ms of entering auto mode is
-    // treated as a layout-echo, not a genuine user drag.
-    if (Date.now() < echoSuppressUntil) {
-      bridgeLog("[Bridge] publishWidths: suppressed (auto-mode echo window)");
+    // Non-auto echo (pixel mode): just suppress, nothing to sync.
+    if (now < echoSuppressUntil) {
+      bridgeLog("[Bridge] publishWidths: suppressed (pixel echo)");
       return;
     }
     // Guard: if the elements we're observing have been detached (MATLAB
