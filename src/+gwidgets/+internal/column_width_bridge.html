@@ -358,31 +358,83 @@
                   " (echoMs=" + echoMs + " paused=" + paused + ")");
         return;
       }
-      // User interaction (drag) or window resize.  Use lastAutoWidths to tell them apart:
-      //   - exactly 1 column changed  → user dragged that column
-      //   - 0 or multiple changed     → window resize (all columns scaled proportionally)
+      // User interaction (drag) or window resize.  Use lastAutoWidths to tell them apart.
       var cols = findColumns();
       if (cols.length === 0) return;
       var currentWidths = colWidthsFromDOM(cols);
-      var changedIdxs = getChangedColumns(currentWidths, lastAutoWidths);
+      var prevWidths = lastAutoWidths;
       lastAutoWidths = currentWidths;   // update baseline for future comparisons
-      if (changedIdxs.length !== 1) {
-        // Window resize — body is already synced live; suppress MATLAB notification
-        // so DataColumnWidth_ keeps its "nx" values.
-        bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode window-resize" +
-                  " (changed=" + changedIdxs.length + " cols) — suppressed");
+      var changedIdxs = getChangedColumns(currentWidths, prevWidths);
+
+      if (changedIdxs.length === 0) {
+        // Sub-threshold change (rounding noise) — nothing to do.
         return;
       }
-      // Single column changed → user drag.  Send a partial-update array:
-      //   positive value  for the dragged column (new pixel width)
-      //   -1              for every other column (keep existing "nx" value in MATLAB)
-      var dragIdx = changedIdxs[0];
-      var jsWidths = currentWidths.map(function(w, i) { return i === dragIdx ? w : -1; });
-      bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode user drag" +
-                " col=" + dragIdx + " → " + currentWidths[dragIdx] + "px" +
-                " jsWidths=[" + jsWidths.join(",") + "]");
+
+      if (changedIdxs.length === 1) {
+        // Exactly one column changed (pure equal-weight "1x" drag: table expands,
+        // other columns stay put).  Send a partial-update array.
+        var dragIdx = changedIdxs[0];
+        var jsWidths = currentWidths.map(function(w, i) { return i === dragIdx ? w : -1; });
+        bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode user drag" +
+                  " col=" + dragIdx + " → " + currentWidths[dragIdx] + "px" +
+                  " jsWidths=[" + jsWidths.join(",") + "]");
+        autoMode = false;
+        htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsWidths };
+        return;
+      }
+
+      // Multiple columns changed.  Distinguish two cases:
+      //
+      //   Window resize: all changed columns scale in the SAME direction (all
+      //   grow or all shrink).  The total table width changes.
+      //
+      //   Drag in mixed-ratio (e.g. "1x"/"2x") layout: the dragged column grows
+      //   while the others shrink to compensate (or vice-versa).  Space is
+      //   redistributed within the same total width, so sum(delta) ≈ 0.
+      //
+      // We detect the drag case by requiring:
+      //   1. Opposing changes (some positive, some negative), AND
+      //   2. |sum(delta)| ≤ nCols * DRAG_THRESHOLD  (total width preserved).
+      var positiveIdxs = changedIdxs.filter(function(i) {
+        return prevWidths && currentWidths[i] > prevWidths[i];
+      });
+      var negativeIdxs = changedIdxs.filter(function(i) {
+        return prevWidths && currentWidths[i] < prevWidths[i];
+      });
+      var totalDelta = 0;
+      if (prevWidths) {
+        for (var i = 0; i < currentWidths.length; i++) {
+          totalDelta += currentWidths[i] - prevWidths[i];
+        }
+      }
+      var isDrag = prevWidths &&
+                   positiveIdxs.length > 0 && negativeIdxs.length > 0 &&
+                   Math.abs(totalDelta) <= cols.length * DRAG_THRESHOLD;
+
+      if (!isDrag) {
+        bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode window-resize" +
+                  " (changed=" + changedIdxs.length +
+                  " totalDelta=" + totalDelta + ") — suppressed");
+        return;
+      }
+
+      // Multi-column drag: the dragged column is the one in the minority direction
+      // (fewest columns) with the largest absolute change.  All other columns keep
+      // their current "nx" value in MATLAB.
+      var minorityIdxs = positiveIdxs.length <= negativeIdxs.length
+                         ? positiveIdxs : negativeIdxs;
+      var dragIdx2 = minorityIdxs.reduce(function(best, i) {
+        return Math.abs(currentWidths[i] - prevWidths[i]) >
+               Math.abs(currentWidths[best] - prevWidths[best]) ? i : best;
+      }, minorityIdxs[0]);
+      var jsWidths2 = currentWidths.map(function(w, i) { return i === dragIdx2 ? w : -1; });
+      bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode multi-col drag" +
+                " col=" + dragIdx2 + " → " + currentWidths[dragIdx2] + "px" +
+                " totalDelta=" + totalDelta +
+                " jsWidths=[" + jsWidths2.join(",") + "]");
       autoMode = false;
-      htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsWidths };
+      htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsWidths2 };
       return;
     }
     if (paused) {
@@ -545,6 +597,15 @@
       setTimeout(function() {
         paused = false;
         bridgeLog("[Bridge] " + ts() + " Pause expired (paused→false)");
+        if (autoMode) {
+          // MATLAB may have re-rendered the header during the pause (e.g. applied
+          // a "1x/2x" layout) without triggering another ResizeObserver fire here.
+          // Sync the body now so it matches the current header widths, and refresh
+          // lastAutoWidths so drag/window-resize detection uses the correct baseline.
+          syncBodyWithHeader("post-pause");
+          var ppCols = findColumns();
+          if (ppCols.length > 0) lastAutoWidths = colWidthsFromDOM(ppCols);
+        }
       }, duration);
     });
 
