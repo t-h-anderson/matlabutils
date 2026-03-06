@@ -171,14 +171,19 @@
 
   // ---- Body cell stamping ----
 
-  function stampBodyCells(bodyTable, widths, nCols) {
+  // autoFlags: optional per-column boolean array (true = proportional).
+  // When provided, only pixel columns (autoFlags[i] === false) are stamped.
+  // Proportional columns must be left unconstrained so they can reflow freely.
+  function stampBodyCells(bodyTable, widths, nCols, autoFlags) {
     if (!bodyTable) return;
     var rows = bodyTable.querySelectorAll("tr");
     for (var r = 0; r < rows.length; r++) {
       var cells = rows[r].querySelectorAll("td");
       for (var i = 0; i < cells.length && i < nCols; i++) {
-        cells[i].style.minWidth = widths[i] + "px";
-        cells[i].style.maxWidth = widths[i] + "px";
+        if (!autoFlags || !autoFlags[i]) {
+          cells[i].style.minWidth = widths[i] + "px";
+          cells[i].style.maxWidth = widths[i] + "px";
+        }
       }
     }
   }
@@ -290,7 +295,7 @@
         bodyTable.style.removeProperty("min-width");
         bodyTable.style.removeProperty("max-width");
       } else {
-        // Stamp pixel cols; remove constraints only from cols that WE previously stamped.
+        // Stamp pixel cols; always clear constraints for proportional cols.
         var bodyRows = bodyTable.querySelectorAll("tr");
         for (var r = 0; r < bodyRows.length; r++) {
           var cells = bodyRows[r].querySelectorAll("td");
@@ -298,7 +303,10 @@
             if (widths[i] >= 0) {
               cells[i].style.minWidth = widths[i] + "px";
               cells[i].style.maxWidth = widths[i] + "px";
-            } else if (!prevColAutoFlags || !prevColAutoFlags[i]) {
+            } else {
+              // Always clear proportional body cells — syncBodyWithHeader
+              // stamps them with live pixel values during drag, so we must
+              // undo that on every SetWidths regardless of previous state.
               cells[i].style.removeProperty("min-width");
               cells[i].style.removeProperty("max-width");
             }
@@ -354,7 +362,8 @@
       bodyTable.style.minWidth = hTableWidth + "px";
       bodyTable.style.maxWidth = hTableWidth + "px";
     }
-    stampBodyCells(bodyTable, widths, cols.length);
+    // Only pin pixel body cells; proportional cells align with header via CSS.
+    stampBodyCells(bodyTable, widths, cols.length, colAutoFlags);
   }
 
   // ---- Change detection ----
@@ -423,8 +432,9 @@
     var singlePixelDrag = changedIdxs.length === 1 && !colFlags[changedIdxs[0]];
     var isDrag = hasOpposing || singlePixelDrag;
 
-    // Always stamp body cells so virtual-scroll rows have accurate widths.
-    stampBodyCells(bodyTable, widths, cols.length);
+    // Stamp pixel body cells so virtual-scroll rows have accurate widths.
+    // Proportional cells must stay unconstrained to reflow freely.
+    stampBodyCells(bodyTable, widths, cols.length, colFlags);
 
     if (!isDrag) {
       // Window resize: re-stamp pixel header cols so they don't drift.
