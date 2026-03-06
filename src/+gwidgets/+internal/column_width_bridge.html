@@ -6,46 +6,73 @@
   </style>
   <script>
   // ColumnWidthBridge
+  //
+  // Sits in a 2-px-tall uihtml row of the Table grid.  Uses ResizeObserver to
+  // detect column-width changes caused by user drags, reports them to MATLAB,
+  // and applies MATLAB's SetWidths responses back to the DOM.
+  //
+  // --- State machine (simplified) ----------------------------------------
+  //
+  //   prevWidths      Settled column pixel widths from the last known stable
+  //                   state.  Used as the baseline to detect change direction
+  //                   (drag vs window-resize).  Updated:
+  //                     • in debouncedPublish when suppressed (paused/echo)
+  //                     • at Pause expiry
+  //                     • at the start of every publishWidths call
+  //
+  //   colAutoFlags    Per-column auto/pixel flag from the most recent SetWidths.
+  //                   true = nx/auto col (MATLAB owns proportional value).
+  //                   false = pixel col (bridge stamps explicit min/max).
+  //
+  //   allPixelMode    true only when every column is pixel.  Controls whether
+  //                   the body table is also given an explicit pixel width
+  //                   (needed to prevent overflow in the all-pixel case).
+  //
+  //   paused          MATLAB is pushing widths; suppress ColumnWidthChanged.
+  //   echoSuppressUntil  Timestamp until which ResizeObserver echoes are muted.
+  //
+  // --- Drag identification -----------------------------------------------
+  //
+  //   A column drag moves exactly one divider — the right boundary of some
+  //   column.  Two adjacent columns change: the LEFT column grows/shrinks to
+  //   the new size; the RIGHT column absorbs the difference.
+  //   Rule: dragIdx = min(changedIdxs).
+  //   The left column becomes pixel; the right column keeps its nx value.
+  //
+  // --- Window-resize detection -------------------------------------------
+  //
+  //   A window resize changes all (or all visible) columns in the SAME
+  //   direction.  A drag always changes two adjacent columns in OPPOSITE
+  //   directions.  We check for opposing changes to tell them apart.
 
   var COL_SELECTOR   = ".mw-table-header-column";
   var RETRY_INTERVAL = 600;
   var DEBOUNCE_MS    = 200;
   var MAX_ATTEMPTS   = 8;
+  var DRAG_THRESHOLD = 2;
 
   var resizeObserver    = null;
   var mutationObserver  = null;
   var debounceTimer     = null;
   var paused            = false;
-  var autoMode          = false;
-  var allPixelMode      = false;  // true only when ALL columns are pixel (no nx/auto)
+  var allPixelMode      = false;
   var echoSuppressUntil = 0;
   var tableTag          = null;
   var htmlComponent     = null;
   var attachAttempts    = 0;
   var observedCols      = [];
-  // Expected column count from the most recent SetWidths event.  Used by
-  // findColumns() Strategy 2 (iframe-relative) and by attachObserver() to
-  // reject a stale/scoping-failed result before it causes an infinite
-  // Reattach loop with a second table in the same figure.
   var expectedColCount  = 0;
-  // Baseline column widths (px) when autoMode is active and MATLAB has fully
-  // rendered.  Used to distinguish a user column drag (one column changed)
-  // from a window resize (all columns changed proportionally).
-  var lastAutoWidths    = null;
-  // Per-column auto/pixel flags from the most recent SetWidths: true = nx/auto
-  // (no explicit min/max constraint), false = pixel (explicitly constrained).
-  // Used to detect window-resize vs drag in mixed (non-autoMode) layouts.
+  // Per-column auto/pixel flags from the most recent SetWidths.
   var colAutoFlags      = null;
-  // Settled baseline widths for non-autoMode layouts (mixed or all-pixel).
-  // Populated from echo/pause firings of publishWidths after MATLAB applies
-  // widths.  Reset each time applyColumnWidths runs.
-  var lastKnownWidths   = null;
+  // Settled column pixel widths used as drag/resize baseline.
+  var prevWidths        = null;
 
-  var t0 = Date.now();  // reference timestamp for relative timing
+  var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
 
-  // Diagnostic log queue
-  var diagQueue     = [];
+  // ---- Diagnostic logging ----
+
+  var diagQueue      = [];
   var diagFlushTimer = null;
   function bridgeLog(msg) {
     console.log(msg);
@@ -53,24 +80,15 @@
     clearTimeout(diagFlushTimer);
     diagFlushTimer = setTimeout(function() {
       if (diagQueue.length === 0 || !htmlComponent) return;
-      var out = diagQueue.join("\n");
+      htmlComponent.Data = { event: "BridgeDiag", msg: diagQueue.join("\n") };
       diagQueue = [];
-      htmlComponent.Data = { event: "BridgeDiag", msg: out };
     }, 10);
   }
 
   // ---- DOM inspection helpers ----
 
   function colWidthsFromDOM(cols) {
-    return cols.map(function(c) {
-      var r = c.getBoundingClientRect();
-      return Math.round(r.width);
-    });
-  }
-
-  function colStyleStr(col) {
-    var s = col.style;
-    return "[mw=" + (s.minWidth||"–") + " mxw=" + (s.maxWidth||"–") + "]";
+    return cols.map(function(c) { return Math.round(c.getBoundingClientRect().width); });
   }
 
   function tableStyleStr(t) {
@@ -78,13 +96,10 @@
     var s = t.style;
     var r = t.getBoundingClientRect();
     return "w=" + Math.round(r.width) + "px" +
-           " style[w=" + (s.width||"–") +
-           " mw=" + (s.minWidth||"–") +
-           " mxw=" + (s.maxWidth||"–") + "]";
+           " style[w=" + (s.width||"–") + " mw=" + (s.minWidth||"–") + " mxw=" + (s.maxWidth||"–") + "]";
   }
 
   function bodyCellStyleStr(bodyTable, n) {
-    // Report first row, first n cells
     if (!bodyTable) return "no-body";
     var row = bodyTable.querySelector("tr");
     if (!row) return "no-rows";
@@ -92,37 +107,32 @@
     var parts = [];
     for (var i = 0; i < Math.min(cells.length, n); i++) {
       var s = cells[i].style;
-      parts.push("cell[" + i + "]: mw=" + (s.minWidth||"–") + " mxw=" + (s.maxWidth||"–") +
+      parts.push("cell[" + i + "]: mw=" + (s.minWidth||"–") +
+                 " mxw=" + (s.maxWidth||"–") +
                  " rect=" + Math.round(cells[i].getBoundingClientRect().width) + "px");
     }
     return cells.length + " td's; " + parts.join("; ");
   }
 
-  // ---- Core functions ----
+  // ---- DOM locators ----
 
   function findColumns() {
     var parentDoc;
     try { parentDoc = window.parent.document; } catch (e) { return []; }
 
-    // Strategy 1: data-tag scoping — most precise when MATLAB reflects .Tag
-    // as a data-tag DOM attribute that is an ancestor of the col elements.
+    // Strategy 1: data-tag scoping.
     if (tableTag) {
       var tableEl = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
       if (tableEl) {
         var taggedCols = Array.from(tableEl.querySelectorAll(COL_SELECTOR));
         if (taggedCols.length > 0) return taggedCols;
-        // Element found but no cols inside — fall through to Strategy 2.
-        bridgeLog("[Bridge] findColumns: data-tag found but 0 cols inside, trying iframe-relative");
       } else {
         bridgeLog("[Bridge] findColumns: data-tag=" + tableTag + " not in DOM, trying iframe-relative");
       }
     }
 
-    // Strategy 2: iframe-relative — walk up from the bridge's own <iframe>
-    // element in the parent document until we reach a container that holds
-    // exactly expectedColCount col elements.  This scopes to THIS table's
-    // grid container without relying on data-tag, and correctly excludes
-    // columns from sibling tables in the same figure.
+    // Strategy 2: walk up from bridge iframe to find the container with the
+    // right column count — scopes to this table without relying on data-tag.
     if (expectedColCount > 0) {
       try {
         var frame = window.frameElement;
@@ -131,21 +141,18 @@
         while (el && depth++ < 15) {
           var nearby = Array.from(el.querySelectorAll(COL_SELECTOR));
           if (nearby.length === expectedColCount) return nearby;
-          if (nearby.length > expectedColCount) break; // overshot — stop climbing
+          if (nearby.length > expectedColCount) break;
           el = el.parentElement;
         }
       } catch (e) {}
     }
 
-    // Strategy 3: unscoped fallback (may find wrong columns if multiple tables exist).
+    // Strategy 3: unscoped fallback.
     return Array.from(parentDoc.querySelectorAll(COL_SELECTOR));
   }
 
-  // headerTable: the <table> element for the column headers (from cols[0].closest("table")).
-  // Passing it lets us find the body table by walking up from a known relative,
-  // which avoids the same data-tag scoping failure that affects findColumns().
   function findBodyTable(doc, headerTable) {
-    // Strategy 1: walk up from the header table until we find a sibling body table.
+    // Walk up from the header table until we find a sibling body table.
     if (headerTable) {
       var el = headerTable;
       for (var i = 0; i < 10; i++) {
@@ -155,25 +162,50 @@
         if (t && t !== headerTable) return t;
       }
     }
-    // Strategy 2: data-tag scoping.
     if (tableTag) {
       var tableEl = doc.querySelector('[data-tag="' + tableTag + '"]');
-      if (tableEl) {
-        var t2 = tableEl.querySelector("table.mw-table");
-        if (t2) return t2;
-      }
+      if (tableEl) { var t2 = tableEl.querySelector("table.mw-table"); if (t2) return t2; }
     }
-    // Strategy 3: unscoped fallback.
     return doc.querySelector("table.mw-table");
   }
 
+  // ---- Body cell stamping ----
+
+  function stampBodyCells(bodyTable, widths, nCols) {
+    if (!bodyTable) return;
+    var rows = bodyTable.querySelectorAll("tr");
+    for (var r = 0; r < rows.length; r++) {
+      var cells = rows[r].querySelectorAll("td");
+      for (var i = 0; i < cells.length && i < nCols; i++) {
+        cells[i].style.minWidth = widths[i] + "px";
+        cells[i].style.maxWidth = widths[i] + "px";
+      }
+    }
+  }
+
+  function clearBodyCellConstraints(bodyTable) {
+    if (!bodyTable) return;
+    var rows = bodyTable.querySelectorAll("tr");
+    for (var r = 0; r < rows.length; r++) {
+      var cells = rows[r].querySelectorAll("td");
+      for (var i = 0; i < cells.length; i++) {
+        cells[i].style.removeProperty("min-width");
+        cells[i].style.removeProperty("max-width");
+      }
+    }
+  }
+
+  // ---- applyColumnWidths: MATLAB → DOM ----
+
   function applyColumnWidths(widths) {
-    var mode = widths.every(function(w) { return w >= 0; }) ? "pixel" :
-               widths.every(function(w) { return w <  0; }) ? "auto"  : "mixed";
+    var allPixel = widths.every(function(w) { return w >= 0; });
+    var allAuto  = widths.every(function(w) { return w <  0; });
+    var mode     = allPixel ? "pixel" : allAuto ? "auto" : "mixed";
+
     bridgeLog("[Bridge] " + ts() + " applyColumnWidths: mode=" + mode +
               " widths=[" + widths.join(", ") + "]" +
               " paused=" + paused +
-              " echoWindowMs=" + Math.max(0, echoSuppressUntil - Date.now()));
+              " echoMs=" + Math.max(0, echoSuppressUntil - Date.now()));
 
     var cols = findColumns();
     if (cols.length !== widths.length) {
@@ -184,51 +216,36 @@
       return;
     }
 
-    var doc = cols.length > 0 ? cols[0].ownerDocument : window.parent.document;
-    var allPixel = widths.every(function(w) { return w >= 0; });
-    var allAuto  = widths.every(function(w) { return w <  0; });
-
-    autoMode     = allAuto;
-    allPixelMode = allPixel;
-    // Track which columns are nx/auto vs pixel for window-resize detection.
-    // Save previous flags so we only remove constraints for columns that WE stamped
-    // with pixel values; if a column was already nx/auto, MATLAB manages its own
-    // constraints (e.g. proportional "2x"/"3x" CSS) and we must not touch them.
-    var prevColAutoFlags = colAutoFlags;
-    colAutoFlags    = widths.map(function(w) { return w < 0; });
-    lastKnownWidths = null;  // will be re-populated from echo/pause publishWidths calls
-    if (allAuto) {
-      echoSuppressUntil = Date.now() + 400;
-      lastAutoWidths = null;  // will be populated once MATLAB's render settles
-      bridgeLog("[Bridge] " + ts() + " applyColumnWidths: echoSuppressUntil set +400ms");
-    }
-
+    var doc         = cols.length > 0 ? cols[0].ownerDocument : window.parent.document;
     var headerTable = cols.length > 0 ? cols[0].closest("table") : null;
 
-    // Log header state BEFORE changes
+    var prevColAutoFlags = colAutoFlags;
+    colAutoFlags    = widths.map(function(w) { return w < 0; });
+    allPixelMode    = allPixel;
+    prevWidths      = null;  // re-populate from next settled publishWidths/pause-expiry
+
+    if (allAuto) {
+      echoSuppressUntil = Date.now() + 400;
+      bridgeLog("[Bridge] " + ts() + " applyColumnWidths: allAuto — echoSuppressUntil +400ms");
+    }
+
     bridgeLog("[Bridge] " + ts() + " applyColumnWidths: header BEFORE:" +
               " table=" + tableStyleStr(headerTable) +
               " cols=" + colWidthsFromDOM(cols).join(","));
 
+    // --- Fixed-offset calculation for all-pixel table width ---
     var fixedOffset = 0;
     if (headerTable && allPixel) {
       var currentColTotal = 0;
       for (var i = 0; i < cols.length; i++) currentColTotal += cols[i].getBoundingClientRect().width;
       fixedOffset = Math.round(headerTable.getBoundingClientRect().width - currentColTotal);
-      bridgeLog("[Bridge] " + ts() + " applyColumnWidths: fixedOffset=" + fixedOffset +
-                " (tableW=" + Math.round(headerTable.getBoundingClientRect().width) +
-                " colTotal=" + Math.round(currentColTotal) + ")");
     }
 
-    // --- Header columns ---
+    // --- Apply header col constraints ---
     var newColTotal = 0;
     for (var i = 0; i < cols.length; i++) {
       if (widths[i] < 0) {
-        // Only remove constraints that WE previously stamped (pixel → auto/nx transition).
-        // If this column was already auto/nx, MATLAB owns its constraints (e.g. proportional
-        // "2x"/"3x" CSS written by the uitable renderer) — removing them would destroy
-        // MATLAB's proportional layout since our bridge processes SetWidths asynchronously,
-        // after MATLAB has already written the new proportional CSS.
+        // Only remove constraints WE previously stamped; preserve MATLAB's proportional CSS.
         if (!prevColAutoFlags || !prevColAutoFlags[i]) {
           cols[i].style.removeProperty("min-width");
           cols[i].style.removeProperty("max-width");
@@ -246,9 +263,8 @@
         headerTable.style.minWidth = newTableWidth + "px";
         headerTable.style.maxWidth = newTableWidth + "px";
       } else {
-        // allAuto or mixed: let the browser size the table freely;
-        // pixel columns' min/max constraints already constrain it.
-        // Only remove px values WE set; preserve MATLAB's % widths (e.g. "width: 100%").
+        // allAuto or mixed: let the browser size the header table freely.
+        // Only remove pixel values WE set; preserve MATLAB's % widths.
         var hw = headerTable.style.width;
         if (hw && hw.indexOf('%') < 0) headerTable.style.removeProperty("width");
         var hmw = headerTable.style.minWidth;
@@ -258,36 +274,26 @@
       }
     }
 
-    // Log header state AFTER changes (forces reflow)
     bridgeLog("[Bridge] " + ts() + " applyColumnWidths: header AFTER:" +
               " table=" + tableStyleStr(headerTable) +
               " cols=" + colWidthsFromDOM(cols).join(","));
 
-    // --- Body columns ---
+    // --- Apply body constraints ---
     var bodyTable = findBodyTable(doc, headerTable);
-    bridgeLog("[Bridge] " + ts() + " applyColumnWidths: bodyTable=" + (bodyTable ? "found" : "NOT FOUND") +
-              (bodyTable ? (" " + tableStyleStr(bodyTable)) : ""));
+    bridgeLog("[Bridge] " + ts() + " applyColumnWidths: bodyTable=" +
+              (bodyTable ? "found " + tableStyleStr(bodyTable) : "NOT FOUND"));
+
     if (bodyTable) {
       bridgeLog("[Bridge] " + ts() + " applyColumnWidths: body BEFORE: " +
                 bodyCellStyleStr(bodyTable, cols.length));
-    }
 
-    if (bodyTable) {
       if (allAuto) {
-        var bodyRows = bodyTable.querySelectorAll("tr");
-        for (var r = 0; r < bodyRows.length; r++) {
-          var cells = bodyRows[r].querySelectorAll("td");
-          for (var i = 0; i < cells.length; i++) {
-            cells[i].style.removeProperty("min-width");
-            cells[i].style.removeProperty("max-width");
-          }
-        }
+        clearBodyCellConstraints(bodyTable);
         bodyTable.style.removeProperty("width");
         bodyTable.style.removeProperty("min-width");
         bodyTable.style.removeProperty("max-width");
-        bridgeLog("[Bridge] " + ts() + " applyColumnWidths: body constraints removed," +
-                  " table now=" + tableStyleStr(bodyTable));
       } else {
+        // Stamp pixel cols; remove constraints only from cols that WE previously stamped.
         var bodyRows = bodyTable.querySelectorAll("tr");
         for (var r = 0; r < bodyRows.length; r++) {
           var cells = bodyRows[r].querySelectorAll("td");
@@ -295,7 +301,7 @@
             if (widths[i] >= 0) {
               cells[i].style.minWidth = widths[i] + "px";
               cells[i].style.maxWidth = widths[i] + "px";
-            } else {
+            } else if (!prevColAutoFlags || !prevColAutoFlags[i]) {
               cells[i].style.removeProperty("min-width");
               cells[i].style.removeProperty("max-width");
             }
@@ -307,8 +313,7 @@
           bodyTable.style.minWidth = bw + "px";
           bodyTable.style.maxWidth = bw + "px";
         } else {
-          // mixed: clear any stale explicit px table width from a prior allPixel state;
-          // preserve MATLAB's % widths (e.g. "width: 100%").
+          // mixed: clear any stale explicit px table width; preserve MATLAB's % widths.
           var bw2 = bodyTable.style.width;
           if (bw2 && bw2.indexOf('%') < 0) bodyTable.style.removeProperty("width");
           var bmw = bodyTable.style.minWidth;
@@ -316,24 +321,188 @@
           var bmxw = bodyTable.style.maxWidth;
           if (bmxw && bmxw.indexOf('%') < 0) bodyTable.style.removeProperty("max-width");
         }
-        bridgeLog("[Bridge] " + ts() + " applyColumnWidths: body AFTER: " +
-                  bodyCellStyleStr(bodyTable, cols.length));
       }
+      bridgeLog("[Bridge] " + ts() + " applyColumnWidths: body AFTER: " +
+                bodyCellStyleStr(bodyTable, cols.length));
     }
 
+    // Schedule body sync so proportional cols settle before we snapshot.
     if (allAuto) {
-      bridgeLog("[Bridge] " + ts() + " applyColumnWidths: scheduling RAF sync");
-      requestAnimationFrame(function() {
-        bridgeLog("[Bridge] " + ts() + " RAF fired: autoMode=" + autoMode +
-                  " echoWindowMs=" + Math.max(0, echoSuppressUntil - Date.now()));
-        if (autoMode) { syncBodyWithHeader("raf"); }
-        else { bridgeLog("[Bridge] " + ts() + " RAF: autoMode=false, skip"); }
-      });
+      requestAnimationFrame(function() { syncBodyWithHeader("raf"); });
     }
 
     bridgeLog("[Bridge] " + ts() + " applyColumnWidths: calling attachObserver");
     attachObserver("SetWidths-sync");
     setupMutationObserver();
+  }
+
+  // ---- syncBodyWithHeader: keep body cells aligned with header ----
+
+  function syncBodyWithHeader(label) {
+    var cols = findColumns();
+    if (cols.length === 0) return;
+    var widths     = colWidthsFromDOM(cols);
+    var headerTable = cols[0].closest("table");
+    var doc        = cols[0].ownerDocument;
+    var bodyTable  = findBodyTable(doc, headerTable);
+
+    bridgeLog("[Bridge] " + ts() + " syncBodyWithHeader(" + label + "):" +
+              " header=[" + widths.join(",") + "]" +
+              " bodyTable=" + (bodyTable ? tableStyleStr(bodyTable) : "NOT FOUND"));
+
+    if (!bodyTable) return;
+
+    if (headerTable && allPixelMode) {
+      var hTableWidth = Math.round(headerTable.getBoundingClientRect().width);
+      bodyTable.style.width    = hTableWidth + "px";
+      bodyTable.style.minWidth = hTableWidth + "px";
+      bodyTable.style.maxWidth = hTableWidth + "px";
+    }
+    stampBodyCells(bodyTable, widths, cols.length);
+  }
+
+  // ---- Change detection ----
+
+  function getChangedColumns(current, last) {
+    if (!last || last.length !== current.length) return current.map(function(_, i) { return i; });
+    var changed = [];
+    for (var i = 0; i < current.length; i++) {
+      if (Math.abs(current[i] - last[i]) > DRAG_THRESHOLD) changed.push(i);
+    }
+    return changed;
+  }
+
+  // ---- publishWidths: decide what to tell MATLAB ----
+
+  function publishWidths() {
+    var now    = Date.now();
+    var echoMs = Math.max(0, echoSuppressUntil - now);
+
+    var cols = findColumns();
+    if (cols.length === 0) return;
+    if (observedCols.length > 0 && !observedCols[0].isConnected) {
+      bridgeLog("[Bridge] " + ts() + " publishWidths: stale obs — re-attaching");
+      attachObserver("stale");
+      return;
+    }
+
+    var widths   = colWidthsFromDOM(cols);
+    var colFlags = colAutoFlags || widths.map(function() { return false; });
+    var prevW    = prevWidths;
+    prevWidths   = widths;  // update baseline regardless of suppress/notify
+
+    var changedIdxs = getChangedColumns(widths, prevW);
+
+    bridgeLog("[Bridge] " + ts() + " publishWidths:" +
+              " widths=[" + widths.join(",") + "]" +
+              " prev=[" + (prevW ? prevW.join(",") : "null") + "]" +
+              " changed=[" + changedIdxs.join(",") + "]" +
+              " flags=[" + colFlags.map(function(f) { return f ? "A" : "P"; }).join(",") + "]" +
+              " paused=" + paused + " echoMs=" + echoMs);
+
+    if (paused || echoMs > 0) {
+      bridgeLog("[Bridge] " + ts() + " publishWidths: suppressed");
+      return;
+    }
+    if (changedIdxs.length === 0) return;
+
+    var headerTable = cols[0].closest("table");
+    var doc         = cols[0].ownerDocument;
+    var bodyTable   = findBodyTable(doc, headerTable);
+
+    // Detect window resize: all changed columns move in the same direction.
+    // Detect drag: at least one grows while another shrinks (opposing).
+    var hasOpposing = changedIdxs.some(function(i) { return prevW && widths[i] > prevW[i]; }) &&
+                      changedIdxs.some(function(i) { return prevW && widths[i] < prevW[i]; });
+
+    // Always stamp body cells so virtual-scroll rows have accurate widths.
+    stampBodyCells(bodyTable, widths, cols.length);
+
+    if (!hasOpposing) {
+      // Window resize: re-stamp pixel header cols so they don't drift.
+      // Do not notify MATLAB — it already has the correct nx values.
+      for (var i = 0; i < cols.length; i++) {
+        if (!colFlags[i]) {
+          cols[i].style.minWidth = widths[i] + "px";
+          cols[i].style.maxWidth = widths[i] + "px";
+        }
+      }
+      bridgeLog("[Bridge] " + ts() + " publishWidths: window-resize suppressed" +
+                " changed=[" + changedIdxs.join(",") + "]");
+      return;
+    }
+
+    // Drag: the LEFT column of the dragged divider (smaller index) becomes pixel.
+    // The right column absorbs the change and stays proportional.
+    var dragIdx = Math.min.apply(null, changedIdxs);
+
+    // Stamp dragged col and all existing pixel cols in header; leave auto cols free.
+    for (var i = 0; i < cols.length; i++) {
+      if (!colFlags[i] || i === dragIdx) {
+        cols[i].style.minWidth = widths[i] + "px";
+        cols[i].style.maxWidth = widths[i] + "px";
+      }
+    }
+
+    // jsNotify: dragged col → new pixel value; existing pixel cols → unchanged;
+    // auto/nx cols → -1 so MATLAB keeps their proportional value.
+    var jsNotify = widths.map(function(w, i) {
+      if (i === dragIdx) return w;
+      if (!colFlags[i])  return w;
+      return -1;
+    });
+    allPixelMode = jsNotify.every(function(w) { return w >= 0; });
+
+    bridgeLog("[Bridge] " + ts() + " publishWidths: drag dragIdx=" + dragIdx +
+              " jsNotify=[" + jsNotify.join(",") + "]");
+    htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify };
+  }
+
+  // ---- debouncedPublish: ResizeObserver entry point ----
+
+  function debouncedPublish() {
+    var echoMs = Math.max(0, echoSuppressUntil - Date.now());
+    bridgeLog("[Bridge] " + ts() + " resize: paused=" + paused + " echoMs=" + echoMs);
+
+    // Sync body with header on every fire for visual fidelity during drag.
+    syncBodyWithHeader("drag-live");
+
+    if (paused || echoMs > 0) {
+      // During suppression: snapshot prevWidths so change detection is correct
+      // after the suppress window ends.
+      var snapCols = findColumns();
+      if (snapCols.length > 0) prevWidths = colWidthsFromDOM(snapCols);
+      return;
+    }
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
+  }
+
+  // ---- Observer management ----
+
+  function attachObserver(label) {
+    var cols = findColumns();
+    bridgeLog("[Bridge] " + ts() + " attachObserver(" + (label||"") + "):" +
+              " found=" + cols.length +
+              (cols.length ? " connected=" + cols[0].isConnected +
+                             " colWidths=[" + colWidthsFromDOM(cols).join(",") + "]" : ""));
+
+    if (cols.length === 0) {
+      if (++attachAttempts < MAX_ATTEMPTS)
+        setTimeout(function() { attachObserver("retry"); }, RETRY_INTERVAL);
+      return;
+    }
+    if (expectedColCount > 0 && cols.length !== expectedColCount) {
+      bridgeLog("[Bridge] " + ts() + " attachObserver: count " + cols.length +
+                " != expected " + expectedColCount + " — retrying");
+      if (++attachAttempts < MAX_ATTEMPTS)
+        setTimeout(function() { attachObserver("retry-count"); }, RETRY_INTERVAL);
+      return;
+    }
+    observedCols = cols;
+    if (resizeObserver) resizeObserver.disconnect();
+    resizeObserver = new ResizeObserver(debouncedPublish);
+    cols.forEach(function(col) { resizeObserver.observe(col); });
   }
 
   function setupMutationObserver() {
@@ -361,427 +530,14 @@
     mutationObserver.observe(headerTable, { childList: true, subtree: true });
   }
 
-  function syncBodyWithHeader(label) {
-    var cols = findColumns();
-    if (cols.length === 0) {
-      bridgeLog("[Bridge] " + ts() + " syncBodyWithHeader(" + label + "): no cols found");
-      return;
-    }
-    var widths = colWidthsFromDOM(cols);
-    var headerTable = cols[0].closest("table");
-    var doc = cols[0].ownerDocument;
-    var bodyTable = findBodyTable(doc, headerTable);
-
-    bridgeLog("[Bridge] " + ts() + " syncBodyWithHeader(" + label + "):" +
-              " headerCols=" + widths.join(",") +
-              " headerTable=" + tableStyleStr(headerTable) +
-              " bodyTable=" + (bodyTable ? tableStyleStr(bodyTable) : "NOT FOUND"));
-
-    if (!bodyTable) return;
-
-    bridgeLog("[Bridge] " + ts() + " syncBodyWithHeader(" + label + "): body BEFORE: " +
-              bodyCellStyleStr(bodyTable, cols.length));
-
-    // Only pin the body table to an explicit pixel width in allPixelMode.
-    // In autoMode or mixed mode, at least one column is proportional so the table
-    // is fluid — locking it to a pixel width would cause horizontal scroll on resize.
-    if (headerTable && allPixelMode) {
-      var hTableWidth = Math.round(headerTable.getBoundingClientRect().width);
-      bodyTable.style.width    = hTableWidth + "px";
-      bodyTable.style.minWidth = hTableWidth + "px";
-      bodyTable.style.maxWidth = hTableWidth + "px";
-    }
-    var bodyRows = bodyTable.querySelectorAll("tr");
-    for (var r = 0; r < bodyRows.length; r++) {
-      var cells = bodyRows[r].querySelectorAll("td");
-      for (var ci = 0; ci < cells.length && ci < widths.length; ci++) {
-        cells[ci].style.minWidth = widths[ci] + "px";
-        cells[ci].style.maxWidth = widths[ci] + "px";
-      }
-    }
-
-    bridgeLog("[Bridge] " + ts() + " syncBodyWithHeader(" + label + "): body AFTER: " +
-              bodyCellStyleStr(bodyTable, cols.length));
-  }
-
-  // Return indices of columns whose width changed by more than DRAG_THRESHOLD px.
-  // If last is null (no baseline yet) every index is returned, which causes the
-  // caller to treat the event as a window resize and suppress MATLAB notification.
-  var DRAG_THRESHOLD = 2;
-  function getChangedColumns(current, last) {
-    if (!last || last.length !== current.length) {
-      return current.map(function(_, i) { return i; });
-    }
-    var changed = [];
-    for (var i = 0; i < current.length; i++) {
-      if (Math.abs(current[i] - last[i]) > DRAG_THRESHOLD) changed.push(i);
-    }
-    return changed;
-  }
-
-  function publishWidths() {
-    var now = Date.now();
-    var echoMs = Math.max(0, echoSuppressUntil - now);
-
-    // Auto mode: body is synced live in debouncedPublish on every fire.
-    // Here we only need to decide whether to notify MATLAB:
-    //   - echo window or paused → MATLAB is already applying widths; suppress notification.
-    //   - user drag (paused=false, echoMs=0) → notify MATLAB so DataColumnWidth_ updates
-    //     to the dragged pixel widths (transitions out of "1x" mode).
-    //
-    // The pause prevents MATLAB notification (no ColumnWidthChanged sent),
-    // but the body tracks the header live via debouncedPublish.  MATLAB's
-    // own "1x" rendering fires the ResizeObserver within the 1200 ms Pause
-    // window but after the 400 ms echo window:
-    //   t+0   ms  applyColumnWidths: header 104→82 px; echo window opens (400ms)
-    //   t+228 ms  echo sync: body→82 px  (echoMs>0)
-    //   t+447 ms  MATLAB renders 1x: header 82→104 px; ResizeObserver fires
-    //   t+650 ms  publishWidths: echoMs=0, paused=true → suppress (no MATLAB notify)
-    //             body already synced live: body→104 px
-    if (autoMode) {
-      if (paused || echoMs > 0) {
-        bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode suppressed" +
-                  " (echoMs=" + echoMs + " paused=" + paused + ")");
-        return;
-      }
-      // User interaction (drag) or window resize.  Use lastAutoWidths to tell them apart.
-      var cols = findColumns();
-      if (cols.length === 0) return;
-      var currentWidths = colWidthsFromDOM(cols);
-      var prevWidths = lastAutoWidths;
-      lastAutoWidths = currentWidths;   // update baseline for future comparisons
-      var changedIdxs = getChangedColumns(currentWidths, prevWidths);
-
-      if (changedIdxs.length === 0) {
-        // Sub-threshold change (rounding noise) — nothing to do.
-        return;
-      }
-
-      if (changedIdxs.length === 1) {
-        // Exactly one column changed (pure equal-weight "1x" drag: table expands,
-        // other columns stay put).  Send a partial-update array.
-        var dragIdx = changedIdxs[0];
-        var jsWidths = currentWidths.map(function(w, i) { return i === dragIdx ? w : -1; });
-        bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode user drag" +
-                  " col=" + dragIdx + " → " + currentWidths[dragIdx] + "px" +
-                  " jsWidths=[" + jsWidths.join(",") + "]");
-        autoMode = false;
-        htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsWidths };
-        return;
-      }
-
-      // Multiple columns changed.  Distinguish two cases:
-      //
-      //   Window resize: all changed columns scale in the SAME direction (all
-      //   grow or all shrink).  The total table width changes.
-      //
-      //   Drag in mixed-ratio (e.g. "1x"/"2x") layout: the dragged column grows
-      //   while the others shrink to compensate (or vice-versa).  Space is
-      //   redistributed within the same total width, so sum(delta) ≈ 0.
-      //
-      // We detect the drag case by requiring:
-      //   1. Opposing changes (some positive, some negative), AND
-      //   2. |sum(delta)| ≤ nCols * DRAG_THRESHOLD  (total width preserved).
-      var positiveIdxs = changedIdxs.filter(function(i) {
-        return prevWidths && currentWidths[i] > prevWidths[i];
-      });
-      var negativeIdxs = changedIdxs.filter(function(i) {
-        return prevWidths && currentWidths[i] < prevWidths[i];
-      });
-      var totalDelta = 0;
-      if (prevWidths) {
-        for (var i = 0; i < currentWidths.length; i++) {
-          totalDelta += currentWidths[i] - prevWidths[i];
-        }
-      }
-      var isDrag = prevWidths &&
-                   positiveIdxs.length > 0 && negativeIdxs.length > 0 &&
-                   Math.abs(totalDelta) <= cols.length * DRAG_THRESHOLD;
-
-      if (!isDrag) {
-        bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode window-resize" +
-                  " (changed=" + changedIdxs.length +
-                  " totalDelta=" + totalDelta + ") — suppressed");
-        return;
-      }
-
-      // Multi-column drag: the dragged column is the one in the minority direction
-      // (fewest columns) with the largest absolute change.  All other columns keep
-      // their current "nx" value in MATLAB.
-      // Use strict < so that when counts tie (e.g. 1 col grows, 1 col shrinks),
-      // we pick the SHRINKING column: the user constrained it to a new smaller size,
-      // so it should become the pixel column.  The growing column merely absorbed
-      // the freed space and should remain proportional.
-      var minorityIdxs = positiveIdxs.length < negativeIdxs.length
-                         ? positiveIdxs : negativeIdxs;
-      var dragIdx2 = minorityIdxs.reduce(function(best, i) {
-        return Math.abs(currentWidths[i] - prevWidths[i]) >
-               Math.abs(currentWidths[best] - prevWidths[best]) ? i : best;
-      }, minorityIdxs[0]);
-      var jsWidths2 = currentWidths.map(function(w, i) { return i === dragIdx2 ? w : -1; });
-      bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode multi-col drag" +
-                " col=" + dragIdx2 + " → " + currentWidths[dragIdx2] + "px" +
-                " totalDelta=" + totalDelta +
-                " jsWidths=[" + jsWidths2.join(",") + "]");
-      autoMode = false;
-      htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsWidths2 };
-      return;
-    }
-    if (paused) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: SUPPRESSED (paused=true, echoMs=" + echoMs + ")");
-      // Snapshot settled widths for non-autoMode change detection baseline.
-      var pausedCols = findColumns();
-      if (pausedCols.length > 0) lastKnownWidths = colWidthsFromDOM(pausedCols);
-      return;
-    }
-    if (now < echoSuppressUntil) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: SUPPRESSED (pixel echo, echoMs=" + echoMs + ")");
-      // Snapshot settled widths for non-autoMode change detection baseline.
-      var echoCols2 = findColumns();
-      if (echoCols2.length > 0) lastKnownWidths = colWidthsFromDOM(echoCols2);
-      return;
-    }
-
-    // Guard: stale observed elements
-    if (observedCols.length > 0 && !observedCols[0].isConnected) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: observed cols detached — re-attaching");
-      attachObserver("stale");
-      return;
-    }
-
-    var cols = findColumns();
-    if (cols.length === 0) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: no cols found");
-      return;
-    }
-    var widths = colWidthsFromDOM(cols);
-    var headerTable = cols[0].closest("table");
-    var doc = cols[0].ownerDocument;
-    var bodyTable = findBodyTable(doc, headerTable);
-
-    var colFlags = colAutoFlags || widths.map(function() { return false; });
-    var prevW = lastKnownWidths;                // save before update
-    var changedIdxs = getChangedColumns(widths, prevW);
-    lastKnownWidths = widths;                   // update baseline for next comparison
-
-    bridgeLog("[Bridge] " + ts() + " publishWidths: PUBLISH widths=[" + widths.join(", ") + "]" +
-              " prevW=[" + (prevW ? prevW.join(",") : "null") + "]" +
-              " changed=[" + changedIdxs.join(",") + "]" +
-              " colFlags=[" + colFlags.map(function(f) { return f ? "A" : "P"; }).join(",") + "]" +
-              " autoMode=" + autoMode + " allPixelMode=" + allPixelMode +
-              " headerTable=" + tableStyleStr(headerTable));
-    bridgeLog("[Bridge] " + ts() + " publishWidths: body BEFORE: " +
-              bodyCellStyleStr(bodyTable, cols.length));
-
-    // Distinguish window resize from user drag using opposing-change direction:
-    //
-    //   Window resize: all changed columns move in the SAME direction.
-    //                  Suppress MATLAB notification so DataColumnWidth_ keeps
-    //                  its nx values.
-    //
-    //   Drag: one column grows while an adjacent one shrinks.
-    //         The LEFT column (smaller index) of the dragged divider becomes
-    //         pixel; the right column stays proportional.
-    //         Send -1 for any unchanged nx columns so MATLAB keeps them.
-    if (changedIdxs.length > 1) {
-      // Window resize: all changed cols move in the same direction.
-      // Drag: at least one grows while another shrinks (space redistributed).
-      var hasOpposing = changedIdxs.some(function(i) { return prevW && widths[i] > prevW[i]; }) &&
-                        changedIdxs.some(function(i) { return prevW && widths[i] < prevW[i]; });
-
-      if (!hasOpposing) {
-        // All changed columns moved the same way — window resize.
-        // Stamp pixel cols in header so they don't drift; leave nx cols unstyled.
-        for (var i = 0; i < cols.length; i++) {
-          if (!colFlags[i]) {
-            cols[i].style.minWidth = widths[i] + "px";
-            cols[i].style.maxWidth = widths[i] + "px";
-          }
-        }
-        if (bodyTable) {
-          var bodyRows0 = bodyTable.querySelectorAll("tr");
-          for (var r0 = 0; r0 < bodyRows0.length; r0++) {
-            var cells0 = bodyRows0[r0].querySelectorAll("td");
-            for (var ci0 = 0; ci0 < cells0.length && ci0 < widths.length; ci0++) {
-              cells0[ci0].style.minWidth = widths[ci0] + "px";
-              cells0[ci0].style.maxWidth = widths[ci0] + "px";
-            }
-          }
-          bridgeLog("[Bridge] " + ts() + " publishWidths: body AFTER: " +
-                    bodyCellStyleStr(bodyTable, cols.length));
-        }
-        bridgeLog("[Bridge] " + ts() + " publishWidths: mixed-mode window-resize" +
-                  " (changed=[" + changedIdxs.join(",") + "]) — suppressed");
-        return;
-      }
-
-      // Opposing changes → single column drag.
-      // The column to the LEFT of the dragged divider becomes pixel; the column
-      // to the right absorbs the change and stays proportional.
-      // The left column always has the smaller index.
-      var dragIdx = Math.min.apply(null, changedIdxs);
-      bridgeLog("[Bridge] " + ts() + " publishWidths: mixed-mode drag" +
-                " changedIdxs=[" + changedIdxs.join(",") + "] dragIdx=" + dragIdx);
-
-      // Stamp header: pixel cols + dragged col; other nx cols left free.
-      for (var i = 0; i < cols.length; i++) {
-        if (!colFlags[i] || i === dragIdx) {
-          cols[i].style.minWidth = widths[i] + "px";
-          cols[i].style.maxWidth = widths[i] + "px";
-        }
-      }
-      if (bodyTable) {
-        var bodyRows1 = bodyTable.querySelectorAll("tr");
-        for (var r1 = 0; r1 < bodyRows1.length; r1++) {
-          var cells1 = bodyRows1[r1].querySelectorAll("td");
-          for (var ci1 = 0; ci1 < cells1.length && ci1 < widths.length; ci1++) {
-            cells1[ci1].style.minWidth = widths[ci1] + "px";
-            cells1[ci1].style.maxWidth = widths[ci1] + "px";
-          }
-        }
-        bridgeLog("[Bridge] " + ts() + " publishWidths: body AFTER: " +
-                  bodyCellStyleStr(bodyTable, cols.length));
-      }
-      // jsNotify: dragged col → new pixel; pixel cols → current pixel;
-      // other nx cols → -1 so MATLAB keeps their existing nx/auto value.
-      var jsNotify2 = widths.map(function(w, i) {
-        if (i === dragIdx) return w;
-        if (!colFlags[i]) return w;
-        return -1;
-      });
-      bridgeLog("[Bridge] " + ts() + " publishWidths: mixed-mode drag col=" + dragIdx +
-                " jsNotify=[" + jsNotify2.join(",") + "]");
-      autoMode = false;
-      htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify2 };
-      return;
-    }
-
-    // changedIdxs.length is 0 or 1 — single-column or no-op path.
-
-    // Special case: single auto/nx column changed → window resize of proportional col.
-    // The pixel cols are constrained (min=max) so they didn't change.
-    // Suppress MATLAB notification (it already holds the correct nx weight).
-    if (changedIdxs.length === 1 && colFlags[changedIdxs[0]]) {
-      // Stamp pixel cols only; leave auto col unstamped in header.
-      for (var i = 0; i < cols.length; i++) {
-        if (!colFlags[i]) {
-          cols[i].style.minWidth = widths[i] + "px";
-          cols[i].style.maxWidth = widths[i] + "px";
-        }
-      }
-      // Update body cells for virtual-scroll accuracy.
-      if (bodyTable) {
-        var bodyRowsS = bodyTable.querySelectorAll("tr");
-        for (var rS = 0; rS < bodyRowsS.length; rS++) {
-          var cellsS = bodyRowsS[rS].querySelectorAll("td");
-          for (var ciS = 0; ciS < cellsS.length && ciS < widths.length; ciS++) {
-            cellsS[ciS].style.minWidth = widths[ciS] + "px";
-            cellsS[ciS].style.maxWidth = widths[ciS] + "px";
-          }
-        }
-        bridgeLog("[Bridge] " + ts() + " publishWidths: body AFTER: " +
-                  bodyCellStyleStr(bodyTable, cols.length));
-      }
-      bridgeLog("[Bridge] " + ts() + " publishWidths: mixed single-auto window-resize" +
-                " col=" + changedIdxs[0] + " — suppressed");
-      return;
-    }
-
-    // Stamp header: pixel cols + any dragged col; leave other nx cols unstyled.
-    for (var i = 0; i < cols.length; i++) {
-      if (!colFlags[i] || changedIdxs.indexOf(i) >= 0) {
-        cols[i].style.minWidth = widths[i] + "px";
-        cols[i].style.maxWidth = widths[i] + "px";
-      }
-    }
-    // Stamp body cells for ALL columns (virtual-scroll row rendering needs it).
-    if (bodyTable) {
-      var bodyRows = bodyTable.querySelectorAll("tr");
-      for (var r = 0; r < bodyRows.length; r++) {
-        var cells = bodyRows[r].querySelectorAll("td");
-        for (var ci = 0; ci < cells.length && ci < widths.length; ci++) {
-          cells[ci].style.minWidth = widths[ci] + "px";
-          cells[ci].style.maxWidth = widths[ci] + "px";
-        }
-      }
-      bridgeLog("[Bridge] " + ts() + " publishWidths: body AFTER: " +
-                bodyCellStyleStr(bodyTable, cols.length));
-    }
-
-    // Build partial-update array: -1 for unchanged nx cols, pixel for everything else.
-    var jsNotify = widths.map(function(w, i) {
-      return (colFlags[i] && changedIdxs.indexOf(i) < 0) ? -1 : w;
-    });
-    bridgeLog("[Bridge] " + ts() + " publishWidths: notifying MATLAB" +
-              " jsNotify=[" + jsNotify.join(",") + "]");
-    autoMode = false;
-    htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify };
-  }
-
-  function debouncedPublish() {
-    var echoMs = Math.max(0, echoSuppressUntil - Date.now());
-    bridgeLog("[Bridge] " + ts() + " debouncedPublish: ResizeObserver fired" +
-              " (debounce " + DEBOUNCE_MS + "ms)" +
-              " paused=" + paused +
-              " autoMode=" + autoMode +
-              " echoWindowMs=" + echoMs);
-    // Sync body with header on every fire for visual fidelity during drag.
-    // This applies in both autoMode and non-autoMode (mixed pixel+nx layouts
-    // also need body cells to track the header live while dragging).
-    syncBodyWithHeader("drag-live");
-    if (autoMode) {
-      if (paused || echoMs > 0) {
-        // Echo / MATLAB-render path: body sync is all we need, no MATLAB notification.
-        // Snapshot the current widths as the settled baseline so that when the user
-        // later drags a column we can tell which one changed.
-        var echoCols = findColumns();
-        if (echoCols.length > 0) lastAutoWidths = colWidthsFromDOM(echoCols);
-        return;
-      }
-      // User drag or window resize: body already synced above; fall through to schedule
-      // debounced publishWidths so it can distinguish the two cases.
-    }
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
-  }
-
-  function attachObserver(label) {
-    var cols = findColumns();
-    var info = "found=" + cols.length +
-               (cols.length ? (" connected=" + cols[0].isConnected +
-                               " colWidths=[" + colWidthsFromDOM(cols).join(",") + "]") : "");
-    bridgeLog("[Bridge] " + ts() + " attachObserver(" + (label||"") + "): " + info);
-    if (cols.length === 0) {
-      attachAttempts++;
-      if (attachAttempts < MAX_ATTEMPTS) {
-        setTimeout(function() { attachObserver("retry"); }, RETRY_INTERVAL);
-      }
-      return;
-    }
-    // Guard: reject a scoping-failure result (e.g. found columns from two
-    // tables when expectedColCount is set).  Retry with a fresh findColumns()
-    // call so that Strategy 2 (iframe-relative) has a chance to converge.
-    if (expectedColCount > 0 && cols.length !== expectedColCount) {
-      bridgeLog("[Bridge] " + ts() + " attachObserver: count " + cols.length +
-                " != expected " + expectedColCount + " — retrying");
-      attachAttempts++;
-      if (attachAttempts < MAX_ATTEMPTS) {
-        setTimeout(function() { attachObserver("retry-count"); }, RETRY_INTERVAL);
-      }
-      return;
-    }
-    observedCols = cols;
-    if (resizeObserver) resizeObserver.disconnect();
-    resizeObserver = new ResizeObserver(debouncedPublish);
-    cols.forEach(function(col) { resizeObserver.observe(col); });
-  }
+  // ---- Event wiring ----
 
   function setup(component) {
     htmlComponent = component;
 
     htmlComponent.addEventListener("Init", function(event) {
       tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
-      bridgeLog("[Bridge] " + ts() + " Init received: tableTag=" + tableTag);
+      bridgeLog("[Bridge] " + ts() + " Init: tableTag=" + tableTag);
       setTimeout(function() { attachObserver("Init"); }, RETRY_INTERVAL);
     });
 
@@ -790,40 +546,29 @@
       clearTimeout(debounceTimer);
       var duration = (event.Data && event.Data.durationMs) ? event.Data.durationMs : 500;
       echoSuppressUntil = Date.now() + duration;
-      bridgeLog("[Bridge] " + ts() + " Pause received: duration=" + duration +
-                "ms, echoSuppressUntil set +" + duration + "ms");
+      bridgeLog("[Bridge] " + ts() + " Pause: duration=" + duration + "ms");
       setTimeout(function() {
         paused = false;
-        bridgeLog("[Bridge] " + ts() + " Pause expired (paused→false)");
-        if (autoMode) {
-          // MATLAB may have re-rendered the header during the pause (e.g. applied
-          // a "1x/2x" layout) without triggering another ResizeObserver fire here.
-          // Sync the body now so it matches the current header widths, and refresh
-          // lastAutoWidths so drag/window-resize detection uses the correct baseline.
-          syncBodyWithHeader("post-pause");
-          var ppCols = findColumns();
-          if (ppCols.length > 0) lastAutoWidths = colWidthsFromDOM(ppCols);
+        syncBodyWithHeader("post-pause");
+        var cols = findColumns();
+        if (cols.length > 0) {
+          prevWidths = colWidthsFromDOM(cols);
+          bridgeLog("[Bridge] " + ts() + " Pause expired: prevWidths=[" + prevWidths.join(",") + "]");
         } else {
-          // Non-autoMode: update lastKnownWidths so any transient layout during the
-          // pause (e.g. MATLAB re-rendering nx columns) doesn't trigger false drags.
-          var ppCols2 = findColumns();
-          if (ppCols2.length > 0) {
-            lastKnownWidths = colWidthsFromDOM(ppCols2);
-            bridgeLog("[Bridge] " + ts() + " Pause expired: lastKnownWidths=[" + lastKnownWidths.join(",") + "]");
-          }
+          bridgeLog("[Bridge] " + ts() + " Pause expired");
         }
       }, duration);
     });
 
     htmlComponent.addEventListener("Reattach", function() {
-      bridgeLog("[Bridge] " + ts() + " Reattach received");
+      bridgeLog("[Bridge] " + ts() + " Reattach");
       attachAttempts = 0;
       setTimeout(function() { attachObserver("Reattach"); }, RETRY_INTERVAL);
     });
 
     htmlComponent.addEventListener("SetWidths", function(event) {
       var widths = event.Data;
-      bridgeLog("[Bridge] " + ts() + " SetWidths received: " + JSON.stringify(widths));
+      bridgeLog("[Bridge] " + ts() + " SetWidths: " + JSON.stringify(widths));
       if (!Array.isArray(widths)) return;
       expectedColCount = widths.length;
       applyColumnWidths(widths);
