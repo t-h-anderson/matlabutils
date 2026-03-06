@@ -24,6 +24,12 @@
   //                   true = nx/auto col (MATLAB owns proportional value).
   //                   false = pixel col (bridge stamps explicit min/max).
   //
+  //   settledPropWidths  Snapshot of proportional column pixel widths taken at
+  //                   each Pause expiry (i.e. after the browser has reflowed
+  //                   following a MATLAB echo).  Used to redistribute
+  //                   proportional header columns when a pixel column is
+  //                   dragged, so the nx columns maintain their current ratio.
+  //
   //   allPixelMode    true only when every column is pixel.  Controls whether
   //                   the body table is also given an explicit pixel width
   //                   (needed to prevent overflow in the all-pixel case).
@@ -38,6 +44,10 @@
   //   of the total proportional space, normalised so weights sum to
   //   propCount (average weight = 1).  Pixel columns report their new
   //   rendered pixel width.  No column ever changes type (px ↔ nx) on drag.
+  //
+  //   When a pixel column is dragged (pixel/nx boundary), the bridge
+  //   redistributes the proportional header columns on each SetWidths echo
+  //   so they keep their settled ratio as the proportional space changes.
   //
   // --- Window-resize detection -------------------------------------------
   //
@@ -66,6 +76,9 @@
   var colAutoFlags      = null;
   // Settled column pixel widths used as drag/resize baseline.
   var prevWidths        = null;
+  // Proportional column pixel widths at the last settled state (Pause expiry).
+  // Index is 0 for pixel columns, >0 for proportional columns.
+  var settledPropWidths = null;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -171,19 +184,14 @@
 
   // ---- Body cell stamping ----
 
-  // autoFlags: optional per-column boolean array (true = proportional).
-  // When provided, only pixel columns (autoFlags[i] === false) are stamped.
-  // Proportional columns must be left unconstrained so they can reflow freely.
-  function stampBodyCells(bodyTable, widths, nCols, autoFlags) {
+  function stampBodyCells(bodyTable, widths, nCols) {
     if (!bodyTable) return;
     var rows = bodyTable.querySelectorAll("tr");
     for (var r = 0; r < rows.length; r++) {
       var cells = rows[r].querySelectorAll("td");
       for (var i = 0; i < cells.length && i < nCols; i++) {
-        if (!autoFlags || !autoFlags[i]) {
-          cells[i].style.minWidth = widths[i] + "px";
-          cells[i].style.maxWidth = widths[i] + "px";
-        }
+        cells[i].style.minWidth = widths[i] + "px";
+        cells[i].style.maxWidth = widths[i] + "px";
       }
     }
   }
@@ -259,6 +267,33 @@
         newColTotal += widths[i];
       }
     }
+
+    // Mixed mode: redistribute proportional header columns so they maintain
+    // their settled ratio as the pixel column total changes.
+    //
+    // In mixed mode MATLAB stamps explicit pixel min/max on ALL header columns
+    // (including proportional ones) at render time.  When a pixel column is
+    // dragged, MATLAB echoes SetWidths=[newPx,-1,-1,...] but does not update
+    // the proportional column CSS until the next full re-render.  Without this
+    // redistribution the proportional columns would stay pinned at their
+    // previous pixel values, causing one proportional column to absorb all the
+    // slack from the pixel column resize.
+    if (!allPixel && !allAuto && settledPropWidths && headerTable) {
+      var settledPropTotal = 0;
+      for (var i = 0; i < settledPropWidths.length; i++) settledPropTotal += settledPropWidths[i];
+      var containerW   = Math.round(headerTable.getBoundingClientRect().width);
+      var newPropSpace = containerW - newColTotal;
+      if (settledPropTotal > 0 && newPropSpace > 0) {
+        for (var i = 0; i < cols.length; i++) {
+          if (widths[i] < 0 && settledPropWidths[i] > 0) {
+            var newW = Math.round(newPropSpace * settledPropWidths[i] / settledPropTotal);
+            cols[i].style.minWidth = Math.max(1, newW) + "px";
+            cols[i].style.maxWidth = Math.max(1, newW) + "px";
+          }
+        }
+      }
+    }
+
     if (headerTable) {
       if (allPixel) {
         headerTable.style.width    = newColTotal + "px";
@@ -295,7 +330,7 @@
         bodyTable.style.removeProperty("min-width");
         bodyTable.style.removeProperty("max-width");
       } else {
-        // Stamp pixel cols; always clear constraints for proportional cols.
+        // Stamp pixel cols; remove constraints only from cols that WE previously stamped.
         var bodyRows = bodyTable.querySelectorAll("tr");
         for (var r = 0; r < bodyRows.length; r++) {
           var cells = bodyRows[r].querySelectorAll("td");
@@ -303,10 +338,7 @@
             if (widths[i] >= 0) {
               cells[i].style.minWidth = widths[i] + "px";
               cells[i].style.maxWidth = widths[i] + "px";
-            } else {
-              // Always clear proportional body cells — syncBodyWithHeader
-              // stamps them with live pixel values during drag, so we must
-              // undo that on every SetWidths regardless of previous state.
+            } else if (!prevColAutoFlags || !prevColAutoFlags[i]) {
               cells[i].style.removeProperty("min-width");
               cells[i].style.removeProperty("max-width");
             }
@@ -331,7 +363,10 @@
     }
 
     // Schedule body sync so proportional cols settle before we snapshot.
-    if (allAuto) {
+    // allAuto: proportional reflow is async; RAF lets columns settle first.
+    // mixed:   header proportional cols were just redistributed above; a RAF
+    //          re-stamps body cells to match their new header pixel values.
+    if (allAuto || (!allPixel && settledPropWidths)) {
       requestAnimationFrame(function() { syncBodyWithHeader("raf"); });
     }
 
@@ -362,8 +397,7 @@
       bodyTable.style.minWidth = hTableWidth + "px";
       bodyTable.style.maxWidth = hTableWidth + "px";
     }
-    // Only pin pixel body cells; proportional cells align with header via CSS.
-    stampBodyCells(bodyTable, widths, cols.length, colAutoFlags);
+    stampBodyCells(bodyTable, widths, cols.length);
   }
 
   // ---- Change detection ----
@@ -432,9 +466,8 @@
     var singlePixelDrag = changedIdxs.length === 1 && !colFlags[changedIdxs[0]];
     var isDrag = hasOpposing || singlePixelDrag;
 
-    // Stamp pixel body cells so virtual-scroll rows have accurate widths.
-    // Proportional cells must stay unconstrained to reflow freely.
-    stampBodyCells(bodyTable, widths, cols.length, colFlags);
+    // Always stamp body cells so virtual-scroll rows have accurate widths.
+    stampBodyCells(bodyTable, widths, cols.length);
 
     if (!isDrag) {
       // Window resize: re-stamp pixel header cols so they don't drift.
@@ -575,6 +608,12 @@
         var cols = findColumns();
         if (cols.length > 0) {
           prevWidths = colWidthsFromDOM(cols);
+          // Snapshot proportional column pixel widths for use by the next
+          // mixed-mode SetWidths (to redistribute proportional header cols
+          // when a pixel col is resized while keeping the nx ratio intact).
+          settledPropWidths = prevWidths.map(function(w, i) {
+            return (colAutoFlags && colAutoFlags[i]) ? w : 0;
+          });
           bridgeLog("[Bridge] " + ts() + " Pause expired: prevWidths=[" + prevWidths.join(",") + "]");
         } else {
           bridgeLog("[Bridge] " + ts() + " Pause expired");
