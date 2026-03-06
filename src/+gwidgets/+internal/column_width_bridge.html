@@ -156,28 +156,44 @@
     // newly rendered rows will be patched the next time SetWidths fires.
     var bodyTable = findBodyTable(doc);
     if (bodyTable) {
-      var bodyRows = bodyTable.querySelectorAll("tr");
-      for (var r = 0; r < bodyRows.length; r++) {
-        var cells = bodyRows[r].querySelectorAll("td");
-        for (var i = 0; i < cells.length && i < widths.length; i++) {
-          if (widths[i] < 0) {
-            cells[i].style.removeProperty("min-width");
-            cells[i].style.removeProperty("max-width");
-          } else {
+      if (allAuto) {
+        // The header and body are independent <table> elements whose flex
+        // layouts would auto-size columns based on different content.  To
+        // keep them aligned: force a reflow to read the header's auto-sized
+        // widths, then pin the body cells to those values.
+        var autoWidths = cols.map(function(c) {
+          return Math.round(c.getBoundingClientRect().width);
+        });
+        var bodyRows = bodyTable.querySelectorAll("tr");
+        for (var r = 0; r < bodyRows.length; r++) {
+          var cells = bodyRows[r].querySelectorAll("td");
+          for (var i = 0; i < cells.length && i < autoWidths.length; i++) {
+            cells[i].style.minWidth = autoWidths[i] + "px";
+            cells[i].style.maxWidth = autoWidths[i] + "px";
+          }
+        }
+        // Match the body table width to the header table width.
+        if (headerTable) {
+          var hTableWidth = Math.round(headerTable.getBoundingClientRect().width);
+          bodyTable.style.width    = hTableWidth + "px";
+          bodyTable.style.minWidth = hTableWidth + "px";
+          bodyTable.style.maxWidth = hTableWidth + "px";
+        }
+      } else {
+        var bodyRows = bodyTable.querySelectorAll("tr");
+        for (var r = 0; r < bodyRows.length; r++) {
+          var cells = bodyRows[r].querySelectorAll("td");
+          for (var i = 0; i < cells.length && i < widths.length; i++) {
             cells[i].style.minWidth = widths[i] + "px";
             cells[i].style.maxWidth = widths[i] + "px";
           }
         }
-      }
-      if (allPixel) {
-        var bw = Math.round(newColTotal + fixedOffset);
-        bodyTable.style.width    = bw + "px";
-        bodyTable.style.minWidth = bw + "px";
-        bodyTable.style.maxWidth = bw + "px";
-      } else if (allAuto) {
-        bodyTable.style.removeProperty("width");
-        bodyTable.style.removeProperty("min-width");
-        bodyTable.style.removeProperty("max-width");
+        if (allPixel) {
+          var bw = Math.round(newColTotal + fixedOffset);
+          bodyTable.style.width    = bw + "px";
+          bodyTable.style.minWidth = bw + "px";
+          bodyTable.style.maxWidth = bw + "px";
+        }
       }
     }
 
