@@ -1555,8 +1555,11 @@ classdef Table < gwidgets.internal.Reparentable
                     struct("durationMs", pauseMs));
             end
             % Clear the MATLAB flag after the same window.
+            % The timer is deleted inside its own callback to avoid leaking
+            % timer objects when this method is called repeatedly (e.g. each
+            % column drag creates a new timer).
             t = timer("StartDelay", pauseMs/1000, "ExecutionMode", "singleShot", ...
-                "TimerFcn", @(~,~) this.clearPushingFlag());
+                "TimerFcn", @(src,~) [this.clearPushingFlag(), delete(src)]);
             start(t);
         end
 
