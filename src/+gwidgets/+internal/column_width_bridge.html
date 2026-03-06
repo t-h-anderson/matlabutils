@@ -79,6 +79,11 @@
   // Proportional column pixel widths at the last settled state (Pause expiry).
   // Index is 0 for pixel columns, >0 for proportional columns.
   var settledPropWidths = null;
+  // Set true in publishWidths before sending ColumnWidthChanged; cleared at
+  // the start of the next applyColumnWidths.  Guards redistribution so it
+  // only fires for MATLAB's echo of a bridge-initiated drag, not for
+  // independent programmatic tb.ColumnWidth assignments.
+  var pendingRedistrib  = false;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -245,6 +250,14 @@
       settledPropWidths = null;
     }
 
+    // Redistribution only makes sense as a response to the bridge's own drag
+    // event (MATLAB echoes Pause + SetWidths after ColumnWidthChanged).  For
+    // independent programmatic assignments, pendingRedistrib is false and
+    // willRedistrib stays false regardless of settledPropWidths.
+    var willRedistrib = pendingRedistrib && !allPixel && !allAuto &&
+                        settledPropWidths !== null && headerTable !== null;
+    pendingRedistrib = false;
+
     if (allAuto) {
       echoSuppressUntil = Date.now() + 400;
       bridgeLog("[Bridge] " + ts() + " applyColumnWidths: allAuto — echoSuppressUntil +400ms");
@@ -286,7 +299,7 @@
     // redistribution the proportional columns would stay pinned at their
     // previous pixel values, causing one proportional column to absorb all the
     // slack from the pixel column resize.
-    if (!allPixel && !allAuto && settledPropWidths && headerTable) {
+    if (willRedistrib) {
       var settledPropTotal = 0;
       for (var i = 0; i < settledPropWidths.length; i++) settledPropTotal += settledPropWidths[i];
       var containerW   = Math.round(headerTable.getBoundingClientRect().width);
@@ -370,11 +383,12 @@
                 bodyCellStyleStr(bodyTable, cols.length));
     }
 
-    // Schedule body sync so proportional cols settle before we snapshot.
-    // allAuto: proportional reflow is async; RAF lets columns settle first.
-    // mixed:   header proportional cols were just redistributed above; a RAF
-    //          re-stamps body cells to match their new header pixel values.
-    if (allAuto || (!allPixel && settledPropWidths)) {
+    // Schedule body sync after the browser has reflowed proportional columns.
+    // allAuto: browser drives column widths asynchronously; RAF waits for it.
+    // mixed:   either redistribution just stamped new header values, or MATLAB
+    //          updated proportional CSS; either way body cells need re-stamping.
+    // allPixel: body cells stamped inline above; no RAF needed.
+    if (!allPixel) {
       requestAnimationFrame(function() { syncBodyWithHeader("raf"); });
     }
 
@@ -518,6 +532,7 @@
 
     bridgeLog("[Bridge] " + ts() + " publishWidths: drag" +
               " jsNotify=[" + jsNotify.join(",") + "]");
+    pendingRedistrib = true;
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify };
   }
 
