@@ -246,9 +246,13 @@
       } else {
         // allAuto or mixed: let the browser size the table freely;
         // pixel columns' min/max constraints already constrain it.
-        headerTable.style.removeProperty("width");
-        headerTable.style.removeProperty("min-width");
-        headerTable.style.removeProperty("max-width");
+        // Only remove px values WE set; preserve MATLAB's % widths (e.g. "width: 100%").
+        var hw = headerTable.style.width;
+        if (hw && hw.indexOf('%') < 0) headerTable.style.removeProperty("width");
+        var hmw = headerTable.style.minWidth;
+        if (hmw && hmw.indexOf('%') < 0) headerTable.style.removeProperty("min-width");
+        var hmxw = headerTable.style.maxWidth;
+        if (hmxw && hmxw.indexOf('%') < 0) headerTable.style.removeProperty("max-width");
       }
     }
 
@@ -301,10 +305,14 @@
           bodyTable.style.minWidth = bw + "px";
           bodyTable.style.maxWidth = bw + "px";
         } else {
-          // mixed: clear any stale explicit table width from a prior allPixel state
-          bodyTable.style.removeProperty("width");
-          bodyTable.style.removeProperty("min-width");
-          bodyTable.style.removeProperty("max-width");
+          // mixed: clear any stale explicit px table width from a prior allPixel state;
+          // preserve MATLAB's % widths (e.g. "width: 100%").
+          var bw2 = bodyTable.style.width;
+          if (bw2 && bw2.indexOf('%') < 0) bodyTable.style.removeProperty("width");
+          var bmw = bodyTable.style.minWidth;
+          if (bmw && bmw.indexOf('%') < 0) bodyTable.style.removeProperty("min-width");
+          var bmxw = bodyTable.style.maxWidth;
+          if (bmxw && bmxw.indexOf('%') < 0) bodyTable.style.removeProperty("max-width");
         }
         bridgeLog("[Bridge] " + ts() + " applyColumnWidths: body AFTER: " +
                   bodyCellStyleStr(bodyTable, cols.length));
@@ -762,6 +770,14 @@
           syncBodyWithHeader("post-pause");
           var ppCols = findColumns();
           if (ppCols.length > 0) lastAutoWidths = colWidthsFromDOM(ppCols);
+        } else {
+          // Non-autoMode: update lastKnownWidths so any transient layout during the
+          // pause (e.g. MATLAB re-rendering nx columns) doesn't trigger false drags.
+          var ppCols2 = findColumns();
+          if (ppCols2.length > 0) {
+            lastKnownWidths = colWidthsFromDOM(ppCols2);
+            bridgeLog("[Bridge] " + ts() + " Pause expired: lastKnownWidths=[" + lastKnownWidths.join(",") + "]");
+          }
         }
       }, duration);
     });
