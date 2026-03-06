@@ -306,12 +306,23 @@
     var now = Date.now();
     var echoMs = Math.max(0, echoSuppressUntil - now);
 
-    // Auto-mode echo: sync body with header but do NOT notify MATLAB.
-    if (now < echoSuppressUntil && autoMode) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: AUTO ECHO (echoWindowMs=" + echoMs +
-                " paused=" + paused + ") → syncBodyWithHeader");
-      syncBodyWithHeader("echo");
-      return;
+    // Auto mode: sync body with header on every ResizeObserver fire, whether
+    // we are in the echo window, still paused, or fully live.
+    //
+    // The pause prevents MATLAB notification (no ColumnWidthChanged sent),
+    // but the body MUST track the header even inside the pause.  MATLAB's
+    // own "1x" rendering fires the ResizeObserver within the 1200 ms Pause
+    // window but after the 400 ms echo window:
+    //   t+0   ms  applyColumnWidths: header 104→82 px; echo window opens (400ms)
+    //   t+228 ms  echo sync: body→82 px  (echoMs>0)
+    //   t+447 ms  MATLAB renders 1x: header 82→104 px; ResizeObserver fires
+    //   t+650 ms  publishWidths: echoMs=0, paused=true → was SUPPRESSED ← bug
+    //             with this fix: body synced to 104 px                   ← fix
+    if (autoMode) {
+      bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode body sync" +
+                " (echoMs=" + echoMs + " paused=" + paused + ")");
+      syncBodyWithHeader(echoMs > 0 ? "echo" : "render-sync");
+      return;   // never notify MATLAB from echo/render paths
     }
     if (paused) {
       bridgeLog("[Bridge] " + ts() + " publishWidths: SUPPRESSED (paused=true, echoMs=" + echoMs + ")");
