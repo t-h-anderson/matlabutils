@@ -237,6 +237,14 @@
     allPixelMode    = allPixel;
     prevWidths      = null;  // re-populate from next settled publishWidths/pause-expiry
 
+    // Invalidate settled proportional widths when the pixel/auto layout changes.
+    // A stale snapshot from a different column configuration (e.g. all-auto →
+    // mixed, or different proportional columns) must not drive redistribution.
+    if (!prevColAutoFlags ||
+        prevColAutoFlags.some(function(f, i) { return f !== colAutoFlags[i]; })) {
+      settledPropWidths = null;
+    }
+
     if (allAuto) {
       echoSuppressUntil = Date.now() + 400;
       bridgeLog("[Bridge] " + ts() + " applyColumnWidths: allAuto — echoSuppressUntil +400ms");
