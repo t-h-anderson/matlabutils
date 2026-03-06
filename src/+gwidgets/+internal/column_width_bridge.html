@@ -22,6 +22,10 @@
   var htmlComponent     = null;
   var attachAttempts    = 0;
   var observedCols      = [];
+  // Baseline column widths (px) when autoMode is active and MATLAB has fully
+  // rendered.  Used to distinguish a user column drag (one column changed)
+  // from a window resize (all columns changed proportionally).
+  var lastAutoWidths    = null;
 
   var t0 = Date.now();  // reference timestamp for relative timing
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -128,6 +132,7 @@
     autoMode = allAuto;
     if (allAuto) {
       echoSuppressUntil = Date.now() + 400;
+      lastAutoWidths = null;  // will be populated once MATLAB's render settles
       bridgeLog("[Bridge] " + ts() + " applyColumnWidths: echoSuppressUntil set +400ms");
     }
 
@@ -302,6 +307,21 @@
               bodyCellStyleStr(bodyTable, cols.length));
   }
 
+  // Return indices of columns whose width changed by more than DRAG_THRESHOLD px.
+  // If last is null (no baseline yet) every index is returned, which causes the
+  // caller to treat the event as a window resize and suppress MATLAB notification.
+  var DRAG_THRESHOLD = 2;
+  function getChangedColumns(current, last) {
+    if (!last || last.length !== current.length) {
+      return current.map(function(_, i) { return i; });
+    }
+    var changed = [];
+    for (var i = 0; i < current.length; i++) {
+      if (Math.abs(current[i] - last[i]) > DRAG_THRESHOLD) changed.push(i);
+    }
+    return changed;
+  }
+
   function publishWidths() {
     var now = Date.now();
     var echoMs = Math.max(0, echoSuppressUntil - now);
@@ -327,8 +347,32 @@
                   " (echoMs=" + echoMs + " paused=" + paused + ")");
         return;
       }
-      // User drag in auto mode: fall through to notify MATLAB with pixel widths.
-      bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode user drag → notifying MATLAB");
+      // User interaction (drag) or window resize.  Use lastAutoWidths to tell them apart:
+      //   - exactly 1 column changed  → user dragged that column
+      //   - 0 or multiple changed     → window resize (all columns scaled proportionally)
+      var cols = findColumns();
+      if (cols.length === 0) return;
+      var currentWidths = colWidthsFromDOM(cols);
+      var changedIdxs = getChangedColumns(currentWidths, lastAutoWidths);
+      lastAutoWidths = currentWidths;   // update baseline for future comparisons
+      if (changedIdxs.length !== 1) {
+        // Window resize — body is already synced live; suppress MATLAB notification
+        // so DataColumnWidth_ keeps its "nx" values.
+        bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode window-resize" +
+                  " (changed=" + changedIdxs.length + " cols) — suppressed");
+        return;
+      }
+      // Single column changed → user drag.  Send a partial-update array:
+      //   positive value  for the dragged column (new pixel width)
+      //   -1              for every other column (keep existing "nx" value in MATLAB)
+      var dragIdx = changedIdxs[0];
+      var jsWidths = currentWidths.map(function(w, i) { return i === dragIdx ? w : -1; });
+      bridgeLog("[Bridge] " + ts() + " publishWidths: auto-mode user drag" +
+                " col=" + dragIdx + " → " + currentWidths[dragIdx] + "px" +
+                " jsWidths=[" + jsWidths.join(",") + "]");
+      autoMode = false;
+      htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsWidths };
+      return;
     }
     if (paused) {
       bridgeLog("[Bridge] " + ts() + " publishWidths: SUPPRESSED (paused=true, echoMs=" + echoMs + ")");
@@ -398,10 +442,14 @@
       syncBodyWithHeader("drag-live");
       if (paused || echoMs > 0) {
         // Echo / MATLAB-render path: body sync is all we need, no MATLAB notification.
+        // Snapshot the current widths as the settled baseline so that when the user
+        // later drags a column we can tell which one changed.
+        var echoCols = findColumns();
+        if (echoCols.length > 0) lastAutoWidths = colWidthsFromDOM(echoCols);
         return;
       }
-      // User drag in auto mode: body already synced above; fall through to schedule
-      // debounced publishWidths so MATLAB is notified after the drag settles.
+      // User drag or window resize: body already synced above; fall through to schedule
+      // debounced publishWidths so it can distinguish the two cases.
     }
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);

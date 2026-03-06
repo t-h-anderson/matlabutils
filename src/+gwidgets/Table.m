@@ -1698,8 +1698,14 @@ classdef Table < gwidgets.internal.Reparentable
 
         function onColumnWidthChanged(this, pixelWidths)
             % Called when the user finishes dragging a column divider.
-            % pixelWidths is a numeric row vector of pixel widths for the
-            % currently visible columns.
+            %
+            % pixelWidths is a numeric row vector with one entry per visible
+            % column.  A positive value means the column was dragged to that
+            % pixel width.  A negative value (-1) is a sentinel meaning "this
+            % column was not dragged — keep its existing width value (e.g.
+            % '1x')".  This allows a drag in auto/nx mode to promote only the
+            % dragged column to a pixel width while leaving all other columns
+            % in their current auto/nx state.
             if this.IsPushingWidthToDisplay_
                 return
             end
@@ -1711,7 +1717,14 @@ classdef Table < gwidgets.internal.Reparentable
             end
 
             dataWidths = this.DataColumnWidth;
-            dataWidths(this.ColumnVisible) = num2cell(pixelWidths);
+            visIdxs = find(this.ColumnVisible);
+            for i = 1:numel(pixelWidths)
+                if pixelWidths(i) >= 0
+                    dataWidths{visIdxs(i)} = pixelWidths(i);
+                end
+                % pixelWidths(i) < 0: column not dragged; preserve existing
+                % value (e.g. "1x", "auto", or a previous pixel width).
+            end
 
             % Guard: if widths are identical to what we already have, this is
             % an echo from our own applyColumnWidthToDisplay (e.g., the
