@@ -232,7 +232,9 @@
         headerTable.style.width    = newTableWidth + "px";
         headerTable.style.minWidth = newTableWidth + "px";
         headerTable.style.maxWidth = newTableWidth + "px";
-      } else if (allAuto) {
+      } else {
+        // allAuto or mixed: let the browser size the table freely;
+        // pixel columns' min/max constraints already constrain it.
         headerTable.style.removeProperty("width");
         headerTable.style.removeProperty("min-width");
         headerTable.style.removeProperty("max-width");
@@ -273,8 +275,13 @@
         for (var r = 0; r < bodyRows.length; r++) {
           var cells = bodyRows[r].querySelectorAll("td");
           for (var i = 0; i < cells.length && i < widths.length; i++) {
-            cells[i].style.minWidth = widths[i] + "px";
-            cells[i].style.maxWidth = widths[i] + "px";
+            if (widths[i] >= 0) {
+              cells[i].style.minWidth = widths[i] + "px";
+              cells[i].style.maxWidth = widths[i] + "px";
+            } else {
+              cells[i].style.removeProperty("min-width");
+              cells[i].style.removeProperty("max-width");
+            }
           }
         }
         if (allPixel) {
@@ -282,6 +289,11 @@
           bodyTable.style.width    = bw + "px";
           bodyTable.style.minWidth = bw + "px";
           bodyTable.style.maxWidth = bw + "px";
+        } else {
+          // mixed: clear any stale explicit table width from a prior allPixel state
+          bodyTable.style.removeProperty("width");
+          bodyTable.style.removeProperty("min-width");
+          bodyTable.style.removeProperty("max-width");
         }
         bridgeLog("[Bridge] " + ts() + " applyColumnWidths: body AFTER: " +
                   bodyCellStyleStr(bodyTable, cols.length));

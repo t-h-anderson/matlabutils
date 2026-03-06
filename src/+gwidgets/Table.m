@@ -15,6 +15,7 @@ classdef Table < gwidgets.internal.Reparentable
         
         ColumnWidth (1,:) % Column Width
         DataColumnWidth (1,:) % Column Width
+        DefaultColumnWidths (1,:) % Default column widths restored when ColumnWidth is reset to {}
 
         Selection (:,:) double % Data selection. Either (:,2) for cell or (1,:) otherwise
         DisplaySelection (:,:) double % Display Selection. Either (:,2) for cell or (1,:) otherwise
@@ -54,6 +55,7 @@ classdef Table < gwidgets.internal.Reparentable
         IsPushingWidthToDisplay_ (1,1) logical = false % True while programmatic widths are being applied
 
         DataColumnWidth_ (1,:) cell % Width of data columns
+        DefaultColumnWidths_ (1,:) cell % Default column widths used as reset target
 
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
 
@@ -193,6 +195,22 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
+        function val = get.DefaultColumnWidths(this)
+            val = this.DefaultColumnWidths_;
+        end
+
+        function set.DefaultColumnWidths(this, val)
+            val = gwidgets.Table.normalizeColumnWidths(val);
+            if isscalar(val)
+                val = repelem(val, 1, numel(this.DataColumnNames));
+            end
+            if ~isempty(val) && numel(val) ~= numel(this.DataColumnNames)
+                error("GraphicsWidgets:Table:DefaultColumnWidthsSize", ...
+                    "Size of DefaultColumnWidths must match the number of data columns, be scalar, or be empty");
+            end
+            this.DefaultColumnWidths_ = val;
+        end
+
         function val = get.ColumnWidth(this)
             if isempty(this.DataColumnWidth_)
                 % No explicit widths set — read the display table's current value
@@ -209,8 +227,12 @@ classdef Table < gwidgets.internal.Reparentable
             val = gwidgets.Table.normalizeColumnWidths(val);
 
             if isempty(val)
-                % Empty clears all explicit widths (restores to auto)
-                this.DataColumnWidth_ = {};
+                % Empty resets to DefaultColumnWidths if set, otherwise clears to auto
+                if ~isempty(this.DefaultColumnWidths_)
+                    this.DataColumnWidth_ = this.DefaultColumnWidths_;
+                else
+                    this.DataColumnWidth_ = {};
+                end
             else
                 if isscalar(val)
                     val = repelem(val, 1, sum(this.ColumnVisible));
@@ -2699,8 +2721,8 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function onAutoResizeColumnsRequest(this, ~, ~)
-            % Reset all explicit column widths, letting the table auto-size.
-            this.ColumnWidth = {"auto"};
+            % Reset to DefaultColumnWidths if set, otherwise clear to auto.
+            this.ColumnWidth = {};
         end
 
         function onToggleRowFilterRequest(this, ~, ~)
