@@ -33,10 +33,15 @@
   //
   // --- Drag identification -----------------------------------------------
   //
-  //   A column drag moves exactly one divider — the right boundary of some
-  //   column.  Two adjacent columns change: one grows, one shrinks.
-  //   Rule: dragIdx = the SHRINKING column (most negative delta).
-  //   The shrinking column becomes pixel; the growing column keeps its nx value.
+  //   A column drag moves exactly one divider.  Multiple proportional columns
+  //   may change due to proportional rebalancing, so we cannot identify the
+  //   dragged boundary from which column shrank/grew.
+  //   Rule: find the internal boundary whose cumulative x-position moved the
+  //   most (largest |Σwidths_before[0..b-1] − Σwidths_after[0..b-1]|).
+  //   The column to the RIGHT of that boundary becomes pixel; columns to the
+  //   left of it keep their nx value.
+  //   Special case: a single pixel column changing alone (no opposing change)
+  //   means the user dragged that column's outer edge → it becomes pixel.
   //
   // --- Window-resize detection -------------------------------------------
   //
@@ -439,13 +444,28 @@
       return;
     }
 
-    // Drag: the SHRINKING column becomes pixel; the growing column stays proportional.
-    var dragIdx = changedIdxs[0];
-    if (prevW) {
-      for (var k = 0; k < changedIdxs.length; k++) {
-        if (widths[changedIdxs[k]] - prevW[changedIdxs[k]] <
-            widths[dragIdx] - prevW[dragIdx]) {
-          dragIdx = changedIdxs[k];
+    // Drag identification: find the internal boundary that moved the most.
+    // Boundary b sits between col[b-1] and col[b]; its x-position equals the
+    // cumulative sum of widths[0..b-1].  The boundary with the largest
+    // absolute position change is the one the user dragged.  The column to the
+    // RIGHT of that boundary (index b) becomes pixel.
+    // Special case: singlePixelDrag has no opposing column, so the one changed
+    // pixel column is the drag target directly.
+    var dragIdx;
+    if (!hasOpposing) {
+      dragIdx = changedIdxs[0];           // singlePixelDrag
+    } else {
+      dragIdx = changedIdxs[changedIdxs.length - 1]; // safe fallback
+      if (prevW) {
+        var maxDelta = 0, cumB = 0, cumA = 0;
+        for (var b = 1; b < cols.length; b++) {
+          cumB += prevW[b - 1];
+          cumA += widths[b - 1];
+          var delta = Math.abs(cumA - cumB);
+          if (delta > maxDelta) {
+            maxDelta = delta;
+            dragIdx = b;
+          }
         }
       }
     }
