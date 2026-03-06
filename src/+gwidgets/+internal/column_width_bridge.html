@@ -34,10 +34,9 @@
   // --- Drag identification -----------------------------------------------
   //
   //   A column drag moves exactly one divider — the right boundary of some
-  //   column.  Two adjacent columns change: the LEFT column grows/shrinks to
-  //   the new size; the RIGHT column absorbs the difference.
-  //   Rule: dragIdx = min(changedIdxs).
-  //   The left column becomes pixel; the right column keeps its nx value.
+  //   column.  Two adjacent columns change: one grows, one shrinks.
+  //   Rule: dragIdx = the SHRINKING column (most negative delta).
+  //   The shrinking column becomes pixel; the growing column keeps its nx value.
   //
   // --- Window-resize detection -------------------------------------------
   //
@@ -440,9 +439,16 @@
       return;
     }
 
-    // Drag: the LEFT column of the dragged divider (smaller index) becomes pixel.
-    // The right column absorbs the change and stays proportional.
-    var dragIdx = Math.min.apply(null, changedIdxs);
+    // Drag: the SHRINKING column becomes pixel; the growing column stays proportional.
+    var dragIdx = changedIdxs[0];
+    if (prevW) {
+      for (var k = 0; k < changedIdxs.length; k++) {
+        if (widths[changedIdxs[k]] - prevW[changedIdxs[k]] <
+            widths[dragIdx] - prevW[dragIdx]) {
+          dragIdx = changedIdxs[k];
+        }
+      }
+    }
 
     // Stamp dragged col and all existing pixel cols in header; leave auto cols free.
     for (var i = 0; i < cols.length; i++) {
