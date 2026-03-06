@@ -499,7 +499,11 @@
       // Multi-column drag: the dragged column is the one in the minority direction
       // (fewest columns) with the largest absolute change.  All other columns keep
       // their current "nx" value in MATLAB.
-      var minorityIdxs = positiveIdxs.length <= negativeIdxs.length
+      // Use strict < so that when counts tie (e.g. 1 col grows, 1 col shrinks),
+      // we pick the SHRINKING column: the user constrained it to a new smaller size,
+      // so it should become the pixel column.  The growing column merely absorbed
+      // the freed space and should remain proportional.
+      var minorityIdxs = positiveIdxs.length < negativeIdxs.length
                          ? positiveIdxs : negativeIdxs;
       var dragIdx2 = minorityIdxs.reduce(function(best, i) {
         return Math.abs(currentWidths[i] - prevWidths[i]) >
@@ -601,7 +605,9 @@
 
       // Opposing changes → drag with space redistribution.
       // Dragged column = minority direction (fewer cols), largest absolute change.
-      var minority = posIdxs.length <= negIdxs.length ? posIdxs : negIdxs;
+      // Strict < so tied counts (1 grows, 1 shrinks) pick the SHRINKING column,
+      // matching the semantic "the constrained column becomes pixel".
+      var minority = posIdxs.length < negIdxs.length ? posIdxs : negIdxs;
       var dragIdx = minority.reduce(function(best, i) {
         return Math.abs(widths[i] - prevW[i]) > Math.abs(widths[best] - prevW[best]) ? i : best;
       }, minority[0]);
