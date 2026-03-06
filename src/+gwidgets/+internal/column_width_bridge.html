@@ -26,6 +26,14 @@
   // rendered.  Used to distinguish a user column drag (one column changed)
   // from a window resize (all columns changed proportionally).
   var lastAutoWidths    = null;
+  // Per-column auto/pixel flags from the most recent SetWidths: true = nx/auto
+  // (no explicit min/max constraint), false = pixel (explicitly constrained).
+  // Used to detect window-resize vs drag in mixed (non-autoMode) layouts.
+  var colAutoFlags      = null;
+  // Settled baseline widths for non-autoMode layouts (mixed or all-pixel).
+  // Populated from echo/pause firings of publishWidths after MATLAB applies
+  // widths.  Reset each time applyColumnWidths runs.
+  var lastKnownWidths   = null;
 
   var t0 = Date.now();  // reference timestamp for relative timing
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -130,6 +138,9 @@
     var allAuto  = widths.every(function(w) { return w <  0; });
 
     autoMode = allAuto;
+    // Track which columns are nx (auto-sized) vs pixel for window-resize detection.
+    colAutoFlags    = widths.map(function(w) { return w < 0; });
+    lastKnownWidths = null;  // will be re-populated from echo/pause publishWidths calls
     if (allAuto) {
       echoSuppressUntil = Date.now() + 400;
       lastAutoWidths = null;  // will be populated once MATLAB's render settles
@@ -376,10 +387,16 @@
     }
     if (paused) {
       bridgeLog("[Bridge] " + ts() + " publishWidths: SUPPRESSED (paused=true, echoMs=" + echoMs + ")");
+      // Snapshot settled widths for non-autoMode change detection baseline.
+      var pausedCols = findColumns();
+      if (pausedCols.length > 0) lastKnownWidths = colWidthsFromDOM(pausedCols);
       return;
     }
     if (now < echoSuppressUntil) {
       bridgeLog("[Bridge] " + ts() + " publishWidths: SUPPRESSED (pixel echo, echoMs=" + echoMs + ")");
+      // Snapshot settled widths for non-autoMode change detection baseline.
+      var echoCols2 = findColumns();
+      if (echoCols2.length > 0) lastKnownWidths = colWidthsFromDOM(echoCols2);
       return;
     }
 
@@ -400,18 +417,37 @@
     var doc = cols[0].ownerDocument;
     var bodyTable = findBodyTable(doc);
 
+    // Window-resize detection for mixed (nx + pixel) mode.
+    // Compare to the settled baseline; columns with explicit pixel constraints
+    // don't change on container resize, so only nx columns appear in changedIdxs.
+    var colFlags = colAutoFlags || widths.map(function() { return false; });
+    var changedIdxs = getChangedColumns(widths, lastKnownWidths);
+    lastKnownWidths = widths;  // update baseline for next comparison
+    var allChangedAreNx = changedIdxs.length > 0 &&
+                          changedIdxs.every(function(i) { return colFlags[i]; });
+    // >1 nx columns all changing together = proportional container resize, not a drag.
+    var isWindowResize = changedIdxs.length > 1 && allChangedAreNx;
+
     bridgeLog("[Bridge] " + ts() + " publishWidths: PUBLISH widths=[" + widths.join(", ") + "]" +
+              " changed=[" + changedIdxs.join(",") + "]" +
+              (isWindowResize ? " (window-resize)" : "") +
               " autoMode=" + autoMode +
               " headerTable=" + tableStyleStr(headerTable));
     bridgeLog("[Bridge] " + ts() + " publishWidths: body BEFORE: " +
               bodyCellStyleStr(bodyTable, cols.length));
 
-    // Stamp header cells
+    // Stamp header: only pixel columns and dragged nx columns.
+    // Nx columns that weren't dragged must NOT be stamped — adding a pixel
+    // constraint would prevent them from auto-sizing on future container resizes.
     for (var i = 0; i < cols.length; i++) {
-      cols[i].style.minWidth = widths[i] + "px";
-      cols[i].style.maxWidth = widths[i] + "px";
+      if (!colFlags[i] || (!isWindowResize && changedIdxs.indexOf(i) >= 0)) {
+        cols[i].style.minWidth = widths[i] + "px";
+        cols[i].style.maxWidth = widths[i] + "px";
+      }
     }
-    // Stamp body cells
+    // Stamp body cells for ALL columns — body cells always need explicit
+    // constraints (for virtual-scroll row rendering); they don't participate
+    // in the header's CSS auto-sizing, so pixel-stamping them is harmless.
     if (bodyTable) {
       var bodyRows = bodyTable.querySelectorAll("tr");
       for (var r = 0; r < bodyRows.length; r++) {
@@ -425,8 +461,24 @@
                 bodyCellStyleStr(bodyTable, cols.length));
     }
 
+    if (isWindowResize) {
+      // Body synced above; suppress MATLAB notification so DataColumnWidth_
+      // keeps its "nx" values.
+      bridgeLog("[Bridge] " + ts() + " publishWidths: mixed-mode window-resize" +
+                " (changed nx cols: [" + changedIdxs.join(",") + "]) — suppressed");
+      return;
+    }
+
+    // User drag (or other single-column change).  Build a partial-update array:
+    //   positive px  for dragged columns and all pixel columns
+    //   -1           for unchanged nx columns (MATLAB keeps the existing "nx" value)
+    var jsNotify = widths.map(function(w, i) {
+      return (colFlags[i] && changedIdxs.indexOf(i) < 0) ? -1 : w;
+    });
+    bridgeLog("[Bridge] " + ts() + " publishWidths: notifying MATLAB" +
+              " jsNotify=[" + jsNotify.join(",") + "]");
     autoMode = false;
-    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
+    htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify };
   }
 
   function debouncedPublish() {
