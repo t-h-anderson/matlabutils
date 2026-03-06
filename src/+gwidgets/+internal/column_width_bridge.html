@@ -575,18 +575,19 @@
 
     // Distinguish window resize from user drag using opposing-change direction:
     //
-    //   Window resize: all changed columns move in the SAME direction
-    //                  (all grow or all shrink).  Suppress MATLAB notification
-    //                  so DataColumnWidth_ keeps its nx values.
+    //   Window resize: all changed columns move in the SAME direction.
+    //                  Suppress MATLAB notification so DataColumnWidth_ keeps
+    //                  its nx values.
     //
-    //   Drag: one column grows while others shrink (space redistributed within
-    //         the same table width).  Use the minority direction to identify
-    //         the dragged column; send -1 for redistributed nx columns so they
-    //         keep their nx value in MATLAB.
+    //   Drag: one column grows while an adjacent one shrinks.
+    //         The LEFT column (smaller index) of the dragged divider becomes
+    //         pixel; the right column stays proportional.
+    //         Send -1 for any unchanged nx columns so MATLAB keeps them.
     if (changedIdxs.length > 1) {
-      var posIdxs = changedIdxs.filter(function(i) { return prevW && widths[i] > prevW[i]; });
-      var negIdxs = changedIdxs.filter(function(i) { return prevW && widths[i] < prevW[i]; });
-      var hasOpposing = posIdxs.length > 0 && negIdxs.length > 0;
+      // Window resize: all changed cols move in the same direction.
+      // Drag: at least one grows while another shrinks (space redistributed).
+      var hasOpposing = changedIdxs.some(function(i) { return prevW && widths[i] > prevW[i]; }) &&
+                        changedIdxs.some(function(i) { return prevW && widths[i] < prevW[i]; });
 
       if (!hasOpposing) {
         // All changed columns moved the same way — window resize.
@@ -614,32 +615,13 @@
         return;
       }
 
-      // Opposing changes → drag with space redistribution.
-      // Identify the dragged column:
-      //   1. If one direction is all-pixel cols and the other is all-auto/nx cols,
-      //      the PIXEL side is the dragged side (user resized an explicit column;
-      //      the auto col just absorbed the change proportionally).
-      //   2. Otherwise use strict minority (fewer cols); tied counts pick the
-      //      SHRINKING side — "the constrained column becomes pixel".
-      var allPosAuto  = posIdxs.every(function(i) { return  colFlags[i]; });
-      var allNegAuto  = negIdxs.every(function(i) { return  colFlags[i]; });
-      var allPosPixel = posIdxs.every(function(i) { return !colFlags[i]; });
-      var allNegPixel = negIdxs.every(function(i) { return !colFlags[i]; });
-      var minority;
-      if (allPosPixel && allNegAuto) {
-        minority = posIdxs;  // pixel growing, auto shrinking → pixel col is dragged
-      } else if (allNegPixel && allPosAuto) {
-        minority = negIdxs;  // pixel shrinking, auto growing → pixel col is dragged
-      } else {
-        minority = posIdxs.length < negIdxs.length ? posIdxs : negIdxs;
-      }
-      bridgeLog("[Bridge] " + ts() + " publishWidths: mixed-mode drag decision:" +
-                " posIdxs=[" + posIdxs.join(",") + "] allPosPixel=" + allPosPixel + " allPosAuto=" + allPosAuto +
-                " negIdxs=[" + negIdxs.join(",") + "] allNegPixel=" + allNegPixel + " allNegAuto=" + allNegAuto +
-                " minority=[" + minority.join(",") + "]");
-      var dragIdx = minority.reduce(function(best, i) {
-        return Math.abs(widths[i] - prevW[i]) > Math.abs(widths[best] - prevW[best]) ? i : best;
-      }, minority[0]);
+      // Opposing changes → single column drag.
+      // The column to the LEFT of the dragged divider becomes pixel; the column
+      // to the right absorbs the change and stays proportional.
+      // The left column always has the smaller index.
+      var dragIdx = Math.min.apply(null, changedIdxs);
+      bridgeLog("[Bridge] " + ts() + " publishWidths: mixed-mode drag" +
+                " changedIdxs=[" + changedIdxs.join(",") + "] dragIdx=" + dragIdx);
 
       // Stamp header: pixel cols + dragged col; other nx cols left free.
       for (var i = 0; i < cols.length; i++) {
