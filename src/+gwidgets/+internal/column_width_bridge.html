@@ -188,7 +188,11 @@
     var allAuto  = widths.every(function(w) { return w <  0; });
 
     autoMode = allAuto;
-    // Track which columns are nx (auto-sized) vs pixel for window-resize detection.
+    // Track which columns are nx/auto vs pixel for window-resize detection.
+    // Save previous flags so we only remove constraints for columns that WE stamped
+    // with pixel values; if a column was already nx/auto, MATLAB manages its own
+    // constraints (e.g. proportional "2x"/"3x" CSS) and we must not touch them.
+    var prevColAutoFlags = colAutoFlags;
     colAutoFlags    = widths.map(function(w) { return w < 0; });
     lastKnownWidths = null;  // will be re-populated from echo/pause publishWidths calls
     if (allAuto) {
@@ -218,8 +222,15 @@
     var newColTotal = 0;
     for (var i = 0; i < cols.length; i++) {
       if (widths[i] < 0) {
-        cols[i].style.removeProperty("min-width");
-        cols[i].style.removeProperty("max-width");
+        // Only remove constraints that WE previously stamped (pixel → auto/nx transition).
+        // If this column was already auto/nx, MATLAB owns its constraints (e.g. proportional
+        // "2x"/"3x" CSS written by the uitable renderer) — removing them would destroy
+        // MATLAB's proportional layout since our bridge processes SetWidths asynchronously,
+        // after MATLAB has already written the new proportional CSS.
+        if (!prevColAutoFlags || !prevColAutoFlags[i]) {
+          cols[i].style.removeProperty("min-width");
+          cols[i].style.removeProperty("max-width");
+        }
       } else {
         cols[i].style.minWidth = widths[i] + "px";
         cols[i].style.maxWidth = widths[i] + "px";
@@ -361,7 +372,11 @@
     bridgeLog("[Bridge] " + ts() + " syncBodyWithHeader(" + label + "): body BEFORE: " +
               bodyCellStyleStr(bodyTable, cols.length));
 
-    if (headerTable) {
+    // Only pin the body table to an explicit pixel width in non-autoMode.
+    // In autoMode (all nx/auto columns), the table is proportionally sized by MATLAB
+    // and must stay fluid (percentage-based).  Locking it to a pixel width here would
+    // cause a horizontal scrollbar whenever the window later shrinks below that value.
+    if (headerTable && !autoMode) {
       var hTableWidth = Math.round(headerTable.getBoundingClientRect().width);
       bodyTable.style.width    = hTableWidth + "px";
       bodyTable.style.minWidth = hTableWidth + "px";
