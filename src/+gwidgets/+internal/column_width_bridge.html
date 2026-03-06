@@ -31,17 +31,13 @@
   //   paused          MATLAB is pushing widths; suppress ColumnWidthChanged.
   //   echoSuppressUntil  Timestamp until which ResizeObserver echoes are muted.
   //
-  // --- Drag identification -----------------------------------------------
+  // --- Drag handling -----------------------------------------------------
   //
-  //   A column drag moves exactly one divider.  Multiple proportional columns
-  //   may change due to proportional rebalancing, so we cannot identify the
-  //   dragged boundary from which column shrank/grew.
-  //   Rule: find the internal boundary whose cumulative x-position moved the
-  //   most (largest |Σwidths_before[0..b-1] − Σwidths_after[0..b-1]|).
-  //   The column to the RIGHT of that boundary becomes pixel; columns to the
-  //   left of it keep their nx value.
-  //   Special case: a single pixel column changing alone (no opposing change)
-  //   means the user dragged that column's outer edge → it becomes pixel.
+  //   On drag, proportional (nx) columns stay proportional — only their
+  //   weights change.  Each proportional column's new weight is its share
+  //   of the total proportional space, normalised so weights sum to
+  //   propCount (average weight = 1).  Pixel columns report their new
+  //   rendered pixel width.  No column ever changes type (px ↔ nx) on drag.
   //
   // --- Window-resize detection -------------------------------------------
   //
@@ -444,50 +440,32 @@
       return;
     }
 
-    // Drag identification: find the internal boundary that moved the most.
-    // Boundary b sits between col[b-1] and col[b]; its x-position equals the
-    // cumulative sum of widths[0..b-1].  The boundary with the largest
-    // absolute position change is the one the user dragged.  The column to the
-    // RIGHT of that boundary (index b) becomes pixel.
-    // Special case: singlePixelDrag has no opposing column, so the one changed
-    // pixel column is the drag target directly.
-    var dragIdx;
-    if (!hasOpposing) {
-      dragIdx = changedIdxs[0];           // singlePixelDrag
-    } else {
-      dragIdx = changedIdxs[changedIdxs.length - 1]; // safe fallback
-      if (prevW) {
-        var maxDelta = 0, cumB = 0, cumA = 0;
-        for (var b = 1; b < cols.length; b++) {
-          cumB += prevW[b - 1];
-          cumA += widths[b - 1];
-          var delta = Math.abs(cumA - cumB);
-          if (delta > maxDelta) {
-            maxDelta = delta;
-            dragIdx = b;
-          }
-        }
-      }
+    // Proportional columns keep their type; only their nx weights change.
+    // Compute each nx col's share of the total proportional pixel space,
+    // normalised so weights sum to propCount (matching the "1x" baseline).
+    var propCount = 0, propTotal = 0;
+    for (var i = 0; i < cols.length; i++) {
+      if (colFlags[i]) { propCount++; propTotal += widths[i]; }
     }
 
-    // Stamp dragged col and all existing pixel cols in header; leave auto cols free.
+    // Pin pixel cols only; leave proportional cols unconstrained so they
+    // continue to reflow freely on subsequent window resizes.
     for (var i = 0; i < cols.length; i++) {
-      if (!colFlags[i] || i === dragIdx) {
+      if (!colFlags[i]) {
         cols[i].style.minWidth = widths[i] + "px";
         cols[i].style.maxWidth = widths[i] + "px";
       }
     }
 
-    // jsNotify: dragged col → new pixel value; existing pixel cols → unchanged;
-    // auto/nx cols → -1 so MATLAB keeps their proportional value.
+    // jsNotify: pixel cols → positive px width.
+    //           proportional cols → negative nx weight: MATLAB reads -v as nx = v.
     var jsNotify = widths.map(function(w, i) {
-      if (i === dragIdx) return w;
-      if (!colFlags[i])  return w;
-      return -1;
+      if (!colFlags[i]) return w;
+      return propTotal > 0 ? -(w / propTotal) * propCount : -1;
     });
-    allPixelMode = jsNotify.every(function(w) { return w >= 0; });
+    allPixelMode = !colFlags.some(Boolean);
 
-    bridgeLog("[Bridge] " + ts() + " publishWidths: drag dragIdx=" + dragIdx +
+    bridgeLog("[Bridge] " + ts() + " publishWidths: drag" +
               " jsNotify=[" + jsNotify.join(",") + "]");
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify };
   }

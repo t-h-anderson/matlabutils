@@ -1718,34 +1718,34 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function onColumnWidthChanged(this, pixelWidths)
+        function onColumnWidthChanged(this, widths)
             % Called when the user finishes dragging a column divider.
             %
-            % pixelWidths is a numeric row vector with one entry per visible
-            % column.  A positive value means the column was dragged to that
-            % pixel width.  A negative value (-1) is a sentinel meaning "this
-            % column was not dragged — keep its existing width value (e.g.
-            % '1x')".  This allows a drag in auto/nx mode to promote only the
-            % dragged column to a pixel width while leaving all other columns
-            % in their current auto/nx state.
+            % widths is a numeric row vector with one entry per visible column.
+            %   widths(i) >= 0  →  pixel column; value is the new pixel width.
+            %   widths(i) <  0  →  proportional column; the new nx weight is
+            %                      -widths(i), e.g. -1.25 → "1.25x".
+            %
+            % Proportional columns are never converted to pixel on drag — only
+            % their weights change to reflect the new rendered proportions.
             if this.IsPushingWidthToDisplay_
                 return
             end
 
             nVisible = sum(this.ColumnVisible);
-            if numel(pixelWidths) ~= nVisible
+            if numel(widths) ~= nVisible
                 sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
                 return
             end
 
             dataWidths = this.DataColumnWidth;
             visIdxs = find(this.ColumnVisible);
-            for i = 1:numel(pixelWidths)
-                if pixelWidths(i) >= 0
-                    dataWidths{visIdxs(i)} = pixelWidths(i);
+            for i = 1:numel(widths)
+                if widths(i) >= 0
+                    dataWidths{visIdxs(i)} = widths(i);              % pixel
+                else
+                    dataWidths{visIdxs(i)} = sprintf('%gx', -widths(i)); % nx
                 end
-                % pixelWidths(i) < 0: column not dragged; preserve existing
-                % value (e.g. "1x", "auto", or a previous pixel width).
             end
 
             % Guard: if widths are identical to what we already have, this is
