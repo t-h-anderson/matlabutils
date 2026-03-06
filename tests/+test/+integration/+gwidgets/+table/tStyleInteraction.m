@@ -473,7 +473,7 @@ classdef tStyleInteraction < test.WithExampleTables
 
             % Edit cell at data position [2,1]
             newValue = originalValue + 100;
-            e = struct("Indices", [2,1], "NewData", newValue);
+            e = testCase.mockEditEvent([2,1], newValue);
             t.onCellEdit([], e);
 
             % Verify data was updated
@@ -494,7 +494,7 @@ classdef tStyleInteraction < test.WithExampleTables
             % Edit a visible cell (display position [1,1])
             % This should correspond to data row 1 after filtering
             visibleRowValue = t.DisplayData{1,1};
-            e = struct("Indices", [1,1], "NewData", visibleRowValue + 50);
+            e = testCase.mockEditEvent([1,1], visibleRowValue + 50);
             t.onCellEdit([1,1], e);
 
             % Verify the underlying data was updated at correct position
@@ -526,7 +526,7 @@ classdef tStyleInteraction < test.WithExampleTables
             if ~isempty(displayPosition)
                 % Edit through display coordinates
                 currentValue = t.Data{2,1};
-                e = struct("Indices", displayPosition, "NewData", currentValue+25);
+                e = testCase.mockEditEvent(displayPosition, currentValue+25);
                 t.onCellEdit([], e);
 
                 % Verify update
@@ -592,7 +592,7 @@ classdef tStyleInteraction < test.WithExampleTables
             newValue = originalValue + 1000; % Large value to affect sort order
 
             % Simulate edit callback
-            e = struct("Indices", displayPos, "NewData", newValue);
+            e = testCase.mockEditEvent(displayPos, newValue);
             t.onCellEdit([], e);
 
             % Verify data updated
@@ -617,7 +617,7 @@ classdef tStyleInteraction < test.WithExampleTables
 
             if ~isempty(displayPosGrouped)
                 % Edit categorical value
-                e = struct("Indices", displayPosGrouped, "NewData", newCatValue);
+                e = testCase.mockEditEvent(displayPosGrouped, newCatValue);
                 t.onCellEdit([], e);
 
                 % Verify update
@@ -641,20 +641,24 @@ classdef tStyleInteraction < test.WithExampleTables
             % Set up callback to track edits
             editCount = 0;
             lastEditDisplay = [];
+            lastEvtClass = "";
 
             t.CellEditCallback = @(src, evt) trackEdit(evt);
 
             function trackEdit(evt)
                 editCount = editCount + 1;
                 lastEditDisplay = evt.DisplayIndices;
+                lastEvtClass = class(evt);
             end
 
             % Edit without filter
-            e = struct("Indices", [1,1], "NewData", 999);
+            e = testCase.mockEditEvent([1,1], 999);
             t.onCellEdit([], e);
 
             testCase.verifyEqual(editCount, 1)
             testCase.verifyEqual(lastEditDisplay, [1 1])
+            testCase.verifyEqual(lastEvtClass, "gwidgets.internal.table.CellEditData", ...
+                "CellEditCallback should receive CellEditData, not CellInteractionData")
 
             % Verify style on original cell [1,1] still exists is not
             % visible
@@ -667,7 +671,7 @@ classdef tStyleInteraction < test.WithExampleTables
             t.DisplaySelection = [1,1];
             dataPosition = t.Selection;
 
-            e = struct("Indices", dataPosition, "NewData", 777);
+            e = testCase.mockEditEvent(dataPosition, 777);
             t.onCellEdit([], e);
 
             testCase.verifyEqual(editCount, 2)
@@ -677,10 +681,10 @@ classdef tStyleInteraction < test.WithExampleTables
             % Verify style on original cell [1,1] still exists is not
             % visible
             testCase.verifyEmpty(t.StyleConfigurations.TargetIndex{1})
-            
+
             % Change value back to 1, so it should be highlighted again
             t.Filter = "";
-            e = struct("Indices", dataPosition, "NewData", 1);
+            e = testCase.mockEditEvent(dataPosition, 1);
             t.onCellEdit([], e);
 
             testCase.verifyEqual(t.StyleConfigurations.TargetIndex{1} , [1,1])
@@ -690,6 +694,20 @@ classdef tStyleInteraction < test.WithExampleTables
             testCase.verifyEqual(editCount, 3)
             testCase.verifyEqual(lastEditDisplay, displayPosition)
             
+        end
+
+    end
+
+    methods (Static)
+
+        function e = mockEditEvent(indices, newData)
+            % Build a struct that matches the fields read by CellEditData
+            e = struct( ...
+                "Indices", indices, ...
+                "DisplayIndices", indices, ...
+                "PreviousData", [], ...
+                "EditData", newData, ...
+                "NewData", newData);
         end
 
     end

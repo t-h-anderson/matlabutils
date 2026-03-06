@@ -12,7 +12,11 @@ classdef Table < gwidgets.internal.Reparentable
 
         Multiselect (1,1) matlab.lang.OnOffSwitchState % Enable/disable multiple selection
         SelectionType (1,1) string % Type of selection: 'cell', 'row', or 'column'
-        ColumnWidth (1,:) % Column Width, cell - enforced by set method
+        
+        ColumnWidth (1,:) % Column Width
+        DataColumnWidth (1,:) % Column Width
+        DefaultColumnWidths (1,:) % Default column widths restored when ColumnWidth is reset to {}
+
         Selection (:,:) double % Data selection. Either (:,2) for cell or (1,:) otherwise
         DisplaySelection (:,:) double % Display Selection. Either (:,2) for cell or (1,:) otherwise
 
@@ -45,6 +49,13 @@ classdef Table < gwidgets.internal.Reparentable
 
         DataColumnEditable_ (1,:) logical % Logical array indicating which columns are editable
         DataColumnSortable_ (1,:) logical % Logical array indicating which columns are sortable
+
+        % Column-width bridge
+        DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
+        IsPushingWidthToDisplay_ (1,1) logical = false % True while programmatic widths are being applied
+
+        DataColumnWidth_ (1,:) cell % Width of data columns
+        DefaultColumnWidths_ (1,:) cell % Default column widths used as reset target
 
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
 
@@ -109,6 +120,8 @@ classdef Table < gwidgets.internal.Reparentable
             this.ColumnEditable = [];
             this.UpdateManager.addSuppression("DataColumnSortable", Times=1);
             this.ColumnSortable = [];
+            this.UpdateManager.addSuppression("DataColumnWidth", Times=1);
+            this.DataColumnWidth = {};
 
             % Clear the styling
             this.UpdateManager.addSuppression("UpdateStyle", Times=1);
@@ -160,19 +173,84 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
+        function val = get.DataColumnWidth(this)
+            val = this.DataColumnWidth_;
+            if isempty(val) && ~isempty(this.DataColumnNames)
+                val = repelem({"auto"}, 1, numel(this.DataColumnNames));
+            end
+        end
+
+        function set.DataColumnWidth(this, val)
+            val = gwidgets.Table.normalizeColumnWidths(val);
+            if isscalar(val)
+                val = repelem(val, 1, numel(this.DataColumnNames));
+            end
+            if ~isempty(val) && numel(val) ~= numel(this.DataColumnNames)
+                error("GraphicsWidgets:Table:DataColumnWidthSize", ...
+                    "Size of DataColumnWidth must match the number of data columns, be scalar, or be empty (restore to default)");
+            end
+            this.DataColumnWidth_ = val;
+            if this.UpdateManager.doRun("DataColumnWidth")
+                this.doUpdateSequence(StartFrom="Interaction");
+            end
+        end
+
+        function val = get.DefaultColumnWidths(this)
+            val = this.DefaultColumnWidths_;
+        end
+
+        function set.DefaultColumnWidths(this, val)
+            val = gwidgets.Table.normalizeColumnWidths(val);
+            if isscalar(val)
+                val = repelem(val, 1, numel(this.DataColumnNames));
+            end
+            if ~isempty(val) && numel(val) ~= numel(this.DataColumnNames)
+                error("GraphicsWidgets:Table:DefaultColumnWidthsSize", ...
+                    "Size of DefaultColumnWidths must match the number of data columns, be scalar, or be empty");
+            end
+            this.DefaultColumnWidths_ = val;
+        end
+
         function val = get.ColumnWidth(this)
-            val = convertCharsToStrings(this.DisplayTable.ColumnWidth);
-            if ~iscell(val)
-                val = num2cell(val);
+            if isempty(this.DataColumnWidth_)
+                % No explicit widths set — read the display table's current value
+                val = this.DisplayTable.ColumnWidth;
+                if ~iscell(val)
+                    val = {val};
+                end
+            else
+                val = this.DataColumnWidth_(this.ColumnVisible);
             end
         end
 
         function set.ColumnWidth(this, val)
-            val = convertCharsToStrings(val);
-            if ~iscell(val)
-                val = num2cell(val);
+            val = gwidgets.Table.normalizeColumnWidths(val);
+
+            if isempty(val)
+                % Empty resets to DefaultColumnWidths if set, otherwise clears to auto
+                if ~isempty(this.DefaultColumnWidths_)
+                    this.DataColumnWidth_ = this.DefaultColumnWidths_;
+                else
+                    this.DataColumnWidth_ = {};
+                end
+            else
+                if isscalar(val)
+                    val = repelem(val, 1, sum(this.ColumnVisible));
+                end
+                if numel(val) ~= sum(this.ColumnVisible)
+                    error("GraphicsWidgets:Table:ColumnWidthSize", ...
+                        "Size of ColumnWidth must match the number of visible columns, be scalar, or be empty (restore to default)");
+                end
+                % Map visible widths back into the per-data-column array,
+                % preserving any explicitly stored width for hidden columns
+                dataWidths = this.DataColumnWidth;
+                dataWidths(this.ColumnVisible) = val;
+                this.DataColumnWidth_ = dataWidths;
             end
-            this.DisplayTable.ColumnWidth = val;
+
+            if this.UpdateManager.doRun("DataColumnWidth")
+                this.doUpdateSequence(StartFrom="Interaction");
+            end
         end
 
         function val = get.ColumnVisible(this)
@@ -367,6 +445,7 @@ classdef Table < gwidgets.internal.Reparentable
                     "Size of column sortable must match the visible table, be scalar (apply to all), or empty (restore to default)");
             end
 
+            this.UpdateManager.addSuppression("DataColumnSortable", Times=1);
             if isempty(val)
                 this.DataColumnSortable = val;
             else
@@ -539,7 +618,7 @@ classdef Table < gwidgets.internal.Reparentable
                         if any(idxFail)
                             failSelection = strjoin(selection(idxFail), ",");
                             limits = destSize;
-                            error("GraphicsWidgets:Table:SelectionOutsideLimits", "Selection " + failSelection + " outsize limits " + limits);
+                            error("GraphicsWidgets:Table:SelectionOutsideLimits", "Selection " + failSelection + " outside limits " + limits);
                         end
 
                 end
@@ -679,6 +758,7 @@ classdef Table < gwidgets.internal.Reparentable
         HasChangeGroupingVariable (1,1) logical
         HasToggleShowEmptyGroups (1,1) logical
         HasColumnSorting (1,1) logical
+        HasAutoResizeColumns (1,1) logical
     end
 
     properties (Access = protected)
@@ -688,6 +768,7 @@ classdef Table < gwidgets.internal.Reparentable
         HasChangeGroupingVariable_ (1,1) logical = false
         HasToggleShowEmptyGroups_ (1,1) logical = false
         HasColumnSorting_ (1,1) logical = false
+        HasAutoResizeColumns_ (1,1) logical = false
     end
 
     methods
@@ -737,6 +818,15 @@ classdef Table < gwidgets.internal.Reparentable
 
         function set.HasColumnSorting(this, val)
             this.HasColumnSorting_ = val;
+            this.addContextMenu();
+        end
+
+        function val = get.HasAutoResizeColumns(this)
+            val = this.HasAutoResizeColumns_;
+        end
+
+        function set.HasAutoResizeColumns(this, val)
+            this.HasAutoResizeColumns_ = val;
             this.addContextMenu();
         end
 
@@ -969,7 +1059,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         function set.HiddenGroups(this, val)
             idx = ismember(this.Groups, val);
-            this.HiddenGroups_ = this.Groups(~idx);
+            this.HiddenGroups_ = this.Groups(idx);
             if this.UpdateManager.doRun("HiddenGroups")
                 this.doUpdateSequence(StartFrom="Folding");
             end
@@ -1028,7 +1118,7 @@ classdef Table < gwidgets.internal.Reparentable
         SortDirection (1,1) string {mustBeMember(SortDirection, ["Ascend", "Descend", "None"])} = "None"
     end
 
-    properties
+    properties (GetAccess = ?matlab.unittest.TestCase, SetAccess = private)
         SortedVisibleData (:,:) cell % Headers and data after sorting
         SortedGroupHeaderRowIdx (1,:) double % (1,nGroups) Indices of group header rows after sorting
 
@@ -1305,6 +1395,7 @@ classdef Table < gwidgets.internal.Reparentable
         DisplayTable (1,:) matlab.ui.control.Table {mustBeScalarOrEmpty}
 
         HelpPanel (1,:) matlab.ui.container.Panel {mustBeScalarOrEmpty}
+        ColumnWidthBridge_ (1,:) matlab.ui.control.HTML {mustBeScalarOrEmpty}
     end
 
     properties (SetAccess = private)
@@ -1321,7 +1412,7 @@ classdef Table < gwidgets.internal.Reparentable
             p = uipanel("Parent", this, ...
                 "BorderType", "none");
             this.Grid = uigridlayout(p, ...
-                "RowHeight", {"fit", 0, "1x"}, "ColumnWidth", {"1x", 0}, "Padding", 0);
+                "RowHeight", {"fit", 0, "1x", 2}, "ColumnWidth", {"1x", 0}, "Padding", 0);
 
             this.HelpPanel = uipanel(Parent=this.Grid);
             this.HelpPanel.Layout.Column = 2;
@@ -1354,6 +1445,7 @@ classdef Table < gwidgets.internal.Reparentable
             this.DisplayTable.Layout.Row = 3;
 
             this.addContextMenu();
+            this.setupColumnWidthBridge();
             this.doUpdateSequence();
         end
 
@@ -1364,6 +1456,11 @@ classdef Table < gwidgets.internal.Reparentable
                 ];
 
             this.updateDisplayTable(vars);
+
+            % Apply column widths immediately so Data and ColumnWidth stay
+            % in sync — avoids MATLAB rendering the new (shorter) column
+            % list with the old positional widths before updateInteraction runs.
+            this.applyColumnWidthToDisplay();
         end
 
         function updateInteraction(this)
@@ -1373,8 +1470,98 @@ classdef Table < gwidgets.internal.Reparentable
                 "SelectionType" ...
                 ];
             this.updateDisplayTable(vars);
+            this.applyColumnWidthToDisplay();
             this.refreshVisibleSelection();
 
+        end
+
+        function applyColumnWidthToDisplay(this)
+            % Push the current visible column widths to the display table
+            % AND directly to the DOM via the bridge.
+            %
+            % Setting DisplayTable.ColumnWidth alone is insufficient when the
+            % user has manually dragged a column — MATLAB ignores the property
+            % setter in that case.  We send a SetWidths event so the bridge
+            % applies the widths directly to the header elements, bypassing
+            % MATLAB's user-drag override.
+            %
+            % The Pause event is sent first so the ResizeObserver does not
+            % echo the resulting DOM changes back as user-driven resize events.
+            if isempty(this.DataColumnWidth_)
+                % Widths cleared or never set — restore display to "auto".
+                % Pause and SetWidths are sent BEFORE touching DisplayTable so
+                % the JS echo-suppression window is already active when
+                % MATLAB's rendering pipeline fires our ResizeObserver.
+                this.pauseColumnWidthBridge(1200);
+                this.sendWidthsToBridge(-ones(1, sum(this.ColumnVisible)));
+                if ~isequal(this.DisplayTable.ColumnWidth, "auto")
+                    this.DisplayTable.ColumnWidth = "auto";
+                end
+            else
+                visWidths = this.DataColumnWidth_(this.ColumnVisible);
+                % Push pixel widths directly to DOM via bridge.
+                % Non-numeric values ("auto", "fit", "1x") map to -1 so JS
+                % removes any explicit width and lets the browser auto-size.
+                jsWidths = this.widthsToJsArray(visWidths);
+                allAuto = all(jsWidths < 0);
+                if allAuto
+                    this.pauseColumnWidthBridge(1200);
+                else
+                    this.pauseColumnWidthBridge();
+                end
+                % Same ordering rationale as above: bridge events before render.
+                this.sendWidthsToBridge(jsWidths);
+                if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
+                    this.DisplayTable.ColumnWidth = visWidths;
+                end
+            end
+        end
+
+        function sendWidthsToBridge(this, jsWidths)
+            if ~isempty(this.ColumnWidthBridge_)
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "SetWidths", jsWidths);
+            end
+        end
+
+        function jsWidths = widthsToJsArray(~, visWidths)
+            % Convert a cell array of MATLAB column widths to a numeric
+            % row vector for JSON transport.  Pixel widths pass through;
+            % anything else ("auto", "fit", "1x") becomes -1 so the JS
+            % handler knows to remove the explicit width style.
+            jsWidths = -ones(1, numel(visWidths));
+            for i = 1:numel(visWidths)
+                w = visWidths{i};
+                if isnumeric(w) && isscalar(w) && w > 0
+                    jsWidths(i) = w;
+                end
+            end
+        end
+
+        function pauseColumnWidthBridge(this, pauseMs)
+            % Tell the bridge to ignore resize events for a short window.
+            % Also set the MATLAB-side flag as a belt-and-braces guard.
+            %
+            % pauseMs: duration in ms (default 500).  Use a larger value when
+            %   sending auto widths (-1) because the ResizeObserver echo from
+            %   the re-attached observer can arrive up to 800 ms after SetWidths
+            %   (600 ms delayed-attach + 200 ms debounce).  1200 ms ensures the
+            %   echo is still within the suppression window.
+            if nargin < 2
+                pauseMs = 500;  % must exceed DEBOUNCE_MS (200 ms)
+            end
+            this.IsPushingWidthToDisplay_ = true;
+            if ~isempty(this.ColumnWidthBridge_)
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Pause", ...
+                    struct("durationMs", pauseMs));
+            end
+            % Clear the MATLAB flag after the same window.
+            t = timer("StartDelay", pauseMs/1000, "ExecutionMode", "singleShot", ...
+                "TimerFcn", @(~,~) this.clearPushingFlag());
+            start(t);
+        end
+
+        function clearPushingFlag(this)
+            this.IsPushingWidthToDisplay_ = false;
         end
 
         function updateDisplayTable(this, vars)
@@ -1472,6 +1659,111 @@ classdef Table < gwidgets.internal.Reparentable
 
         function reactToFigureChanged(this)
             this.reparentContextMenu();
+        end
+
+    end
+
+    % Column-width bridge
+    methods (Access = private)
+
+        function setupColumnWidthBridge(this)
+            % Create a tiny (2 px tall) uihtml component that uses a
+            % ResizeObserver in the figure's web context to detect when the
+            % user drags a column divider and report the new pixel widths
+            % back to MATLAB.  The component lives in row 4 of this.Grid,
+            % which has a fixed height of 2 px so it is effectively invisible.
+
+            % Assign a unique tag to the uitable so the bridge JS can scope
+            % its DOM query to this table specifically (avoids cross-talk
+            % when multiple Table widgets live in the same figure).
+            this.DisplayTableTag_ = "GwidgetsTable_" + mlut.uniqueID();
+            this.DisplayTable.Tag  = this.DisplayTableTag_;
+
+            htmlFile = fullfile(fileparts(mfilename("fullpath")), ...
+                "+internal", "column_width_bridge.html");
+
+            this.ColumnWidthBridge_ = uihtml( ...
+                "Parent",       this.Grid, ...
+                "HTMLSource",   htmlFile, ...
+                "DataChangedFcn", @(src,~) this.onBridgeData(src));
+            this.ColumnWidthBridge_.Layout.Row    = 4;
+            this.ColumnWidthBridge_.Layout.Column = 1;
+
+            % Do NOT call sendEventToHTMLSource here — the HTML page loads
+            % asynchronously.  The JS sets Data = {event:"BridgeReady"} once
+            % setup() completes, and onBridgeData responds with Init.
+        end
+
+        function onBridgeData(this, src)
+            % Dispatcher: JS -> MATLAB channel uses htmlComponent.Data = {...}
+            % which triggers DataChangedFcn.  Route on the 'event' field.
+            d = src.Data;
+            if ~isstruct(d) || ~isfield(d, "event")
+                return
+            end
+
+            switch d.event
+
+                case "BridgeReady"
+                    % setup() has run — safe to send Init now.
+                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
+                        struct("tableTag", this.DisplayTableTag_));
+
+                case "ColumnWidthChanged"
+                    this.onColumnWidthChanged(d.widths);
+
+                case "BridgeDiag"
+                    fprintf("%s\n", d.msg);
+
+            end
+        end
+
+        function onColumnWidthChanged(this, widths)
+            % Called when the user finishes dragging a column divider.
+            %
+            % widths is a numeric row vector with one entry per visible column.
+            %   widths(i) >= 0  →  pixel column; value is the new pixel width.
+            %   widths(i) <  0  →  proportional column; the new nx weight is
+            %                      -widths(i), e.g. -1.25 → "1.25x".
+            %
+            % Proportional columns are never converted to pixel on drag — only
+            % their weights change to reflect the new rendered proportions.
+            if this.IsPushingWidthToDisplay_
+                return
+            end
+
+            nVisible = sum(this.ColumnVisible);
+            if numel(widths) ~= nVisible
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
+                return
+            end
+
+            dataWidths = this.DataColumnWidth;
+            visIdxs = find(this.ColumnVisible);
+            for i = 1:numel(widths)
+                if widths(i) >= 0
+                    dataWidths{visIdxs(i)} = widths(i);              % pixel
+                else
+                    dataWidths{visIdxs(i)} = sprintf('%gx', -widths(i)); % nx
+                end
+            end
+
+            % Guard: if widths are identical to what we already have, this is
+            % an echo from our own applyColumnWidthToDisplay (e.g., the
+            % ResizeObserver re-fired after the SetWidths stamp).  Returning
+            % early breaks the potential update → echo → update loop.
+            if isequal(dataWidths, this.DataColumnWidth_)
+                return
+            end
+
+            this.DataColumnWidth_ = dataWidths;
+
+            % Push the new pixel widths to the display so that body cells
+            % (including newly rendered rows from virtual scrolling) pick up
+            % explicit min-width / max-width constraints.  The round-trip also
+            % sets the table-level widths via applyColumnWidths in JS, keeping
+            % header and body tables permanently in sync.
+            this.applyColumnWidthToDisplay();
         end
 
     end
@@ -1811,6 +2103,10 @@ classdef Table < gwidgets.internal.Reparentable
                 uimenu("Parent", this.ContextMenu, "Text", "Show/hide row filter", "MenuSelectedFcn", @(s,e) this.onToggleRowFilterRequest(s,e), "Tag", "GWidgetsTableContextMenu");
             end
 
+            if this.HasAutoResizeColumns
+                uimenu("Parent", this.ContextMenu, "Text", "Auto-resize columns", "MenuSelectedFcn", @(s,e) this.onAutoResizeColumnsRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+            end
+
             for i = 1:numel(this.CustomContextMenuItems)
                 this.CustomContextMenuItems(i).Parent = this.ContextMenu;
             end
@@ -1829,9 +2125,11 @@ classdef Table < gwidgets.internal.Reparentable
             nGroups = numel(this.Groups);
             nGroupsVisible = numel(this.VisibleGroupHeaderRowIdx);
 
-            % Replace group names with the alias on the label
-            groupingVariableName = this.GroupingVariableName;
-            groupingVariableName = this.translateNames(groupingVariableName);
+            % Replace each grouping variable name with its alias, then join
+            groupingVariableName = strjoin(this.translateNames(this.GroupingVariable_), "|");
+            if isempty(groupingVariableName)
+                groupingVariableName = "";
+            end
 
             if nGroups == nGroupsVisible
                 this.GroupLabel.Text = "Group: " + groupingVariableName + " (" + nGroups + " groups)";
@@ -2328,9 +2626,9 @@ classdef Table < gwidgets.internal.Reparentable
             % Forward to custom cell edit callback
             if ~isempty(this.CellEditCallback)
                 dataIdx = this.displaySelectionToDataSelection(displayIdx, "cell");
-                e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+                editData = gwidgets.internal.table.CellEditData(e, dataIdx);
                 s = this;
-                this.CellEditCallback(s, e);
+                this.CellEditCallback(s, editData);
             end
 
         end
@@ -2422,6 +2720,11 @@ classdef Table < gwidgets.internal.Reparentable
             this.clearSelection();
         end
 
+        function onAutoResizeColumnsRequest(this, ~, ~)
+            % Reset to DefaultColumnWidths if set, otherwise clear to auto.
+            this.ColumnWidth = {};
+        end
+
         function onToggleRowFilterRequest(this, ~, ~)
             this.ShowRowFilter = ~this.ShowRowFilter;
         end
@@ -2457,6 +2760,24 @@ classdef Table < gwidgets.internal.Reparentable
 
             this.SortByColumn = vars;
 
+        end
+
+    end
+
+    methods (Static, Access = private)
+
+        function val = normalizeColumnWidths(val)
+            % Accept numeric arrays, string arrays, char, or cell.
+            % Returns a cell array (or empty cell if input was empty).
+            if isempty(val)
+                val = {};
+            elseif ~iscell(val)
+                if isnumeric(val)
+                    val = num2cell(val);
+                else
+                    val = cellstr(val);
+                end
+            end
         end
 
     end

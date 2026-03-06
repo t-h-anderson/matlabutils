@@ -12,7 +12,7 @@ classdef CellEditData < event.EventData
 
         function this = CellEditData(e, indices)
             arguments
-                e matlab.ui.eventdata.CellEditData
+                e  % matlab.ui.eventdata.CellEditData or compatible struct
                 indices
             end
 
