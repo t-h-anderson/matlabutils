@@ -12,7 +12,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         Multiselect (1,1) matlab.lang.OnOffSwitchState % Enable/disable multiple selection
         SelectionType (1,1) string % Type of selection: 'cell', 'row', or 'column'
-        
+
         ColumnWidth (1,:) % Column Width
         DataColumnWidth (1,:) % Column Width
         DefaultColumnWidths (1,:) % Default column widths restored when ColumnWidth is reset to {}
@@ -185,7 +185,7 @@ classdef Table < gwidgets.internal.Reparentable
             if isempty(val) && ~isempty(this.DataColumnNames)
                 val = repelem({"auto"}, 1, numel(this.DataColumnNames));
             end
-            val = convertToMixedNumStringCellOutput(val);
+            val = gwidgets.Table.normalizeColumnWidths(val);
         end
 
         function set.DataColumnWidth(this, val)
@@ -209,7 +209,7 @@ classdef Table < gwidgets.internal.Reparentable
             if ~iscell(val)
                 val = num2cell(val);
             end
-            val = convertToMixedNumStringCellOutput(val);
+            val = gwidgets.Table.normalizeColumnWidths(val);
         end
 
         function set.DefaultColumnWidths(this, val)
@@ -234,7 +234,7 @@ classdef Table < gwidgets.internal.Reparentable
             else
                 val = this.DataColumnWidth_(this.ColumnVisible);
             end
-            val = convertToMixedNumStringCellOutput(val);
+            val = gwidgets.Table.normalizeColumnWidths(val);
         end
 
         function set.ColumnWidth(this, val)
@@ -978,6 +978,10 @@ classdef Table < gwidgets.internal.Reparentable
         HiddenGroups (1,:) string % Groups that are hidden
     end
 
+    properties (Hidden)
+        VisibleGroupHeaderRowIdx (1,:) double % (1,nVisGroups) Indices of header rows
+    end
+
     properties (Access = private)
         % Grouping
         GroupingVariable_ (1,:) string = string.empty(1,0)
@@ -988,7 +992,6 @@ classdef Table < gwidgets.internal.Reparentable
         GroupedVisibleData (:,:) cell % Headers and data before sorting
         GroupedDataVariables  (1,:) string % Table variable names after grouping
         GroupHeaderRowIdx (1,:) double % (1,nGroups) Indices of group header rows
-        VisibleGroupHeaderRowIdx (1,:) double % (1,nVisGroups) Indices of header rows
 
         GroupFilteredCount (1,:) double % (1,nGroups) Group filtered counts
 
@@ -2828,32 +2831,26 @@ classdef Table < gwidgets.internal.Reparentable
 
     end
 
-    methods (Static, Access = private)
+    methods (Static, Hidden)
 
         function val = normalizeColumnWidths(val)
             % Accept numeric arrays, string arrays, char, or cell.
             % Returns a cell array (or empty cell if input was empty).
+            val = convertCharsToStrings(val);
             if isempty(val)
                 val = {};
             elseif ~iscell(val)
-                if isnumeric(val)
-                    val = num2cell(val);
-                else
-                    val = cellstr(val);
-                end
+                val = num2cell(val);
+            else
+                val = cellfun(@(x) convertCharsToStrings(x), val, "UniformOutput", false);
             end
+
+            if isscalar(val) && isstring(val{1}) && val{1} == ""
+                val = {};
+            end
+
         end
 
     end
 
-end
-
-
-function val = convertToMixedNumStringCellOutput(val)
-val = convertCharsToStrings(val);
-if ~iscell(val)
-    val = num2cell(val);
-else
-    val = cellfun(@(x) convertCharsToStrings(x), val, "UniformOutput", false);
-end
 end

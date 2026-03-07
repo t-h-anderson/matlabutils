@@ -400,6 +400,9 @@ classdef tColumnWidthBridge < test.WithExampleTables
         function tNormalizeEmptyReturnsEmpty(testCase)
             testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths([]),  {})
             testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths(""),  {})
+            testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths({""}),  {})
+            testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths(''),  {})
+            testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths({''}),  {})
             testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths({}),  {})
         end
 
