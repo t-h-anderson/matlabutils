@@ -1758,9 +1758,21 @@ classdef Table < gwidgets.internal.Reparentable
             visIdxs = find(this.ColumnVisible);
             for i = 1:numel(widths)
                 if widths(i) >= 0
-                    dataWidths{visIdxs(i)} = widths(i);              % pixel
+                    % Bridge reports a pixel width — always accept.
+                    dataWidths{visIdxs(i)} = widths(i);
                 else
-                    dataWidths{visIdxs(i)} = sprintf('%gx', -widths(i)); % nx
+                    % Bridge reports a proportional weight.  If this column is
+                    % currently pixel-specified in MATLAB, the bridge colAutoFlags
+                    % must have been stale (all-auto even though some columns
+                    % are pixel-specified).  Preserve the pixel type; the
+                    % SetWidths echo from applyColumnWidthToDisplay will
+                    % re-sync colAutoFlags on the JS side.
+                    % Columns that were already proportional or auto are
+                    % updated to their new proportional weight normally.
+                    currentW = dataWidths{visIdxs(i)};
+                    if ~(isnumeric(currentW) && isscalar(currentW) && currentW > 0)
+                        dataWidths{visIdxs(i)} = sprintf('%gx', -widths(i));
+                    end
                 end
             end
 
@@ -1780,6 +1792,18 @@ classdef Table < gwidgets.internal.Reparentable
             % sets the table-level widths via applyColumnWidths in JS, keeping
             % header and body tables permanently in sync.
             this.applyColumnWidthToDisplay();
+        end
+
+    end
+
+    % Test hooks — accessible to matlab.unittest.TestCase but not public API
+    methods (Access = ?matlab.unittest.TestCase)
+
+        function simulateBridgeDrag(this, widths)
+            % Simulate a ColumnWidthChanged notification from the bridge
+            % without requiring a live DOM/figure.  Used by unit tests to
+            % exercise onColumnWidthChanged logic headlessly.
+            this.onColumnWidthChanged(widths);
         end
 
     end
