@@ -1549,6 +1549,9 @@ classdef Table < gwidgets.internal.Reparentable
             % so MATLAB's own proportional CSS is applied for relative columns.
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
+                if isempty(visWidths)
+                    visWidths = {"Auto"};
+                end
                 this.DisplayTable.ColumnWidth = visWidths;
             end
         end
