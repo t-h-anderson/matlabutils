@@ -185,6 +185,7 @@ classdef Table < gwidgets.internal.Reparentable
             if isempty(val) && ~isempty(this.DataColumnNames)
                 val = repelem({"auto"}, 1, numel(this.DataColumnNames));
             end
+            val = convertToMixedNumStringCellOutput(val);
         end
 
         function set.DataColumnWidth(this, val)
@@ -204,6 +205,11 @@ classdef Table < gwidgets.internal.Reparentable
 
         function val = get.DefaultColumnWidths(this)
             val = this.DefaultColumnWidths_;
+            val = convertCharsToStrings(val);
+            if ~iscell(val)
+                val = num2cell(val);
+            end
+            val = convertToMixedNumStringCellOutput(val);
         end
 
         function set.DefaultColumnWidths(this, val)
@@ -228,6 +234,7 @@ classdef Table < gwidgets.internal.Reparentable
             else
                 val = this.DataColumnWidth_(this.ColumnVisible);
             end
+            val = convertToMixedNumStringCellOutput(val);
         end
 
         function set.ColumnWidth(this, val)
@@ -2829,4 +2836,14 @@ classdef Table < gwidgets.internal.Reparentable
 
     end
 
+end
+
+
+function val = convertToMixedNumStringCellOutput(val)
+val = convertCharsToStrings(val);
+if ~iscell(val)
+    val = num2cell(val);
+else
+    val = cellfun(@(x) convertCharsToStrings(x), val, "UniformOutput", false);
+end
 end
