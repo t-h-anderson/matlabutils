@@ -447,6 +447,19 @@
       return;
     }
 
+    // Guard: if the live column count no longer matches what MATLAB last
+    // reported via SetWidths, the table is mid-render (e.g. a ColumnVisible
+    // change arrived while the 200 ms debounce was in flight).  A length
+    // mismatch causes getChangedColumns to mark ALL columns as changed, which
+    // then falsely passes the hasOpposing test and fires a spurious
+    // ColumnWidthChanged.  Reset the baseline and wait for the next SetWidths.
+    if (expectedColCount > 0 && cols.length !== expectedColCount) {
+      prevWidths = colWidthsFromDOM(cols);
+      bridgeLog("[Bridge] " + ts() + " publishWidths: col count " + cols.length +
+                " != expected " + expectedColCount + " -- skipping");
+      return;
+    }
+
     var widths   = colWidthsFromDOM(cols);
     var colFlags = colAutoFlags || widths.map(function() { return false; });
     var prevW    = prevWidths;
