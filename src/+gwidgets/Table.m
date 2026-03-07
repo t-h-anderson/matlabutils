@@ -1569,13 +1569,15 @@ classdef Table < gwidgets.internal.Reparentable
                 delete(this.PauseTimer_);
             end
             t = timer("StartDelay", pauseMs/1000, "ExecutionMode", "singleShot", ...
-                "TimerFcn", @(src,~) [this.clearPushingFlag(), delete(src)]);
+                "TimerFcn", @(src,~) this.clearPushingFlagAndDelete(src));
             this.PauseTimer_ = t;
             start(t);
         end
 
-        function clearPushingFlag(this)
+        function clearPushingFlagAndDelete(this, src)
             this.IsPushingWidthToDisplay_ = false;
+            stop(src);
+            delete(src);
         end
 
         function updateDisplayTable(this, vars)

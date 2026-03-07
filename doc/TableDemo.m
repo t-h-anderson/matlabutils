@@ -12,12 +12,14 @@ T.ID = (1:n).';
 T.Category = categorical(randi([1 4], n, 1), 1:4, ["A","B","C","D"]); 
 T.Group = categorical(randi([1 5], n, 1), 1:5, compose("G%d", 1:5)); 
 T.Value = randn(n,1) * 10 + 50; T.Note = arrayfun(@(x) "Row" + x, (1:n).', 'UniformOutput', false) %[output:331202a1]
+T = T(:, [1:3]);
 %%
 %[text] ### Create the widget
 fig = uifigure('Name','Table Widget Demo');
 gl = uigridlayout(fig, [1,1]);
 %[text] Construct the Table widget using name-value pairs supported by the class 
 tb = gwidgets.Table(Parent=gl, Data=T, ColumnEditable=true);
+%tb2 = gwidgets.Table(Parent=gl, Data=T, ColumnEditable=true);
 %%
 %[text] ### Enable features
 %[text] Enable the row filter control 
