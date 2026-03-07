@@ -51,13 +51,16 @@
   //
   // --- Drag handling -----------------------------------------------------
   //
-  //   On drag, proportional (nx) columns stay proportional — only their
-  //   weights change.  Each proportional column's new weight is its share
-  //   of the total proportional space, normalised so weights sum to
-  //   propCount (average weight = 1).  Pixel columns report their new
-  //   rendered pixel width.  No column ever changes type (px ↔ nx) on drag.
+  //   ColumnWidthChanged is only sent on mouseup (end of drag), never
+  //   mid-drag.  This prevents a MATLAB SetWidths response from interfering
+  //   with an in-progress column-divider drag.
   //
-  //   When a pixel column is dragged (pixel/nx boundary), the bridge
+  //   The bridge sends ACTUAL POSITIVE pixel widths for ALL columns.
+  //   MATLAB uses its DataColumnWidthTypes_ store to know which columns are
+  //   Pixel vs Relative and recomputes relative weights from the GCD.
+  //   No column ever changes type (Pixel ↔ Relative) as a result of a drag.
+  //
+  //   When a pixel column is dragged (Pixel/Relative boundary), the bridge
   //   redistributes the proportional header columns on each SetWidths echo
   //   so they keep their settled ratio as the proportional space changes.
   //
@@ -78,6 +81,8 @@
   var debounceTimer     = null;
   var allPixelMode      = false;
   var lastSetSeq        = 0;   // seq from the most recent SetWidths; echoed in ColumnWidthChanged
+  var isDragging        = false; // true while a mouse button is held down on the parent doc
+  var pendingPublish    = false;  // a drag fired during isDragging; publish on mouseup
   var tableTag          = null;
   var htmlComponent     = null;
   var attachAttempts    = 0;
@@ -568,28 +573,39 @@
       return;
     }
 
-    // jsNotify: pixel cols → positive px width.
-    //           proportional cols → negative nx weight: MATLAB reads -v as nx = v.
-    var jsNotify = widths.map(function(w, i) {
-      if (!colFlags[i]) return w;
-      return -Math.max(1, Math.round((w / propTotal) * propCount * 100));
-    });
+    // Always send actual positive pixel widths for every column.
+    // MATLAB uses DataColumnWidthTypes_ to know which columns are Pixel vs
+    // Relative — the sign encoding is no longer used in the bridge→MATLAB
+    // direction.  MATLAB computes new relative weights from the GCD of all
+    // pixel values on receipt.
     allPixelMode = !colFlags.some(Boolean);
 
     bridgeLog("[Bridge] " + ts() + " publishWidths: drag" +
-              " jsNotify=[" + jsNotify.join(",") + "]" +
+              " widths=[" + widths.join(",") + "]" +
               " seqToEcho=" + seqToEcho);
     pendingRedistrib = true;
-    htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify, seq: seqToEcho };
+    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, seq: seqToEcho };
   }
 
   // ---- debouncedPublish: ResizeObserver entry point ----
 
   function debouncedPublish() {
-    bridgeLog("[Bridge] " + ts() + " resize: lastSetSeq=" + lastSetSeq);
+    bridgeLog("[Bridge] " + ts() + " resize: isDragging=" + isDragging +
+              " lastSetSeq=" + lastSetSeq);
 
     // Sync body with header on every fire for visual fidelity during drag.
     syncBodyWithHeader("drag-live");
+
+    if (isDragging) {
+      // During drag: snapshot prevWidths so change detection is correct
+      // once the drag ends, but don't schedule publishWidths yet — firing
+      // ColumnWidthChanged mid-drag would cause MATLAB to respond with a
+      // SetWidths that may visually interrupt the in-progress drag.
+      var snapCols = findColumns();
+      if (snapCols.length > 0) prevWidths = colWidthsFromDOM(snapCols);
+      pendingPublish = true;
+      return;
+    }
 
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
@@ -651,6 +667,40 @@
 
   function setup(component) {
     htmlComponent = component;
+
+    // Track mouse button state in the parent document (where the column
+    // dividers live).  ColumnWidthChanged is only sent on mouseup so that
+    // a MATLAB response (SetWidths) cannot interrupt an in-progress drag.
+    try {
+      var parentDoc = window.parent.document;
+      parentDoc.addEventListener("mousedown", function() {
+        isDragging = true;
+        pendingPublish = false;
+      }, true);
+      parentDoc.addEventListener("mouseup", function() {
+        isDragging = false;
+        if (pendingPublish) {
+          pendingPublish = false;
+          clearTimeout(debounceTimer);
+          bridgeLog("[Bridge] " + ts() + " mouseup: firing deferred publishWidths");
+          publishWidths();
+        }
+      }, true);
+      // Safety net: if the cursor leaves the page while dragging,
+      // treat the next re-entry without a button as a mouseup.
+      parentDoc.addEventListener("mouseleave", function(e) {
+        if (isDragging && e.buttons === 0) {
+          isDragging = false;
+          if (pendingPublish) {
+            pendingPublish = false;
+            clearTimeout(debounceTimer);
+            publishWidths();
+          }
+        }
+      }, true);
+    } catch (e) {
+      bridgeLog("[Bridge] Could not attach parent mousedown/mouseup listeners: " + e);
+    }
 
     htmlComponent.addEventListener("Init", function(event) {
       tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
