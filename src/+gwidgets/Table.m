@@ -1763,6 +1763,11 @@ classdef Table < gwidgets.internal.Reparentable
 
             dataWidths = this.DataColumnWidth;
             visIdxs = find(this.ColumnVisible);
+            % Track whether any proportional-to-pixel type change was blocked.
+            % When true we must still call applyColumnWidthToDisplay even if
+            % DataColumnWidth_ itself did not change, so that the bridge's
+            % stale colAutoFlags are corrected via the SetWidths echo.
+            typeChangePrevented = false;
             for i = 1:numel(widths)
                 if widths(i) >= 0
                     % Bridge reports a pixel width — always accept.
@@ -1777,17 +1782,22 @@ classdef Table < gwidgets.internal.Reparentable
                     % Columns that were already proportional or auto are
                     % updated to their new proportional weight normally.
                     currentW = dataWidths{visIdxs(i)};
-                    if ~(isnumeric(currentW) && isscalar(currentW) && currentW > 0)
+                    if isnumeric(currentW) && isscalar(currentW) && currentW > 0
+                        typeChangePrevented = true;  % pixel preserved
+                    else
                         dataWidths{visIdxs(i)} = sprintf('%gx', -widths(i));
                     end
                 end
             end
 
-            % Guard: if widths are identical to what we already have, this is
-            % an echo from our own applyColumnWidthToDisplay (e.g., the
-            % ResizeObserver re-fired after the SetWidths stamp).  Returning
-            % early breaks the potential update → echo → update loop.
-            if isequal(dataWidths, this.DataColumnWidth_)
+            % Guard: if widths are identical to what we already have AND no
+            % type change was suppressed, this is an echo from our own
+            % applyColumnWidthToDisplay.  Returning early breaks the
+            % update → echo → update loop.
+            % Exception: when typeChangePrevented is true the bridge has a
+            % stale colAutoFlags state — we must still call
+            % applyColumnWidthToDisplay to send the corrective SetWidths.
+            if isequal(dataWidths, this.DataColumnWidth_) && ~typeChangePrevented
                 return
             end
 

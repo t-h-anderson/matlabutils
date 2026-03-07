@@ -246,6 +246,39 @@ classdef tColumnWidthBridge < test.WithExampleTables
         end
 
 
+        function tAllPixelColumnsResyncsWhenBridgeReportsAllProp(testCase)
+            % Regression: when ALL columns are pixel-specified and the bridge
+            % fires all-proportional values (stale colAutoFlags), the isequal
+            % guard must not bail out even though DataColumnWidth_ is unchanged.
+            % applyColumnWidthToDisplay must still run to send a corrective
+            % SetWidths and re-sync the bridge.
+            %
+            % Observable effect: a new pause timer is created, confirming that
+            % applyColumnWidthToDisplay was called.
+
+            nBefore = numel(timerfindall);
+
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.DataColumnWidth = {100, 200};
+
+            % Stale all-proportional notification for all-pixel columns
+            t.simulateBridgeDrag([-97, -103]);
+
+            % Pixel values must be untouched
+            testCase.verifyEqual(t.DataColumnWidth{1}, 100, ...
+                "Col 1 pixel value must be preserved")
+            testCase.verifyEqual(t.DataColumnWidth{2}, 200, ...
+                "Col 2 pixel value must be preserved")
+
+            % applyColumnWidthToDisplay must have run — it creates a timer
+            nAfter = numel(timerfindall);
+            testCase.verifyGreaterThan(nAfter, nBefore, ...
+                "applyColumnWidthToDisplay must be called to re-sync the bridge")
+
+            delete(t);
+        end
+
+
     end
 
 end
