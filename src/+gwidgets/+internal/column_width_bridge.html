@@ -597,12 +597,9 @@
     syncBodyWithHeader("drag-live");
 
     if (isDragging) {
-      // During drag: snapshot prevWidths so change detection is correct
-      // once the drag ends, but don't schedule publishWidths yet — firing
-      // ColumnWidthChanged mid-drag would cause MATLAB to respond with a
-      // SetWidths that may visually interrupt the in-progress drag.
-      var snapCols = findColumns();
-      if (snapCols.length > 0) prevWidths = colWidthsFromDOM(snapCols);
+      // During drag: do NOT update prevWidths — the pre-drag baseline must
+      // stay intact so publishWidths on mouseup correctly detects what changed.
+      // syncBodyWithHeader above already keeps body cells visually in sync.
       pendingPublish = true;
       return;
     }
