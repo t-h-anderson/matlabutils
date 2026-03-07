@@ -286,11 +286,12 @@
     var newColTotal = 0;
     for (var i = 0; i < cols.length; i++) {
       if (widths[i] < 0) {
-        // Only remove constraints WE previously stamped; preserve MATLAB's proportional CSS.
-        if (!prevColAutoFlags || !prevColAutoFlags[i]) {
-          cols[i].style.removeProperty("min-width");
-          cols[i].style.removeProperty("max-width");
-        }
+        // Preserve MATLAB's %-based proportional CSS; always clear px constraints
+        // we may have stamped (initial SetWidths, redistribution, prior epoch).
+        var hMin = cols[i].style.minWidth;
+        if (!hMin || hMin.indexOf('%') < 0) cols[i].style.removeProperty("min-width");
+        var hMax = cols[i].style.maxWidth;
+        if (!hMax || hMax.indexOf('%') < 0) cols[i].style.removeProperty("max-width");
       } else {
         cols[i].style.minWidth = widths[i] + "px";
         cols[i].style.maxWidth = widths[i] + "px";
@@ -368,9 +369,12 @@
             if (widths[i] >= 0) {
               cells[i].style.minWidth = widths[i] + "px";
               cells[i].style.maxWidth = widths[i] + "px";
-            } else if (!prevColAutoFlags || !prevColAutoFlags[i]) {
-              cells[i].style.removeProperty("min-width");
-              cells[i].style.removeProperty("max-width");
+            } else {
+              // Preserve MATLAB's %-based proportional CSS; clear any px stamps.
+              var cMin = cells[i].style.minWidth;
+              if (!cMin || cMin.indexOf('%') < 0) cells[i].style.removeProperty("min-width");
+              var cMax = cells[i].style.maxWidth;
+              if (!cMax || cMax.indexOf('%') < 0) cells[i].style.removeProperty("max-width");
             }
           }
         }
