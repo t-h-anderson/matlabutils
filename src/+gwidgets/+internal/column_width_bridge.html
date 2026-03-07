@@ -467,7 +467,7 @@
 
   // ---- publishWidths: decide what to tell MATLAB ----
 
-  function publishWidths() {
+  function publishWidths(fromMouseUp) {
     var cols = findColumns();
     if (cols.length === 0) return;
     if (observedCols.length > 0 && !observedCols[0].isConnected) {
@@ -528,7 +528,7 @@
     var hasOpposing = changedIdxs.some(function(i) { return prevW && widths[i] > prevW[i]; }) &&
                       changedIdxs.some(function(i) { return prevW && widths[i] < prevW[i]; });
     var singlePixelDrag = changedIdxs.length === 1 && !colFlags[changedIdxs[0]];
-    var isDrag = hasOpposing || singlePixelDrag;
+    var isDrag = fromMouseUp || hasOpposing || singlePixelDrag;
 
     // Always stamp body cells so virtual-scroll rows have accurate widths.
     stampBodyCells(bodyTable, widths, cols.length);
@@ -680,7 +680,7 @@
           pendingPublish = false;
           clearTimeout(debounceTimer);
           bridgeLog("[Bridge] " + ts() + " mouseup: firing deferred publishWidths");
-          publishWidths();
+          publishWidths(true);
         }
       }, true);
       // Safety net: if the cursor leaves the page while dragging,
@@ -691,7 +691,7 @@
           if (pendingPublish) {
             pendingPublish = false;
             clearTimeout(debounceTimer);
-            publishWidths();
+            publishWidths(true);
           }
         }
       }, true);
