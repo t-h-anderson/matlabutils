@@ -144,8 +144,6 @@
       if (tableEl) {
         var taggedCols = Array.from(tableEl.querySelectorAll(COL_SELECTOR));
         if (taggedCols.length > 0) return taggedCols;
-      } else {
-        bridgeLog("[Bridge] findColumns: data-tag=" + tableTag + " not in DOM, trying iframe-relative");
       }
     }
 
@@ -413,11 +411,19 @@
 
     if (!bodyTable) return;
 
-    if (headerTable && allPixelMode) {
+    if (headerTable) {
       var hTableWidth = Math.round(headerTable.getBoundingClientRect().width);
-      bodyTable.style.width    = hTableWidth + "px";
-      bodyTable.style.minWidth = hTableWidth + "px";
-      bodyTable.style.maxWidth = hTableWidth + "px";
+      var bRendered   = Math.round(bodyTable.getBoundingClientRect().width);
+      // In all-pixel mode the body table must track the header exactly.
+      // In auto/mixed mode we normally leave the table width to the browser,
+      // but if the body has collapsed to 0px (transient reflow state after
+      // allAuto SetWidths clears the body constraints) we stamp a rescue width
+      // so the body rows remain visible until MATLAB sets width=100% inline.
+      if (allPixelMode || (bRendered === 0 && hTableWidth > 0)) {
+        bodyTable.style.width    = hTableWidth + "px";
+        bodyTable.style.minWidth = hTableWidth + "px";
+        bodyTable.style.maxWidth = hTableWidth + "px";
+      }
     }
     stampBodyCells(bodyTable, widths, cols.length);
   }

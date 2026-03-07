@@ -279,6 +279,142 @@ classdef tColumnWidthBridge < test.WithExampleTables
         end
 
 
+        % ----------------------------------------------------------- %
+        %  Mixed-mode drag tests
+        % ----------------------------------------------------------- %
+
+        function tMixedModePixelAndPropDragUpdatesCorrectly(testCase)
+            % When the bridge correctly reports mixed pixel+proportional
+            % values (pixel col gets positive, auto cols get negative),
+            % onColumnWidthChanged must store the pixel value for the pixel
+            % column and proportional weights for the auto columns.
+
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+            t.DataColumnWidth = {100, "auto", "auto", "auto"};
+
+            % Bridge correctly reports: col 1 pixel (new value 120),
+            % cols 2-4 proportional (bridge has correct colAutoFlags).
+            t.simulateBridgeDrag([120, -55, -45, -0]);
+
+            testCase.verifyEqual(t.DataColumnWidth{1}, 120, ...
+                "Pixel column must update to new pixel value")
+            testCase.verifyEqual(t.DataColumnWidth{2}, "55x", ...
+                "Auto column must update to proportional weight")
+            testCase.verifyEqual(t.DataColumnWidth{3}, "45x")
+        end
+
+        function tPartialPixelPreservationInMixedTable(testCase)
+            % Stale bridge fires all-proportional for a mixed pixel/auto
+            % table.  Pixel columns must be preserved; auto columns update.
+
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+            t.DataColumnWidth = {100, 200, "auto", "auto"};
+
+            % All-proportional from stale bridge
+            t.simulateBridgeDrag([-40, -50, -60, -50]);
+
+            % Pixel cols 1 and 2 preserved
+            testCase.verifyEqual(t.DataColumnWidth{1}, 100)
+            testCase.verifyEqual(t.DataColumnWidth{2}, 200)
+
+            % Auto cols 3 and 4 updated
+            testCase.verifyEqual(t.DataColumnWidth{3}, "60x")
+            testCase.verifyEqual(t.DataColumnWidth{4}, "50x")
+        end
+
+        % ----------------------------------------------------------- %
+        %  Echo-guard tests
+        % ----------------------------------------------------------- %
+
+        function tEchoGuardSuppressesIdenticalDragNotification(testCase)
+            % If onColumnWidthChanged receives widths that produce no change
+            % to DataColumnWidth_ (echo from our own SetWidths), the update
+            % must be silently dropped and no new pause timer created.
+
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.DataColumnWidth = {100, 200};
+
+            % First drag — sets DataColumnWidth_ to {150, 150}
+            t.simulateBridgeDrag([150, 150]);
+            testCase.verifyEqual(t.DataColumnWidth, {150, 150})
+
+            % Capture timer count after the first drag settled
+            nAfterFirst = numel(timerfindall);
+
+            % Identical notification again — should be a no-op
+            t.simulateBridgeDrag([150, 150]);
+            testCase.verifyEqual(t.DataColumnWidth, {150, 150}, ...
+                "DataColumnWidth must not change on echo notification")
+
+            % No additional timer should have been created
+            testCase.verifyEqual(numel(timerfindall), nAfterFirst, ...
+                "Echo notification must not create a new pause timer")
+
+            delete(t);
+        end
+
+        % ----------------------------------------------------------- %
+        %  normalizeColumnWidths static helper tests
+        % ----------------------------------------------------------- %
+
+        function tNormalizeNumericArray(testCase)
+            result = gwidgets.Table.normalizeColumnWidths([100 200 150]);
+            testCase.verifyEqual(result, {100, 200, 150})
+        end
+
+        function tNormalizeScalarNumeric(testCase)
+            result = gwidgets.Table.normalizeColumnWidths(75);
+            testCase.verifyEqual(result, {75})
+        end
+
+        function tNormalizeStringArray(testCase)
+            result = gwidgets.Table.normalizeColumnWidths(["auto", "1x"]);
+            testCase.verifyEqual(result, {"auto", "1x"})
+        end
+
+        function tNormalizeCharScalar(testCase)
+            result = gwidgets.Table.normalizeColumnWidths("fit");
+            testCase.verifyEqual(result, {"fit"})
+        end
+
+        function tNormalizeCellPassThrough(testCase)
+            input  = {100, "auto", "2x"};
+            result = gwidgets.Table.normalizeColumnWidths(input);
+            testCase.verifyEqual(result, input)
+        end
+
+        function tNormalizeEmptyReturnsEmpty(testCase)
+            testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths([]),  {})
+            testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths(""),  {})
+            testCase.verifyEqual(gwidgets.Table.normalizeColumnWidths({}),  {})
+        end
+
+        % ----------------------------------------------------------- %
+        %  get.ColumnWidth after drag
+        % ----------------------------------------------------------- %
+
+        function tGetColumnWidthReflectsDragResultsImmediately(testCase)
+            % After a drag notification, both DataColumnWidth and ColumnWidth
+            % must reflect the new values without requiring an update cycle.
+
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.simulateBridgeDrag([120, 180]);
+
+            testCase.verifyEqual(t.DataColumnWidth, {120, 180})
+            testCase.verifyEqual(t.ColumnWidth,     {120, 180})
+        end
+
+        function tGetColumnWidthReflectsProportionalDragResult(testCase)
+            % Proportional drag results must be visible via ColumnWidth.
+
+            t = gwidgets.Table(Data=testCase.stringData());
+            t.simulateBridgeDrag([-60, -40]);
+
+            testCase.verifyEqual(t.DataColumnWidth, {"60x", "40x"})
+            testCase.verifyEqual(t.ColumnWidth,     {"60x", "40x"})
+        end
+
+
     end
 
 end
