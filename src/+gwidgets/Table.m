@@ -52,8 +52,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         % Column-width bridge
         DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
-        IsPushingWidthToDisplay_ (1,1) logical = false % True while programmatic widths are being applied
-        PauseTimer_ (1,:) timer {mustBeScalarOrEmpty}   % In-flight pause timer; replaced on each call
+        LastSentSeq_ (1,1) double = 0   % Monotonic counter; echoed back by bridge so MATLAB can ignore programmatic echoes
 
         DataColumnWidth_ (1,:) cell % Width of data columns
         DefaultColumnWidths_ (1,:) cell % Default column widths used as reset target
@@ -99,12 +98,6 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function delete(this)
-            % Stop any in-flight pause timer so it cannot fire after the
-            % object is destroyed and attempt to access deleted properties.
-            if ~isempty(this.PauseTimer_) && isvalid(this.PauseTimer_)
-                stop(this.PauseTimer_);
-                delete(this.PauseTimer_);
-            end
             delete(this.FilterController);
             delete(this.CustomContextMenuItems);
             delete(this.ContextMenu);
@@ -1502,14 +1495,14 @@ classdef Table < gwidgets.internal.Reparentable
             % applies the widths directly to the header elements, bypassing
             % MATLAB's user-drag override.
             %
-            % The Pause event is sent first so the ResizeObserver does not
-            % echo the resulting DOM changes back as user-driven resize events.
+            % Each SetWidths carries a monotonically-increasing sequence number
+            % (LastSentSeq_).  The bridge echoes the seq back with
+            % ColumnWidthChanged; MATLAB compares the received seq with
+            % LastSentSeq_ and ignores the notification if they match,
+            % eliminating all timer-based echo-suppression windows.
+            this.LastSentSeq_ = this.LastSentSeq_ + 1;
             if isempty(this.DataColumnWidth_)
                 % Widths cleared or never set — restore display to "auto".
-                % Pause and SetWidths are sent BEFORE touching DisplayTable so
-                % the JS echo-suppression window is already active when
-                % MATLAB's rendering pipeline fires our ResizeObserver.
-                this.pauseColumnWidthBridge(1200);
                 this.sendWidthsToBridge(-ones(1, sum(this.ColumnVisible)));
                 if ~isequal(this.DisplayTable.ColumnWidth, "auto")
                     this.DisplayTable.ColumnWidth = "auto";
@@ -1520,13 +1513,6 @@ classdef Table < gwidgets.internal.Reparentable
                 % Non-numeric values ("auto", "fit", "1x") map to -1 so JS
                 % removes any explicit width and lets the browser auto-size.
                 jsWidths = this.widthsToJsArray(visWidths);
-                allAuto = all(jsWidths < 0);
-                if allAuto
-                    this.pauseColumnWidthBridge(1200);
-                else
-                    this.pauseColumnWidthBridge();
-                end
-                % Same ordering rationale as above: bridge events before render.
                 this.sendWidthsToBridge(jsWidths);
                 if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                     this.DisplayTable.ColumnWidth = visWidths;
@@ -1536,7 +1522,8 @@ classdef Table < gwidgets.internal.Reparentable
 
         function sendWidthsToBridge(this, jsWidths)
             if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "SetWidths", jsWidths);
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "SetWidths", ...
+                    struct("w", jsWidths, "seq", this.LastSentSeq_));
             end
         end
 
@@ -1552,42 +1539,6 @@ classdef Table < gwidgets.internal.Reparentable
                     jsWidths(i) = w;
                 end
             end
-        end
-
-        function pauseColumnWidthBridge(this, pauseMs)
-            % Tell the bridge to ignore resize events for a short window.
-            % Also set the MATLAB-side flag as a belt-and-braces guard.
-            %
-            % pauseMs: duration in ms (default 500).  Use a larger value when
-            %   sending auto widths (-1) because the ResizeObserver echo from
-            %   the re-attached observer can arrive up to 800 ms after SetWidths
-            %   (600 ms delayed-attach + 200 ms debounce).  1200 ms ensures the
-            %   echo is still within the suppression window.
-            if nargin < 2
-                pauseMs = 500;  % must exceed DEBOUNCE_MS (200 ms)
-            end
-            this.IsPushingWidthToDisplay_ = true;
-            if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "Pause", ...
-                    struct("durationMs", pauseMs));
-            end
-            % Cancel any in-flight timer from a prior call before starting a
-            % new one.  Without this, rapid drags accumulate timer objects that
-            % all fire and clear IsPushingWidthToDisplay_ redundantly.
-            if ~isempty(this.PauseTimer_) && isvalid(this.PauseTimer_)
-                stop(this.PauseTimer_);
-                delete(this.PauseTimer_);
-            end
-            t = timer("StartDelay", pauseMs/1000, "ExecutionMode", "singleShot", ...
-                "TimerFcn", @(src,~) this.clearPushingFlagAndDelete(src));
-            this.PauseTimer_ = t;
-            start(t);
-        end
-
-        function clearPushingFlagAndDelete(this, src)
-            this.IsPushingWidthToDisplay_ = false;
-            stop(src);
-            delete(src);
         end
 
         function updateDisplayTable(this, vars)
@@ -1736,6 +1687,12 @@ classdef Table < gwidgets.internal.Reparentable
                         struct("tableTag", this.DisplayTableTag_));
 
                 case "ColumnWidthChanged"
+                    % Ignore programmatic echoes: bridge echoes the seq we sent;
+                    % if it matches our LastSentSeq_ this notification is the
+                    % ResizeObserver firing in response to our own SetWidths.
+                    if isfield(d, "seq") && d.seq == this.LastSentSeq_
+                        return
+                    end
                     this.onColumnWidthChanged(d.widths);
 
                 case "BridgeDiag"
@@ -1754,10 +1711,10 @@ classdef Table < gwidgets.internal.Reparentable
             %
             % Proportional columns are never converted to pixel on drag — only
             % their weights change to reflect the new rendered proportions.
-            if this.IsPushingWidthToDisplay_
-                return
-            end
-
+            %
+            % Programmatic-echo filtering happens upstream in onBridgeData via
+            % the seq field; by the time this method is called the notification
+            % is a genuine user drag.
             nVisible = sum(this.ColumnVisible);
             if numel(widths) ~= nVisible
                 sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
@@ -1824,13 +1781,14 @@ classdef Table < gwidgets.internal.Reparentable
             % without requiring a live DOM/figure.  Used by unit tests to
             % exercise onColumnWidthChanged logic headlessly.
             %
-            % Clear IsPushingWidthToDisplay_ first to match the real-world
-            % state: by the time the user drags a column, the Pause window
-            % from the last applyColumnWidthToDisplay call has already
-            % expired and the flag is false.  In tests the pause timer has
-            % not yet fired so we must clear it manually.
-            this.IsPushingWidthToDisplay_ = false;
+            % The seq field is omitted (seq=0), so onBridgeData's echo guard
+            % passes: 0 never equals a positive LastSentSeq_.
             this.onColumnWidthChanged(widths);
+        end
+
+        function seq = getLastSentSeq(this)
+            % Return the current LastSentSeq_ value for test assertions.
+            seq = this.LastSentSeq_;
         end
 
     end

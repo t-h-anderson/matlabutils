@@ -2,96 +2,75 @@ classdef tColumnWidthBridge < test.WithExampleTables
     % Unit tests for the MATLAB-side column-width bridge logic.
     %
     % These tests run headlessly (no figure or DOM required) by inspecting
-    % timer state and MATLAB-visible properties.  They cover the fixes to:
+    % MATLAB-visible properties.  They cover:
     %
-    %   - Timer accumulation: rapid ColumnWidth changes must not build up
-    %     multiple concurrent pause timers (fix: PauseTimer_ is cancelled
-    %     and replaced on each pauseColumnWidthBridge call).
+    %   - Echo suppression via seq: programmatic ColumnWidthChanged echoes
+    %     must be ignored using the sequence-number round-trip.
     %
-    %   - Timer cleanup on delete: the in-flight pause timer must be stopped
-    %     and deleted when the Table object is destroyed (fix: delete() now
-    %     calls stop/delete on PauseTimer_ before releasing resources).
+    %   - Pixel-column preservation: when the bridge's colAutoFlags are stale
+    %     and a pixel column is incorrectly reported as proportional, the
+    %     stored pixel width must be preserved and a corrective SetWidths
+    %     sent (verified by an incremented LastSentSeq_).
+    %
+    %   - Proportional-weight update: auto/nx columns correctly update their
+    %     weights when reported as negative values by the bridge.
 
     % ------------------------------------------------------------------ %
-    %  Helpers
-    % ------------------------------------------------------------------ %
-    methods (Access = private)
-
-        function timers = ownTimers(~, baseline)
-            % Return timer objects created after 'baseline' was taken.
-            % Uses Tags set on pause timers to scope to our objects only.
-            % Fallback: just return all timers minus the baseline set.
-            all = timerfindall;
-            if isempty(baseline)
-                timers = all;
-            else
-                % setdiff on handles: keep timers not in the baseline set.
-                timers = all(~ismember(all, baseline));
-            end
-        end
-
-    end
-
-    % ------------------------------------------------------------------ %
-    %  Timer accumulation tests
+    %  Echo-guard (seq-based) tests
     % ------------------------------------------------------------------ %
     methods (Test)
 
-        function tSingleTimerAfterRapidWidthChanges(testCase)
-            % Each pauseColumnWidthBridge call should cancel the previous
-            % in-flight timer before starting a new one.  After N rapid
-            % ColumnWidth assignments only one pause timer should exist.
+        function tSeqIncrementedOnEachApply(testCase)
+            % Every call to applyColumnWidthToDisplay must increment
+            % LastSentSeq_ so each SetWidths carries a unique seq.
 
-            baseline = timerfindall;
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            seq0 = t.getLastSentSeq();
 
-            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
-            t.DataColumnWidth = {100, 100, 100, 100};               % 1st pause
+            t.DataColumnWidth = {100, 100, 100, 100};   % first apply
+            seq1 = t.getLastSentSeq();
 
-            for i = 1:5
-                t.DataColumnWidth = {100+i, 100+i, 100+i, 100+i};   % cancels prev
-            end
+            t.DataColumnWidth = {200, 200, 200, 200};   % second apply
+            seq2 = t.getLastSentSeq();
 
-            created = testCase.ownTimers(baseline);
-            testCase.verifyLessThanOrEqual(numel(created), 1, ...
-                "Rapid width changes should leave at most 1 in-flight pause timer")
-
+            testCase.verifyGreaterThan(seq1, seq0, "Seq must increment on first apply")
+            testCase.verifyGreaterThan(seq2, seq1, "Seq must increment on second apply")
             delete(t);
         end
 
-        function tTimerCancelledOnTableDelete(testCase)
-            % Deleting the Table object must stop and delete any in-flight
-            % pause timer so that it cannot fire after the object is gone.
+        function tSeqStaysConstantWhenNothingApplied(testCase)
+            % LastSentSeq_ must not change between applyColumnWidthToDisplay
+            % calls (e.g. after a simulateBridgeDrag that doesn't trigger
+            % applyColumnWidthToDisplay because widths are unchanged).
 
-            baseline = timerfindall;
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.DataColumnWidth = {100, 200};
+            seq1 = t.getLastSentSeq();
 
-            t = gwidgets.Table(Data=testCase.multivariableData());
-            t.DataColumnWidth = {100, 100, 100, 100};  % creates a timer
+            % Identical drag — echo guard in onColumnWidthChanged bails early.
+            t.simulateBridgeDrag([100, 200]);
+            seq2 = t.getLastSentSeq();
 
+            testCase.verifyEqual(seq2, seq1, ...
+                "Seq must not change when DataColumnWidth_ is unchanged")
             delete(t);
-
-            created = testCase.ownTimers(baseline);
-            testCase.verifyEmpty(created, ...
-                "Deleting the Table should cancel its in-flight pause timer")
         end
 
-        function tTimerCountAfterMixedPauseValues(testCase)
-            % pauseColumnWidthBridge is called with different durations
-            % (500 ms for pixel, 1200 ms for auto).  Interleaving these
-            % must still leave at most one timer alive.
+        function tSeqIncrementedWhenTypeChangePrevented(testCase)
+            % When the bridge reports a pixel column as proportional (stale
+            % colAutoFlags), typeChangePrevented triggers applyColumnWidthToDisplay
+            % to send a corrective SetWidths.  LastSentSeq_ must increment.
 
-            baseline = timerfindall;
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.DataColumnWidth = {100, 200};
+            seqBefore = t.getLastSentSeq();
 
-            t = gwidgets.Table(Data=testCase.multivariableData());
+            % Stale all-proportional notification for all-pixel columns.
+            t.simulateBridgeDrag([-97, -103]);
 
-            t.DataColumnWidth = {100, 100, 100, 100};   % pixel  → 500 ms pause
-            t.DataColumnWidth = {};                     % auto   → 1200 ms pause
-            t.DataColumnWidth = {200, 200, 200, 200};   % pixel  → 500 ms pause
-            t.DataColumnWidth = {};                     % auto   → 1200 ms pause
-
-            created = testCase.ownTimers(baseline);
-            testCase.verifyLessThanOrEqual(numel(created), 1, ...
-                "Interleaved pixel/auto width changes must leave at most 1 timer")
-
+            seqAfter = t.getLastSentSeq();
+            testCase.verifyGreaterThan(seqAfter, seqBefore, ...
+                "applyColumnWidthToDisplay must increment seq when sending corrective SetWidths")
             delete(t);
         end
 
@@ -253,26 +232,12 @@ classdef tColumnWidthBridge < test.WithExampleTables
             % applyColumnWidthToDisplay must still run to send a corrective
             % SetWidths and re-sync the bridge.
             %
-            % Observable effect: pauseColumnWidthBridge is called, which
-            % stop+deletes the existing pause timer and creates a replacement.
-            % The replacement is a new timer object not present in the
-            % pre-drag snapshot, so ownTimers(preDrag) is non-empty iff
-            % applyColumnWidthToDisplay actually ran.
-            %
-            % Note: simply comparing numel(timerfindall) before/after is
-            % unreliable here because pauseColumnWidthBridge *replaces* the
-            % timer (count unchanged) rather than adding one.  Using the
-            % object-identity snapshot avoids that pitfall and is also immune
-            % to leaked timers from earlier tests firing during this window.
+            % Observable effect: applyColumnWidthToDisplay increments
+            % LastSentSeq_.  We compare the seq before and after the drag.
 
             t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
             t.DataColumnWidth = {100, 200};
-
-            % Snapshot taken after setup: any timer alive here (the pause
-            % timer created by the DataColumnWidth assignment) will be
-            % stop+deleted by the next pauseColumnWidthBridge call, and a
-            % brand-new timer object will be created in its place.
-            preDrag = timerfindall;
+            seqBefore = t.getLastSentSeq();
 
             % Stale all-proportional notification for all-pixel columns
             t.simulateBridgeDrag([-97, -103]);
@@ -283,11 +248,9 @@ classdef tColumnWidthBridge < test.WithExampleTables
             testCase.verifyEqual(t.DataColumnWidth{2}, 200, ...
                 "Col 2 pixel value must be preserved")
 
-            % applyColumnWidthToDisplay must have run: the replacement timer
-            % is a new object not present in preDrag.
-            newTimers = testCase.ownTimers(preDrag);
-            testCase.verifyNotEmpty(newTimers, ...
-                "applyColumnWidthToDisplay must create a replacement pause timer")
+            % applyColumnWidthToDisplay must have run: seq incremented.
+            testCase.verifyGreaterThan(t.getLastSentSeq(), seqBefore, ...
+                "applyColumnWidthToDisplay must increment LastSentSeq_ when sending corrective SetWidths")
 
             delete(t);
         end
@@ -308,13 +271,14 @@ classdef tColumnWidthBridge < test.WithExampleTables
 
             % Bridge correctly reports: col 1 pixel (new value 120),
             % cols 2-4 proportional (bridge has correct colAutoFlags).
-            t.simulateBridgeDrag([120, -55, -45, -0]);
+            t.simulateBridgeDrag([120, -55, -45, -50]);
 
             testCase.verifyEqual(t.DataColumnWidth{1}, 120, ...
                 "Pixel column must update to new pixel value")
             testCase.verifyEqual(t.DataColumnWidth{2}, "55x", ...
                 "Auto column must update to proportional weight")
             testCase.verifyEqual(t.DataColumnWidth{3}, "45x")
+            testCase.verifyEqual(t.DataColumnWidth{4}, "50x")
         end
 
         function tPartialPixelPreservationInMixedTable(testCase)
@@ -337,13 +301,13 @@ classdef tColumnWidthBridge < test.WithExampleTables
         end
 
         % ----------------------------------------------------------- %
-        %  Echo-guard tests
+        %  Echo-guard isequal tests
         % ----------------------------------------------------------- %
 
         function tEchoGuardSuppressesIdenticalDragNotification(testCase)
             % If onColumnWidthChanged receives widths that produce no change
             % to DataColumnWidth_ (echo from our own SetWidths), the update
-            % must be silently dropped and no new pause timer created.
+            % must be silently dropped and LastSentSeq_ must not change.
 
             t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
             t.DataColumnWidth = {100, 200};
@@ -352,17 +316,17 @@ classdef tColumnWidthBridge < test.WithExampleTables
             t.simulateBridgeDrag([150, 150]);
             testCase.verifyEqual(t.DataColumnWidth, {150, 150})
 
-            % Capture timer count after the first drag settled
-            nAfterFirst = numel(timerfindall);
+            % Capture seq after the first drag settled
+            seqAfterFirst = t.getLastSentSeq();
 
             % Identical notification again — should be a no-op
             t.simulateBridgeDrag([150, 150]);
             testCase.verifyEqual(t.DataColumnWidth, {150, 150}, ...
                 "DataColumnWidth must not change on echo notification")
 
-            % No additional timer should have been created
-            testCase.verifyEqual(numel(timerfindall), nAfterFirst, ...
-                "Echo notification must not create a new pause timer")
+            % No corrective SetWidths issued: seq must stay the same
+            testCase.verifyEqual(t.getLastSentSeq(), seqAfterFirst, ...
+                "Echo notification must not trigger applyColumnWidthToDisplay")
 
             delete(t);
         end

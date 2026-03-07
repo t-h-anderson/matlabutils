@@ -11,22 +11,32 @@
   // detect column-width changes caused by user drags, reports them to MATLAB,
   // and applies MATLAB's SetWidths responses back to the DOM.
   //
+  // --- Echo suppression (source-tagging) ----------------------------------
+  //
+  //   Every SetWidths from MATLAB carries a monotonically-increasing sequence
+  //   number (seq).  The bridge stores that seq in lastSetSeq when it applies
+  //   the widths.  The next publishWidths call echoes the seq back to MATLAB.
+  //   MATLAB compares the received seq with the last seq it sent; if they
+  //   match the notification is a programmatic echo and is ignored.  If they
+  //   differ (or seq is 0) the notification is a genuine user drag.
+  //
+  //   This eliminates all timer-based pause windows.  The only "dead time"
+  //   is the 200 ms ResizeObserver debounce — shorter than the old 500 ms Pause.
+  //
   // --- State machine (simplified) ----------------------------------------
   //
   //   prevWidths      Settled column pixel widths from the last known stable
   //                   state.  Used as the baseline to detect change direction
   //                   (drag vs window-resize).  Updated:
-  //                     • in debouncedPublish when suppressed (paused/echo)
-  //                     • at Pause expiry
+  //                     • via RAF after each SetWidths apply
   //                     • at the start of every publishWidths call
   //
   //   colAutoFlags    Per-column auto/pixel flag from the most recent SetWidths.
   //                   true = nx/auto col (MATLAB owns proportional value).
   //                   false = pixel col (bridge stamps explicit min/max).
   //
-  //   settledPropWidths  Snapshot of proportional column pixel widths taken at
-  //                   each Pause expiry (i.e. after the browser has reflowed
-  //                   following a MATLAB echo).  Used to redistribute
+  //   settledPropWidths  Snapshot of proportional column pixel widths taken
+  //                   via RAF after each SetWidths apply.  Used to redistribute
   //                   proportional header columns when a pixel column is
   //                   dragged, so the nx columns maintain their current ratio.
   //
@@ -34,8 +44,10 @@
   //                   the body table is also given an explicit pixel width
   //                   (needed to prevent overflow in the all-pixel case).
   //
-  //   paused          MATLAB is pushing widths; suppress ColumnWidthChanged.
-  //   echoSuppressUntil  Timestamp until which ResizeObserver echoes are muted.
+  //   lastSetSeq      Sequence number from the most recent SetWidths.  Echoed
+  //                   back in ColumnWidthChanged so MATLAB can distinguish
+  //                   programmatic echoes from genuine user drags.  Cleared to
+  //                   0 after each publishWidths call.
   //
   // --- Drag handling -----------------------------------------------------
   //
@@ -64,9 +76,8 @@
   var resizeObserver    = null;
   var mutationObserver  = null;
   var debounceTimer     = null;
-  var paused            = false;
   var allPixelMode      = false;
-  var echoSuppressUntil = 0;
+  var lastSetSeq        = 0;   // seq from the most recent SetWidths; echoed in ColumnWidthChanged
   var tableTag          = null;
   var htmlComponent     = null;
   var attachAttempts    = 0;
@@ -76,7 +87,7 @@
   var colAutoFlags      = null;
   // Settled column pixel widths used as drag/resize baseline.
   var prevWidths        = null;
-  // Proportional column pixel widths at the last settled state (Pause expiry).
+  // Proportional column pixel widths at the last settled state (RAF after SetWidths).
   // Index is 0 for pixel columns, >0 for proportional columns.
   var settledPropWidths = null;
   // Set true in publishWidths before sending ColumnWidthChanged; cleared at
@@ -213,15 +224,14 @@
 
   // ---- applyColumnWidths: MATLAB → DOM ----
 
-  function applyColumnWidths(widths) {
+  function applyColumnWidths(widths, seq) {
     var allPixel = widths.every(function(w) { return w >= 0; });
     var allAuto  = widths.every(function(w) { return w <  0; });
     var mode     = allPixel ? "pixel" : allAuto ? "auto" : "mixed";
 
     bridgeLog("[Bridge] " + ts() + " applyColumnWidths: mode=" + mode +
               " widths=[" + widths.join(", ") + "]" +
-              " paused=" + paused +
-              " echoMs=" + Math.max(0, echoSuppressUntil - Date.now()));
+              " seq=" + seq);
 
     var cols = findColumns();
     if (cols.length !== widths.length) {
@@ -238,7 +248,8 @@
     var prevColAutoFlags = colAutoFlags;
     colAutoFlags    = widths.map(function(w) { return w < 0; });
     allPixelMode    = allPixel;
-    prevWidths      = null;  // re-populate from next settled publishWidths/pause-expiry
+    lastSetSeq      = seq || 0;
+    prevWidths      = null;  // re-populate from next settled RAF / publishWidths
 
     // Invalidate settled proportional widths when the pixel/auto layout changes.
     // A stale snapshot from a different column configuration (e.g. all-auto →
@@ -249,17 +260,12 @@
     }
 
     // Redistribution only makes sense as a response to the bridge's own drag
-    // event (MATLAB echoes Pause + SetWidths after ColumnWidthChanged).  For
+    // event (MATLAB echoes SetWidths after ColumnWidthChanged).  For
     // independent programmatic assignments, pendingRedistrib is false and
     // willRedistrib stays false regardless of settledPropWidths.
     var willRedistrib = pendingRedistrib && !allPixel && !allAuto &&
                         settledPropWidths !== null && headerTable !== null;
     pendingRedistrib = false;
-
-    if (allAuto) {
-      echoSuppressUntil = Date.now() + 400;
-      bridgeLog("[Bridge] " + ts() + " applyColumnWidths: allAuto — echoSuppressUntil +400ms");
-    }
 
     bridgeLog("[Bridge] " + ts() + " applyColumnWidths: header BEFORE:" +
               " table=" + tableStyleStr(headerTable) +
@@ -390,6 +396,21 @@
       requestAnimationFrame(function() { syncBodyWithHeader("raf"); });
     }
 
+    // Capture settled proportional widths after the browser has reflowed.
+    // Used by the next mixed-mode SetWidths to redistribute proportional header
+    // columns when a pixel col is dragged while preserving the nx ratio.
+    // Also snaps prevWidths so drag-change detection has a correct baseline.
+    requestAnimationFrame(function() {
+      var snapCols = findColumns();
+      if (snapCols.length === 0) return;
+      var ws = colWidthsFromDOM(snapCols);
+      prevWidths = ws;
+      settledPropWidths = ws.map(function(w, i) {
+        return (colAutoFlags && colAutoFlags[i]) ? w : 0;
+      });
+      bridgeLog("[Bridge] " + ts() + " RAF settled: prevWidths=[" + ws.join(",") + "]");
+    });
+
     bridgeLog("[Bridge] " + ts() + " applyColumnWidths: calling attachObserver");
     attachObserver("SetWidths-sync");
     setupMutationObserver();
@@ -442,9 +463,6 @@
   // ---- publishWidths: decide what to tell MATLAB ----
 
   function publishWidths() {
-    var now    = Date.now();
-    var echoMs = Math.max(0, echoSuppressUntil - now);
-
     var cols = findColumns();
     if (cols.length === 0) return;
     if (observedCols.length > 0 && !observedCols[0].isConnected) {
@@ -473,17 +491,17 @@
 
     var changedIdxs = getChangedColumns(widths, prevW);
 
+    // Capture the seq to echo before clearing it.
+    var seqToEcho = lastSetSeq;
+    lastSetSeq    = 0;
+
     bridgeLog("[Bridge] " + ts() + " publishWidths:" +
               " widths=[" + widths.join(",") + "]" +
               " prev=[" + (prevW ? prevW.join(",") : "null") + "]" +
               " changed=[" + changedIdxs.join(",") + "]" +
               " flags=[" + colFlags.map(function(f) { return f ? "A" : "P"; }).join(",") + "]" +
-              " paused=" + paused + " echoMs=" + echoMs);
+              " seqToEcho=" + seqToEcho);
 
-    if (paused || echoMs > 0) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: suppressed");
-      return;
-    }
     if (changedIdxs.length === 0) return;
 
     var headerTable = cols[0].closest("table");
@@ -559,27 +577,20 @@
     allPixelMode = !colFlags.some(Boolean);
 
     bridgeLog("[Bridge] " + ts() + " publishWidths: drag" +
-              " jsNotify=[" + jsNotify.join(",") + "]");
+              " jsNotify=[" + jsNotify.join(",") + "]" +
+              " seqToEcho=" + seqToEcho);
     pendingRedistrib = true;
-    htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify };
+    htmlComponent.Data = { event: "ColumnWidthChanged", widths: jsNotify, seq: seqToEcho };
   }
 
   // ---- debouncedPublish: ResizeObserver entry point ----
 
   function debouncedPublish() {
-    var echoMs = Math.max(0, echoSuppressUntil - Date.now());
-    bridgeLog("[Bridge] " + ts() + " resize: paused=" + paused + " echoMs=" + echoMs);
+    bridgeLog("[Bridge] " + ts() + " resize: lastSetSeq=" + lastSetSeq);
 
     // Sync body with header on every fire for visual fidelity during drag.
     syncBodyWithHeader("drag-live");
 
-    if (paused || echoMs > 0) {
-      // During suppression: snapshot prevWidths so change detection is correct
-      // after the suppress window ends.
-      var snapCols = findColumns();
-      if (snapCols.length > 0) prevWidths = colWidthsFromDOM(snapCols);
-      return;
-    }
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
   }
@@ -647,31 +658,6 @@
       setTimeout(function() { attachObserver("Init"); }, RETRY_INTERVAL);
     });
 
-    htmlComponent.addEventListener("Pause", function(event) {
-      paused = true;
-      clearTimeout(debounceTimer);
-      var duration = (event.Data && event.Data.durationMs) ? event.Data.durationMs : 500;
-      echoSuppressUntil = Date.now() + duration;
-      bridgeLog("[Bridge] " + ts() + " Pause: duration=" + duration + "ms");
-      setTimeout(function() {
-        paused = false;
-        syncBodyWithHeader("post-pause");
-        var cols = findColumns();
-        if (cols.length > 0) {
-          prevWidths = colWidthsFromDOM(cols);
-          // Snapshot proportional column pixel widths for use by the next
-          // mixed-mode SetWidths (to redistribute proportional header cols
-          // when a pixel col is resized while keeping the nx ratio intact).
-          settledPropWidths = prevWidths.map(function(w, i) {
-            return (colAutoFlags && colAutoFlags[i]) ? w : 0;
-          });
-          bridgeLog("[Bridge] " + ts() + " Pause expired: prevWidths=[" + prevWidths.join(",") + "]");
-        } else {
-          bridgeLog("[Bridge] " + ts() + " Pause expired");
-        }
-      }, duration);
-    });
-
     htmlComponent.addEventListener("Reattach", function() {
       bridgeLog("[Bridge] " + ts() + " Reattach");
       attachAttempts = 0;
@@ -679,11 +665,22 @@
     });
 
     htmlComponent.addEventListener("SetWidths", function(event) {
-      var widths = event.Data;
-      bridgeLog("[Bridge] " + ts() + " SetWidths: " + JSON.stringify(widths));
-      if (!Array.isArray(widths)) return;
+      var data = event.Data;
+      bridgeLog("[Bridge] " + ts() + " SetWidths: " + JSON.stringify(data));
+      if (!data) return;
+      var widths, seq;
+      if (Array.isArray(data)) {
+        // Legacy format (plain array, no seq) — treat seq as 0.
+        widths = data;
+        seq    = 0;
+      } else if (Array.isArray(data.w)) {
+        widths = data.w;
+        seq    = data.seq || 0;
+      } else {
+        return;
+      }
       expectedColCount = widths.length;
-      applyColumnWidths(widths);
+      applyColumnWidths(widths, seq);
     });
 
     htmlComponent.Data = { event: "BridgeReady" };
