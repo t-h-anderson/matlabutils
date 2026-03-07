@@ -1803,6 +1803,13 @@ classdef Table < gwidgets.internal.Reparentable
             % Simulate a ColumnWidthChanged notification from the bridge
             % without requiring a live DOM/figure.  Used by unit tests to
             % exercise onColumnWidthChanged logic headlessly.
+            %
+            % Clear IsPushingWidthToDisplay_ first to match the real-world
+            % state: by the time the user drags a column, the Pause window
+            % from the last applyColumnWidthToDisplay call has already
+            % expired and the flag is false.  In tests the pause timer has
+            % not yet fired so we must clear it manually.
+            this.IsPushingWidthToDisplay_ = false;
             this.onColumnWidthChanged(widths);
         end
 
