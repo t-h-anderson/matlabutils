@@ -253,13 +253,26 @@ classdef tColumnWidthBridge < test.WithExampleTables
             % applyColumnWidthToDisplay must still run to send a corrective
             % SetWidths and re-sync the bridge.
             %
-            % Observable effect: a new pause timer is created, confirming that
-            % applyColumnWidthToDisplay was called.
-
-            nBefore = numel(timerfindall);
+            % Observable effect: pauseColumnWidthBridge is called, which
+            % stop+deletes the existing pause timer and creates a replacement.
+            % The replacement is a new timer object not present in the
+            % pre-drag snapshot, so ownTimers(preDrag) is non-empty iff
+            % applyColumnWidthToDisplay actually ran.
+            %
+            % Note: simply comparing numel(timerfindall) before/after is
+            % unreliable here because pauseColumnWidthBridge *replaces* the
+            % timer (count unchanged) rather than adding one.  Using the
+            % object-identity snapshot avoids that pitfall and is also immune
+            % to leaked timers from earlier tests firing during this window.
 
             t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
             t.DataColumnWidth = {100, 200};
+
+            % Snapshot taken after setup: any timer alive here (the pause
+            % timer created by the DataColumnWidth assignment) will be
+            % stop+deleted by the next pauseColumnWidthBridge call, and a
+            % brand-new timer object will be created in its place.
+            preDrag = timerfindall;
 
             % Stale all-proportional notification for all-pixel columns
             t.simulateBridgeDrag([-97, -103]);
@@ -270,10 +283,11 @@ classdef tColumnWidthBridge < test.WithExampleTables
             testCase.verifyEqual(t.DataColumnWidth{2}, 200, ...
                 "Col 2 pixel value must be preserved")
 
-            % applyColumnWidthToDisplay must have run — it creates a timer
-            nAfter = numel(timerfindall);
-            testCase.verifyGreaterThan(nAfter, nBefore, ...
-                "applyColumnWidthToDisplay must be called to re-sync the bridge")
+            % applyColumnWidthToDisplay must have run: the replacement timer
+            % is a new object not present in preDrag.
+            newTimers = testCase.ownTimers(preDrag);
+            testCase.verifyNotEmpty(newTimers, ...
+                "applyColumnWidthToDisplay must create a replacement pause timer")
 
             delete(t);
         end
