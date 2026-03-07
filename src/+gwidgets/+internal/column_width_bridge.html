@@ -203,14 +203,24 @@
 
   // ---- Body cell stamping ----
 
-  function stampBodyCells(bodyTable, widths, nCols) {
+  function stampBodyCells(bodyTable, widths, nCols, autoFlags) {
     if (!bodyTable) return;
     var rows = bodyTable.querySelectorAll("tr");
     for (var r = 0; r < rows.length; r++) {
       var cells = rows[r].querySelectorAll("td");
       for (var i = 0; i < cells.length && i < nCols; i++) {
-        cells[i].style.minWidth = widths[i] + "px";
-        cells[i].style.maxWidth = widths[i] + "px";
+        if (autoFlags && autoFlags[i]) {
+          // Relative column: clear any px constraints so the browser distributes
+          // remaining space naturally.  A body cell min-width would hold the
+          // column frozen on subsequent drags by preventing container shrinkage.
+          var cMin = cells[i].style.minWidth;
+          if (!cMin || cMin.indexOf('%') < 0) cells[i].style.removeProperty("min-width");
+          var cMax = cells[i].style.maxWidth;
+          if (!cMax || cMax.indexOf('%') < 0) cells[i].style.removeProperty("max-width");
+        } else {
+          cells[i].style.minWidth = widths[i] + "px";
+          cells[i].style.maxWidth = widths[i] + "px";
+        }
       }
     }
   }
@@ -457,7 +467,7 @@
         bodyTable.style.maxWidth = hTableWidth + "px";
       }
     }
-    stampBodyCells(bodyTable, widths, cols.length);
+    stampBodyCells(bodyTable, widths, cols.length, colAutoFlags);
   }
 
   // ---- Change detection ----
@@ -537,7 +547,7 @@
     var isDrag = fromMouseUp || hasOpposing || singlePixelDrag;
 
     // Always stamp body cells so virtual-scroll rows have accurate widths.
-    stampBodyCells(bodyTable, widths, cols.length);
+    stampBodyCells(bodyTable, widths, cols.length, colAutoFlags);
 
     if (!isDrag) {
       // Window resize: re-stamp pixel header cols so they don't drift.
