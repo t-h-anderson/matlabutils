@@ -475,6 +475,9 @@
       // allAuto SetWidths clears the body constraints) we stamp a rescue width
       // so the body rows remain visible until MATLAB sets width=100% inline.
       if (allPixelMode || (bRendered === 0 && hTableWidth > 0)) {
+        bridgeLog("[Bridge] " + ts() + " syncBodyWithHeader(" + label +
+                  "): stampBodyTable allPixelMode=" + allPixelMode +
+                  " bRendered=" + bRendered + " hTableWidth=" + hTableWidth);
         bodyTable.style.width    = hTableWidth + "px";
         bodyTable.style.minWidth = hTableWidth + "px";
         bodyTable.style.maxWidth = hTableWidth + "px";
@@ -629,14 +632,18 @@
       // During drag: do NOT update prevWidths — the pre-drag baseline must
       // stay intact so publishWidths on mouseup correctly detects what changed.
       // syncBodyWithHeader above already keeps body cells visually in sync.
-      if (!pendingPublish) {
-        // First resize event of this drag: log th.style.width to diagnose
-        // whether MATLAB's drag handler has pinned relative columns at px values.
-        var dcs = findColumns();
-        bridgeLog("[Bridge] " + ts() + " drag-first-resize thStyleWidth=[" +
-                  dcs.map(function(c) { return c.style.width || "–"; }).join(",") + "]" +
-                  " colWidths=[" + colWidthsFromDOM(dcs).join(",") + "]");
-      }
+      var dcs  = findColumns();
+      var dHt  = dcs.length > 0 ? dcs[0].closest("table") : null;
+      var dDoc = dcs.length > 0 ? dcs[0].ownerDocument : null;
+      var dBt  = (dHt && dDoc) ? findBodyTable(dDoc, dHt) : null;
+      bridgeLog("[Bridge] " + ts() + " drag-resize" +
+        " ht=[w="  + (dHt ? dHt.style.width    ||"–" : "null") +
+            " mn=" + (dHt ? dHt.style.minWidth  ||"–" : "null") +
+            " mx=" + (dHt ? dHt.style.maxWidth  ||"–" : "null") + "]" +
+        " bt=[w="  + (dBt ? dBt.style.width     ||"–" : "null") + "]" +
+        " thW=["   + dcs.map(function(c){return c.style.width    ||"–";}).join(",") + "]" +
+        " thMn=["  + dcs.map(function(c){return c.style.minWidth ||"–";}).join(",") + "]" +
+        " thMx=["  + dcs.map(function(c){return c.style.maxWidth ||"–";}).join(",") + "]");
       pendingPublish = true;
       return;
     }
@@ -708,8 +715,19 @@
     try {
       var parentDoc = window.parent.document;
       parentDoc.addEventListener("mousedown", function() {
-        isDragging = true;
+        isDragging    = true;
         pendingPublish = false;
+        var mCols = findColumns();
+        if (mCols.length > 0) {
+          var mHt  = mCols[0].closest("table");
+          var mDoc = mCols[0].ownerDocument;
+          var mBt  = findBodyTable(mDoc, mHt);
+          bridgeLog("[Bridge] " + ts() + " mousedown" +
+            " thW=["  + mCols.map(function(c){return c.style.width    ||"–";}).join(",") + "]" +
+            " thMn=[" + mCols.map(function(c){return c.style.minWidth ||"–";}).join(",") + "]" +
+            " thMx=[" + mCols.map(function(c){return c.style.maxWidth ||"–";}).join(",") + "]" +
+            " body=" + (mBt ? bodyCellStyleStr(mBt, mCols.length) : "null"));
+        }
       }, true);
       parentDoc.addEventListener("mouseup", function() {
         isDragging = false;
