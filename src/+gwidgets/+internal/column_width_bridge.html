@@ -522,11 +522,20 @@
       }
     }
 
+    // Guard: if the table is off-screen or zero-width all proportional columns
+    // will have propTotal === 0.  Sending weights computed from a zero-width
+    // render would reset every nx column to "1x", losing the user's ratios.
+    if (propCount > 0 && propTotal === 0) {
+      bridgeLog("[Bridge] " + ts() + " publishWidths: propTotal=0 with propCount=" +
+                propCount + " — skipping notification");
+      return;
+    }
+
     // jsNotify: pixel cols → positive px width.
     //           proportional cols → negative nx weight: MATLAB reads -v as nx = v.
     var jsNotify = widths.map(function(w, i) {
       if (!colFlags[i]) return w;
-      return propTotal > 0 ? -Math.max(1, Math.round((w / propTotal) * propCount * 100)) : -1;
+      return -Math.max(1, Math.round((w / propTotal) * propCount * 100));
     });
     allPixelMode = !colFlags.some(Boolean);
 

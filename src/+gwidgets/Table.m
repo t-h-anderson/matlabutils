@@ -53,6 +53,7 @@ classdef Table < gwidgets.internal.Reparentable
         % Column-width bridge
         DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
         IsPushingWidthToDisplay_ (1,1) logical = false % True while programmatic widths are being applied
+        PauseTimer_ (1,:) timer {mustBeScalarOrEmpty}   % In-flight pause timer; replaced on each call
 
         DataColumnWidth_ (1,:) cell % Width of data columns
         DefaultColumnWidths_ (1,:) cell % Default column widths used as reset target
@@ -98,6 +99,12 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function delete(this)
+            % Stop any in-flight pause timer so it cannot fire after the
+            % object is destroyed and attempt to access deleted properties.
+            if ~isempty(this.PauseTimer_) && isvalid(this.PauseTimer_)
+                stop(this.PauseTimer_);
+                delete(this.PauseTimer_);
+            end
             delete(this.FilterController);
             delete(this.CustomContextMenuItems);
             delete(this.ContextMenu);
@@ -1554,12 +1561,16 @@ classdef Table < gwidgets.internal.Reparentable
                 sendEventToHTMLSource(this.ColumnWidthBridge_, "Pause", ...
                     struct("durationMs", pauseMs));
             end
-            % Clear the MATLAB flag after the same window.
-            % The timer is deleted inside its own callback to avoid leaking
-            % timer objects when this method is called repeatedly (e.g. each
-            % column drag creates a new timer).
+            % Cancel any in-flight timer from a prior call before starting a
+            % new one.  Without this, rapid drags accumulate timer objects that
+            % all fire and clear IsPushingWidthToDisplay_ redundantly.
+            if ~isempty(this.PauseTimer_) && isvalid(this.PauseTimer_)
+                stop(this.PauseTimer_);
+                delete(this.PauseTimer_);
+            end
             t = timer("StartDelay", pauseMs/1000, "ExecutionMode", "singleShot", ...
                 "TimerFcn", @(src,~) [this.clearPushingFlag(), delete(src)]);
+            this.PauseTimer_ = t;
             start(t);
         end
 
