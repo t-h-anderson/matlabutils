@@ -286,8 +286,10 @@
     var newColTotal = 0;
     for (var i = 0; i < cols.length; i++) {
       if (widths[i] < 0) {
-        // Preserve MATLAB's %-based proportional CSS; always clear px constraints
-        // we may have stamped (initial SetWidths, redistribution, prior epoch).
+        // Preserve MATLAB's %-based CSS; clear all px constraints including
+        // the style.width that MATLAB's native drag handler stamps on <th>s.
+        var hW = cols[i].style.width;
+        if (!hW || hW.indexOf('%') < 0) cols[i].style.removeProperty("width");
         var hMin = cols[i].style.minWidth;
         if (!hMin || hMin.indexOf('%') < 0) cols[i].style.removeProperty("min-width");
         var hMax = cols[i].style.maxWidth;
