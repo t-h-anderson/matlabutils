@@ -443,6 +443,20 @@
         return (colAutoFlags && colAutoFlags[i]) ? w : 0;
       });
       bridgeLog("[Bridge] " + ts() + " RAF settled: prevWidths=[" + ws.join(",") + "]");
+
+      // Clear redistribution-stamped px min/max from relative header columns.
+      // The redistribution loop in applyColumnWidths correctly positions these
+      // columns during the SetWidths echo, but the constraints must be removed
+      // before the next drag so MATLAB's native drag handler treats them as
+      // proportional (unconstrained) rather than fixed-width columns.
+      for (var j = 0; j < snapCols.length; j++) {
+        if (colAutoFlags && colAutoFlags[j]) {
+          var rMin = snapCols[j].style.minWidth;
+          if (!rMin || rMin.indexOf('%') < 0) snapCols[j].style.removeProperty("min-width");
+          var rMax = snapCols[j].style.maxWidth;
+          if (!rMax || rMax.indexOf('%') < 0) snapCols[j].style.removeProperty("max-width");
+        }
+      }
     });
 
     bridgeLog("[Bridge] " + ts() + " applyColumnWidths: calling attachObserver");
