@@ -1533,11 +1533,10 @@ classdef Table < gwidgets.internal.Reparentable
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
-                this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
+                this.DisplayTable.ColumnWidth = this.normalizeColumnWidths(this.PixelDataColumnWidths_);
+                this.forceRefresh();
                 this.DisplayTable.ColumnWidth = visWidths;
-                drawnow   % flush DOM before Restore → attachObserver fires
             end
-            this.sendTypesToBridge();
             this.sendRestoreToBridge();
         end
 
@@ -1889,20 +1888,6 @@ classdef Table < gwidgets.internal.Reparentable
             % table DOM has settled.
             if isempty(this.ColumnWidthBridge_), return; end
             sendEventToHTMLSource(this.ColumnWidthBridge_, "Ready", []);
-        end
-
-        function sendTypesToBridge(this)
-            % Send a SetTypes event so the bridge knows which visible columns
-            % are Relative and can clear stale px drag-handler styles from them.
-            % The bridge defers the actual clear until the next suppressed
-            % ResizeObserver callback (= DOM settled), or applies it as a fallback
-            % in Restore if no resize fired during suppression.
-            if isempty(this.ColumnWidthBridge_), return; end
-            visIdxs = find(this.ColumnVisible);
-            types   = this.extendStore(this.DataColumnWidthTypes_, "Relative", ...
-                                       numel(this.DataColumnNames));
-            isRel   = arrayfun(@(i) types(i) == "Relative", visIdxs);
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTypes", isRel);
         end
 
     end
@@ -2984,7 +2969,7 @@ classdef Table < gwidgets.internal.Reparentable
             % and Relative column types are supported.
             val = convertCharsToStrings(val);
             if isempty(val)
-                val = {};
+                val = {"fit"};
             elseif ~iscell(val)
                 val = num2cell(val);
             else
