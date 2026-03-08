@@ -435,6 +435,12 @@
       settledPropWidths = ws.map(function(w, i) {
         return (colAutoFlags && colAutoFlags[i]) ? w : 0;
       });
+      // After the settled state is captured, any pending echo should have
+      // already been queued via the ResizeObserver debounce (which fires
+      // before the 200 ms debounce window).  Keeping a non-zero lastSetSeq
+      // past this point risks the next real user drag being misidentified as
+      // an echo by MATLAB (seq match → MATLAB suppresses update → snap-back).
+      lastSetSeq = 0;
       bridgeLog("[Bridge] " + ts() + " RAF settled: prevWidths=[" + ws.join(",") + "]");
 
       // For each relative column:
