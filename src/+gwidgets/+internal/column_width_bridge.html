@@ -154,6 +154,11 @@
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
   }
 
+  // Pending RAF id for clearRelativeConstraints.  Tracked so a new SetTypes
+  // event can cancel any not-yet-fired RAF from a previous one (prevents a
+  // stale mid-drag RAF from releasing the pin while a new drag is in progress).
+  var clearRAFId = null;
+
   // ---- clearRelativeConstraints: remove stale drag-handler px styles ----
 
   function clearRelativeConstraints() {
@@ -254,12 +259,28 @@
       var data = event.Data;
       if (!Array.isArray(data)) return;
       colAutoFlags = data;
-      bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
-                data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
-      // Immediate: no RAF needed.  We no longer clear style.width, so there
-      // is no timing dependency on MATLAB's renderer.  Only minWidth/maxWidth
-      // are removed — those are drag-handler artifacts MATLAB never clears.
-      clearRelativeConstraints();
+      // Cancel any not-yet-fired RAF from a previous SetTypes.  Without this
+      // a mid-drag or cascade RAF could fire during a subsequent drag and
+      // release the minWidth pin before MATLAB's <col> update has landed.
+      if (clearRAFId !== null) {
+        cancelAnimationFrame(clearRAFId);
+        bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
+                  data.map(function(f) { return f ? "R" : "P"; }).join(",") +
+                  "] (cancelled stale RAF)");
+      } else {
+        bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
+                  data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
+      }
+      // Defer one frame: MATLAB drives column widths through <col> elements
+      // which are updated asynchronously.  Keeping the drag-handler minWidth
+      // pin in place until the next frame ensures the <col> update has
+      // settled before we release it.  We never touch style.width, so there
+      // is no risk of revealing a stale % from a previous drag.
+      clearRAFId = requestAnimationFrame(function() {
+        clearRAFId = null;
+        bridgeLog("[Bridge] " + ts() + " RAF: clearRelativeConstraints");
+        clearRelativeConstraints();
+      });
     });
 
     htmlComponent.Data = { event: "BridgeReady" };
