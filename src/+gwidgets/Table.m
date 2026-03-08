@@ -1518,17 +1518,21 @@ classdef Table < gwidgets.internal.Reparentable
         function applyColumnWidthToDisplay(this)
             % Push the current visible column widths to the display table.
             % Suppress bridge callbacks so ResizeObserver echoes during the
-            % DOM update are dropped.  SetTypes stores pending constraint data
-            % in the bridge; the bridge applies clearRelativeConstraints() when
-            % the suppressed ResizeObserver fires (= DOM has settled), or as a
-            % fallback in Restore if the ColumnWidth update didn't change the DOM.
+            % DOM update are dropped.  The NaN flush resets MATLAB's internal
+            % column-type metadata so relative weights are correctly applied.
+            % drawnow flushes both DOM updates through the widget pipeline
+            % before SetTypes/Restore are queued, ensuring the bridge's deferred
+            % constraint clear (pendingSetTypes fallback in Restore) runs on the
+            % settled DOM rather than stale state.
             this.sendSuppressToBridge();
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
+                this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
                 this.DisplayTable.ColumnWidth = visWidths;
+                drawnow   % flush both DOM updates before queuing SetTypes/Restore
             end
             this.sendTypesToBridge();
             this.sendRestoreToBridge();
