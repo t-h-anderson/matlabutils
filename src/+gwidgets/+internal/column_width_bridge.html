@@ -8,17 +8,19 @@
   // ColumnWidthBridge — timer-free, MATLAB-driven
   //
   // MATLAB API (events sent TO the bridge):
+  //   Poll                    — request current column widths; responds with PollResponse
   //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
   //   Ready                   — attach/re-attach ResizeObserver (no poll)
   //   Suppress                — stop ColumnWidthChanged from being sent to MATLAB
   //   SetTypes   [bool,...]   — per-column Relative flag; clears drag px styles
-  //   Restore                 — re-enable ColumnWidthChanged; re-attach observer;
-  //                             poll current widths and send ColumnWidthChanged
+  //   Restore                 — re-enable ColumnWidthChanged; re-attach observer
+  //                             (ResizeObserver fires naturally after DOM settles)
   //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
+  //   PollResponse            — {widths:[...]} response to a Poll request (bypasses suppress)
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
   var COL_SELECTOR       = ".mw-table-header-column";
@@ -163,11 +165,18 @@
       flushDiag();
     });
 
+    htmlComponent.addEventListener("Poll", function() {
+      var cols = findColumns();
+      var widths = cols.length > 0 ? colWidthsFromDOM(cols) : [];
+      bridgeLog("[Bridge] " + ts() + " Poll: widths=[" + widths.join(",") + "]");
+      flushDiag();
+      htmlComponent.Data = { event: "PollResponse", widths: widths };
+    });
+
     htmlComponent.addEventListener("Restore", function() {
       callbackSuppressed = false;
       bridgeLog("[Bridge] " + ts() + " Restore");
-      attachObserver();
-      onResize();
+      attachObserver();   // ResizeObserver fires naturally once DOM has settled
       flushDiag();
     });
 
