@@ -1517,9 +1517,10 @@ classdef Table < gwidgets.internal.Reparentable
 
         function applyColumnWidthToDisplay(this)
             % Push the current visible column widths to the display table.
-            % The bridge observes the resulting DOM change and reports back via
-            % ColumnWidthChanged; MATLAB compares against PixelDataColumnWidths_
-            % to distinguish its own CSS settling from a genuine user drag.
+            % Bracket the DOM update with Busy/Ready so the bridge suppresses
+            % ResizeObserver events caused by our own layout change, and
+            % re-attaches to the (possibly re-rendered) header afterwards.
+            this.sendBusyToBridge();
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
@@ -1530,6 +1531,7 @@ classdef Table < gwidgets.internal.Reparentable
             % Tell the bridge which visible columns are Relative so it can
             % clear any px drag-handler styles that would block %-based CSS.
             this.sendTypesToBridge();
+            this.sendReadyToBridge();
         end
 
         % ---- Column-width store helpers ----------------------------------------
@@ -1809,14 +1811,19 @@ classdef Table < gwidgets.internal.Reparentable
             switch d.event
 
                 case "BridgeReady"
-                    % setup() has run — safe to send Init now.
+                    % setup() has run — send Init then Ready so the bridge
+                    % attaches its ResizeObserver to the (already-rendered) table.
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
+                    this.sendReadyToBridge();
 
                 case "ColumnWidthChanged"
-                    % Bridge reports actual positive pixel widths for all
-                    % visible columns after any drag or window resize.
-                    %
+                    % Bridge fires on every ResizeObserver callback.
+                    % Ignore mid-drag (moving=true) events — only process the
+                    % settled value when the user releases the mouse.
+                    if isfield(d, "moving") && d.moving
+                        return
+                    end
                     % If the incoming widths match PixelDataColumnWidths_ (within
                     % 1 px browser-rounding tolerance) the event was caused by
                     % MATLAB's own CSS settling — ignore it to avoid a loop.
@@ -1834,11 +1841,22 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function onBridgeReattachNeeded(this)
-            % Send a Reattach event when the bridge's observed column count
-            % no longer matches the visible column count.
-            if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
-            end
+            % Column count mismatch — tell bridge to re-attach to current DOM.
+            this.sendReadyToBridge();
+        end
+
+        function sendBusyToBridge(this)
+            % Signal the bridge to detach its ResizeObserver before a MATLAB-
+            % driven layout change, preventing echo ColumnWidthChanged events.
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Busy", []);
+        end
+
+        function sendReadyToBridge(this)
+            % Signal the bridge to (re-)attach its ResizeObserver once the
+            % table DOM has settled.
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Ready", []);
         end
 
         function sendTypesToBridge(this)

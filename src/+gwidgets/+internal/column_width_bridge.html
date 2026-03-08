@@ -5,59 +5,45 @@
     body { margin: 0; overflow: hidden; background: transparent; }
   </style>
   <script>
-  // ColumnWidthBridge — reactive observer, MATLAB owns all width-setting
+  // ColumnWidthBridge — timer-free, MATLAB-driven
   //
-  // Observes column-header resize events and reports width changes to MATLAB
-  // via ColumnWidthChanged.  MATLAB drives all layout (DisplayTable.ColumnWidth).
+  // MATLAB API (events sent TO the bridge):
+  //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
+  //   Ready                   — table DOM is settled; attach/re-attach ResizeObserver
+  //   Busy                    — table DOM is being updated; detach ResizeObserver
+  //   SetTypes   [bool,...]   — per-column Relative flag; also clears drag px styles
+  //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
   //
-  // Echo suppression lives entirely in MATLAB: on receiving ColumnWidthChanged
-  // MATLAB compares the incoming pixel widths against PixelDataColumnWidths_.
-  // A match (within 1 px) means the event was caused by MATLAB's own CSS
-  // settling — ignored.  A difference means a genuine user drag or window
-  // resize — MATLAB updates its stores and re-applies ColumnWidth.
-  //
-  // The bridge does one targeted DOM write: on receiving SetTypes from MATLAB
-  // it clears any px inline styles (width/minWidth/maxWidth) from relative
-  // columns.  This is needed because MATLAB's native drag handler stamps px
-  // values on all <th> elements and MATLAB's renderer does not clear them
-  // when re-applying %-based CSS for relative columns.
+  // Bridge reports (events sent FROM the bridge):
+  //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
+  //   ColumnWidthChanged      — {widths:[...], moving:bool}
+  //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
-  var COL_SELECTOR   = ".mw-table-header-column";
-  var RETRY_INTERVAL = 600;
-  var DEBOUNCE_MS    = 200;
-  var MAX_ATTEMPTS   = 8;
+  var COL_SELECTOR  = ".mw-table-header-column";
   var DRAG_THRESHOLD = 2;
 
-  var resizeObserver   = null;
-  var mutationObserver = null;
-  var debounceTimer    = null;
-  var tableTag         = null;
-  var htmlComponent    = null;
-  var attachAttempts   = 0;
-  var observedCols     = [];
-  // Settled column pixel widths from the last reported state.
-  // Used as the baseline to detect changes worth reporting.
-  var prevWidths       = null;
-  // Per-column relative flags from the most recent SetTypes (true = Relative).
-  // Used by clearRelativeConstraints to target only relative columns.
-  var colAutoFlags     = null;
+  var resizeObserver = null;
+  var tableTag       = null;
+  var htmlComponent  = null;
+  var colAutoFlags   = null;
+  var isMoving       = false;
+  var diagEnabled    = true;
+  var diagQueue      = [];
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
 
   // ---- Diagnostic logging ----
 
-  var diagQueue      = [];
-  var diagFlushTimer = null;
   function bridgeLog(msg) {
     console.log(msg);
-    diagQueue.push(msg);
-    clearTimeout(diagFlushTimer);
-    diagFlushTimer = setTimeout(function() {
-      if (diagQueue.length === 0 || !htmlComponent) return;
-      htmlComponent.Data = { event: "BridgeDiag", msg: diagQueue.join("\n") };
-      diagQueue = [];
-    }, 10);
+    if (diagEnabled) diagQueue.push(msg);
+  }
+
+  function flushDiag() {
+    if (!diagEnabled || diagQueue.length === 0 || !htmlComponent) return;
+    htmlComponent.Data = { event: "BridgeDiag", msg: diagQueue.join("\n") };
+    diagQueue = [];
   }
 
   // ---- DOM helpers ----
@@ -66,102 +52,46 @@
     return cols.map(function(c) { return Math.round(c.getBoundingClientRect().width); });
   }
 
-  // ---- DOM locators ----
+  // ---- DOM locator ----
 
   function findColumns() {
     var parentDoc;
     try { parentDoc = window.parent.document; } catch (e) { return []; }
-
-    // Strategy 1: data-tag scoping (primary — handles multiple tables per page).
     if (tableTag) {
       var tableEl = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
       if (tableEl) {
-        var taggedCols = Array.from(tableEl.querySelectorAll(COL_SELECTOR));
-        if (taggedCols.length > 0) return taggedCols;
+        var cols = Array.from(tableEl.querySelectorAll(COL_SELECTOR));
+        if (cols.length > 0) return cols;
       }
     }
-
-    // Strategy 2: walk up from bridge iframe using the last-known column count
-    // to scope to the correct table when data-tag is unavailable.
-    var expectedCount = prevWidths ? prevWidths.length : 0;
-    if (expectedCount > 0) {
-      try {
-        var frame = window.frameElement;
-        var el = frame ? frame.parentElement : null;
-        var depth = 0;
-        while (el && depth++ < 15) {
-          var nearby = Array.from(el.querySelectorAll(COL_SELECTOR));
-          if (nearby.length === expectedCount) return nearby;
-          if (nearby.length > expectedCount) break;
-          el = el.parentElement;
-        }
-      } catch (e) {}
-    }
-
-    // Strategy 3: unscoped fallback.
     return Array.from(parentDoc.querySelectorAll(COL_SELECTOR));
   }
 
-  // ---- Change detection ----
+  // ---- Mouse tracking — drives the moving flag ----
 
-  function getChangedColumns(current, last) {
-    if (!last || last.length !== current.length) return current.map(function(_, i) { return i; });
-    var changed = [];
-    for (var i = 0; i < current.length; i++) {
-      if (Math.abs(current[i] - last[i]) > DRAG_THRESHOLD) changed.push(i);
-    }
-    return changed;
+  function setupMouseTracking() {
+    try {
+      var pd = window.parent.document;
+      pd.addEventListener("mousedown", function() { isMoving = true;  }, true);
+      pd.addEventListener("mouseup",   function() { isMoving = false; }, true);
+    } catch (e) {}
   }
 
-  // ---- publishWidths: report current widths to MATLAB ----
+  // ---- Observer management (MATLAB-driven via Ready / Busy) ----
 
-  function publishWidths() {
+  function attachObserver() {
+    if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
     var cols = findColumns();
+    bridgeLog("[Bridge] " + ts() + " attachObserver: found=" + cols.length +
+              (cols.length ? " widths=[" + colWidthsFromDOM(cols).join(",") + "]" : ""));
     if (cols.length === 0) return;
-    if (observedCols.length > 0 && !observedCols[0].isConnected) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: stale obs — re-attaching");
-      attachObserver("stale");
-      return;
-    }
+    resizeObserver = new ResizeObserver(onResize);
+    cols.forEach(function(col) { resizeObserver.observe(col); });
+  }
 
-    var widths = colWidthsFromDOM(cols);
-    var prevW  = prevWidths;
-    prevWidths = widths;
-
-    // Guard: column count changed mid-render — reset baseline, wait for reattach.
-    if (prevW && prevW.length !== widths.length) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: col count " + prevW.length +
-                "→" + widths.length + " — resetting baseline");
-      return;
-    }
-
-    var changedIdxs = getChangedColumns(widths, prevW);
-    bridgeLog("[Bridge] " + ts() + " publishWidths:" +
-              " widths=[" + widths.join(",") + "]" +
-              " prev=[" + (prevW ? prevW.join(",") : "null") + "]" +
-              " changed=[" + changedIdxs.join(",") + "]");
-
-    if (changedIdxs.length === 0) return;
-
-    // Clear drag-handler px constraints NOW — before telling MATLAB about the
-    // new widths — so MATLAB's <col> update lands on unconstrained <th> elements.
-    // Re-measure immediately after and store as the new prevWidths baseline.
-    // This absorbs any snap caused by releasing the pin into the baseline so
-    // the resulting ResizeObserver echo is never reported as a genuine drag.
-    clearRelativeConstraints();
-    var postClear = colWidthsFromDOM(cols);
-    bridgeLog("[Bridge] " + ts() + " publishWidths: post-clear=[" + postClear.join(",") + "]");
-    prevWidths = postClear;
-
-    // Guard: all columns zero-width — table is off-screen; don't overwrite
-    // MATLAB's stored widths with meaningless zeros.
-    if (widths.every(function(w) { return w === 0; })) {
-      bridgeLog("[Bridge] " + ts() + " publishWidths: all-zero — skipping");
-      return;
-    }
-
-    bridgeLog("[Bridge] " + ts() + " publishWidths: sending ColumnWidthChanged");
-    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
+  function detachObserver() {
+    if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+    bridgeLog("[Bridge] " + ts() + " detachObserver");
   }
 
   // ---- clearRelativeConstraints: remove stale drag-handler px styles ----
@@ -172,92 +102,51 @@
     if (cols.length !== colAutoFlags.length) return;
     for (var i = 0; i < cols.length; i++) {
       if (!colAutoFlags[i]) continue;
-      // Log what MATLAB's renderer has written (or not) at this moment.
-      // style.width is intentionally left alone: MATLAB's renderer always
-      // writes a new inline "Nx%" for relative columns, naturally overriding
-      // the drag handler's px value.  Clearing it ourselves risks revealing
-      // the previous drag's stale "%" before the new one has arrived.
-      // We only remove minWidth/maxWidth, which MATLAB's renderer never clears.
       var mn = cols[i].style.minWidth;
       var mx = cols[i].style.maxWidth;
       bridgeLog("[Bridge] " + ts() + " col[" + i + "] (R):" +
-                " width=" + (cols[i].style.width || "''") +
-                " minWidth=" + (mn || "''") +
-                " maxWidth=" + (mx || "''"));
+                " minWidth=" + (mn || "''") + " maxWidth=" + (mx || "''"));
       if (!mn || mn.indexOf('%') < 0) cols[i].style.removeProperty("min-width");
       if (!mx || mx.indexOf('%') < 0) cols[i].style.removeProperty("max-width");
     }
   }
 
-  // ---- debouncedPublish: ResizeObserver entry point ----
+  // ---- ResizeObserver callback ----
 
-  function debouncedPublish() {
-    bridgeLog("[Bridge] " + ts() + " resize");
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
-  }
-
-  // ---- Observer management ----
-
-  function attachObserver(label) {
-    var cols = findColumns();
-    bridgeLog("[Bridge] " + ts() + " attachObserver(" + (label||"") + "):" +
-              " found=" + cols.length +
-              (cols.length ? " connected=" + cols[0].isConnected +
-                             " colWidths=[" + colWidthsFromDOM(cols).join(",") + "]" : ""));
-
-    if (cols.length === 0) {
-      if (++attachAttempts < MAX_ATTEMPTS)
-        setTimeout(function() { attachObserver("retry"); }, RETRY_INTERVAL);
-      return;
-    }
-    observedCols = cols;
-    if (resizeObserver) resizeObserver.disconnect();
-    resizeObserver = new ResizeObserver(debouncedPublish);
-    cols.forEach(function(col) { resizeObserver.observe(col); });
-    setupMutationObserver();
-  }
-
-  function setupMutationObserver() {
-    if (mutationObserver) { mutationObserver.disconnect(); mutationObserver = null; }
+  function onResize() {
     var cols = findColumns();
     if (cols.length === 0) return;
-    var headerTable = cols[0].closest("table");
-    if (!headerTable) return;
+    var widths = colWidthsFromDOM(cols);
+    if (widths.every(function(w) { return w === 0; })) return;
 
-    mutationObserver = new MutationObserver(function(mutations) {
-      var rerendered = mutations.some(function(m) {
-        if (m.type !== "childList" || m.removedNodes.length === 0) return false;
-        return Array.from(m.removedNodes).some(function(n) {
-          return n.nodeType === 1 && (
-            (n.classList && n.classList.contains("mw-table-header-column")) ||
-            (n.querySelector && n.querySelector(".mw-table-header-column") !== null)
-          );
-        });
-      });
-      if (rerendered) {
-        bridgeLog("[Bridge] " + ts() + " MutationObserver: header re-rendered — re-attaching");
-        setTimeout(function() { attachObserver("mutation"); }, 50);
-      }
-    });
-    mutationObserver.observe(headerTable, { childList: true, subtree: true });
+    bridgeLog("[Bridge] " + ts() + " resize: widths=[" + widths.join(",") + "]" +
+              " moving=" + isMoving);
+    flushDiag();
+    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, moving: isMoving };
   }
 
   // ---- Event wiring ----
 
   function setup(component) {
     htmlComponent = component;
+    setupMouseTracking();
 
     htmlComponent.addEventListener("Init", function(event) {
       tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
       bridgeLog("[Bridge] " + ts() + " Init: tableTag=" + tableTag);
-      setTimeout(function() { attachObserver("Init"); }, RETRY_INTERVAL);
+      flushDiag();
     });
 
-    htmlComponent.addEventListener("Reattach", function() {
-      bridgeLog("[Bridge] " + ts() + " Reattach");
-      attachAttempts = 0;
-      setTimeout(function() { attachObserver("Reattach"); }, RETRY_INTERVAL);
+    htmlComponent.addEventListener("Ready", function() {
+      bridgeLog("[Bridge] " + ts() + " Ready");
+      attachObserver();
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("Busy", function() {
+      bridgeLog("[Bridge] " + ts() + " Busy");
+      detachObserver();
+      flushDiag();
     });
 
     htmlComponent.addEventListener("SetTypes", function(event) {
@@ -266,17 +155,13 @@
       colAutoFlags = data;
       bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
                 data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
-      // Belt-and-suspenders for programmatic ColumnWidth changes (tb.ColumnWidth = {…})
-      // where publishWidths has not already cleared the constraints.  Also re-measure
-      // and re-baseline prevWidths so any snap from releasing the pin does not escape
-      // as a spurious ColumnWidthChanged event.
       clearRelativeConstraints();
-      var snapCols = findColumns();
-      if (snapCols.length > 0) {
-        var snap = colWidthsFromDOM(snapCols);
-        bridgeLog("[Bridge] " + ts() + " SetTypes: post-clear=[" + snap.join(",") + "]");
-        prevWidths = snap;
-      }
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("Diag", function(event) {
+      diagEnabled = !!(event.Data);
+      console.log("[Bridge] " + ts() + " Diag: " + diagEnabled);
     });
 
     htmlComponent.Data = { event: "BridgeReady" };
