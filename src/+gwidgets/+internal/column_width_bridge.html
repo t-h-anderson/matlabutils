@@ -297,22 +297,13 @@
     for (var i = 0; i < cols.length; i++) {
       if (widths[i] < 0) {
         // Preserve MATLAB's %-based CSS; clear px min/max constraints.
-        // For style.width: if it currently holds a px value (stamped by
-        // MATLAB's native drag handler at drag end), replace it with a fresh %
-        // computed from the settled rendered width.  MATLAB's drag handler
-        // checks style.width at mousedown: a % value causes it to treat the
-        // column as proportional (free to reflow); an empty or px value causes
-        // it to pin the column at its current pixel size, freezing it.
-        var hW = cols[i].style.width;
-        if (!hW || hW.indexOf('%') < 0) {
-          var ctnrW = headerTable ? Math.round(headerTable.getBoundingClientRect().width) : 0;
-          var colW  = Math.round(cols[i].getBoundingClientRect().width);
-          if (ctnrW > 0 && colW > 0) {
-            cols[i].style.width = (colW * 100 / ctnrW).toFixed(4) + "%";
-          } else {
-            cols[i].style.removeProperty("width");
-          }
-        }
+        // Clear any inline style.width (px left by MATLAB's native drag
+        // handler, or a stale % from a previous applyColumnWidths call).
+        // The settled RAF stamps the correct % AFTER MATLAB's CSS has
+        // reflowed, so getBoundingClientRect() returns the true width.
+        // Stamping here would use a stale pre-reflow position and give
+        // MATLAB's drag handler a wrong proportional baseline at mousedown.
+        cols[i].style.removeProperty("width");
         var hMin = cols[i].style.minWidth;
         if (!hMin || hMin.indexOf('%') < 0) cols[i].style.removeProperty("min-width");
         var hMax = cols[i].style.maxWidth;
@@ -437,6 +428,8 @@
     requestAnimationFrame(function() {
       var snapCols = findColumns();
       if (snapCols.length === 0) return;
+      var snapHdrTable = snapCols.length > 0 ? snapCols[0].closest("table") : null;
+      var ctnrW = snapHdrTable ? Math.round(snapHdrTable.getBoundingClientRect().width) : 0;
       var ws = colWidthsFromDOM(snapCols);
       prevWidths = ws;
       settledPropWidths = ws.map(function(w, i) {
@@ -444,13 +437,22 @@
       });
       bridgeLog("[Bridge] " + ts() + " RAF settled: prevWidths=[" + ws.join(",") + "]");
 
-      // Clear redistribution-stamped px min/max from relative header columns.
-      // The redistribution loop in applyColumnWidths correctly positions these
-      // columns during the SetWidths echo, but the constraints must be removed
-      // before the next drag so MATLAB's native drag handler treats them as
-      // proportional (unconstrained) rather than fixed-width columns.
+      // For each relative column:
+      //   • Stamp the correct % so MATLAB's native drag handler treats it as
+      //     proportional at next mousedown (% → free to reflow; px/empty → pinned).
+      //     Doing this in the RAF rather than in the sync header loop ensures
+      //     getBoundingClientRect() reflects MATLAB's updated CSS, not a stale
+      //     pre-reflow position that would give the handler a wrong baseline.
+      //   • Clear any redistribution-stamped px min/max so the handler does not
+      //     read them and treat the column as fixed-width.
       for (var j = 0; j < snapCols.length; j++) {
         if (colAutoFlags && colAutoFlags[j]) {
+          var rW = Math.round(snapCols[j].getBoundingClientRect().width);
+          if (ctnrW > 0 && rW > 0) {
+            snapCols[j].style.width = (rW * 100 / ctnrW).toFixed(4) + "%";
+          } else {
+            snapCols[j].style.removeProperty("width");
+          }
           var rMin = snapCols[j].style.minWidth;
           if (!rMin || rMin.indexOf('%') < 0) snapCols[j].style.removeProperty("min-width");
           var rMax = snapCols[j].style.maxWidth;
