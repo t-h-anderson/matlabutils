@@ -11,8 +11,6 @@
   //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
   //   Ready                   — attach/re-attach ResizeObserver
   //   Suppress                — stop ColumnWidthChanged from being sent to MATLAB
-  //   Unsuppress              — re-enable ColumnWidthChanged without re-attaching
-  //                             the observer (no-change path; avoids loop)
   //   Restore                 — re-enable ColumnWidthChanged (leave existing observer)
   //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
   //
@@ -28,7 +26,7 @@
   var htmlComponent      = null;
   var isMoving           = false;
   var callbackSuppressed = false;
-  var diagEnabled        = true;
+  var diagEnabled        = false;
   var diagQueue          = [];
 
   var t0 = Date.now();
@@ -142,15 +140,6 @@
     htmlComponent.addEventListener("Suppress", function() {
       callbackSuppressed = true;
       bridgeLog("[Bridge] " + ts() + " Suppress");
-      flushDiag();
-    });
-
-    htmlComponent.addEventListener("Unsuppress", function() {
-      // Un-suppress without re-attaching the ResizeObserver.
-      // Used for the no-change ColumnWidthChanged path: re-attaching would
-      // fire ResizeObserver immediately and create an infinite loop.
-      callbackSuppressed = false;
-      bridgeLog("[Bridge] " + ts() + " Unsuppress");
       flushDiag();
     });
 

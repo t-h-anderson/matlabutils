@@ -1003,6 +1003,7 @@ classdef Table < gwidgets.internal.Reparentable
 
     properties (Hidden)
         VisibleGroupHeaderRowIdx (1,:) double % (1,nVisGroups) Indices of header rows
+        BridgeDiagEnabled (1,1) logical = false % Enable JS bridge diagnostic output
     end
 
     properties (Access = private)
@@ -1237,6 +1238,13 @@ classdef Table < gwidgets.internal.Reparentable
                 this.doUpdateSequence(StartFrom="Sorting");
             end
 
+        end
+
+        function set.BridgeDiagEnabled(this, val)
+            this.BridgeDiagEnabled = val;
+            if ~isempty(this.ColumnWidthBridge_)
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", val);
+            end
         end
 
     end
@@ -1817,6 +1825,8 @@ classdef Table < gwidgets.internal.Reparentable
                     % attaches its ResizeObserver to the (already-rendered) table.
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
+                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", ...
+                        this.BridgeDiagEnabled);
                     this.sendReadyToBridge();
 
                 case "ColumnWidthChanged"
@@ -1836,11 +1846,8 @@ classdef Table < gwidgets.internal.Reparentable
                         this.applyColumnWidthToDisplay();
                     else
                         % Drag produced no net width change, but the bridge
-                        % self-suppressed on mouseup.  Un-suppress without
-                        % re-attaching the observer — Restore would call
-                        % attachObserver, which fires ResizeObserver immediately
-                        % and creates an infinite loop.
-                        this.sendUnsuppressToBridge();
+                        % self-suppressed on mouseup.  Re-enable reporting.
+                        this.sendRestoreToBridge();
                     end
 
                 case "BridgeDiag"
@@ -1867,15 +1874,6 @@ classdef Table < gwidgets.internal.Reparentable
             % The existing ResizeObserver fires naturally on the next DOM change.
             if isempty(this.ColumnWidthBridge_), return; end
             sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
-        end
-
-        function sendUnsuppressToBridge(this)
-            % Re-enable ColumnWidthChanged reporting without re-attaching the
-            % ResizeObserver.  Used for the no-change ColumnWidthChanged path:
-            % Restore would call attachObserver which fires ResizeObserver
-            % immediately and creates an infinite loop.
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Unsuppress", []);
         end
 
         function sendReadyToBridge(this)
