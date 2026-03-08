@@ -1517,11 +1517,12 @@ classdef Table < gwidgets.internal.Reparentable
 
         function applyColumnWidthToDisplay(this)
             % Push the current visible column widths to the display table.
-            % Suppress bridge callbacks before the DOM update so the
-            % ResizeObserver echo is not reported back to MATLAB.  SetTypes
-            % (sent at the end) auto-restores suppression on the JS side.
-            % Ready re-attaches the observer to any re-rendered DOM elements.
-            this.suppressBridgeCallbacks();
+            % Suppress bridge callbacks before the update so ResizeObserver
+            % echoes are silently dropped.  Restore (sent last) re-attaches
+            % the observer and polls the settled DOM widths; MATLAB's
+            % didBridgeWidthsChange ignores that echo since it matches
+            % what was just stored.
+            this.sendSuppressToBridge();
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
@@ -1529,10 +1530,8 @@ classdef Table < gwidgets.internal.Reparentable
                 end
                 this.DisplayTable.ColumnWidth = visWidths;
             end
-            % Tell the bridge which visible columns are Relative so it can
-            % clear any px drag-handler styles that would block %-based CSS.
             this.sendTypesToBridge();
-            this.sendReadyToBridge();
+            this.sendRestoreToBridge();
         end
 
         % ---- Column-width store helpers ----------------------------------------
@@ -1846,22 +1845,20 @@ classdef Table < gwidgets.internal.Reparentable
             this.sendReadyToBridge();
         end
 
-        function suppressBridgeCallbacks(this)
-            % Prevent ColumnWidthChanged from being sent to MATLAB until the
-            % next SetTypes event (which auto-restores suppression) or an
-            % explicit call to restoreBridgeCallbacks().
-            % Uses the synchronous jsmethods channel so suppression takes
-            % effect before any async DOM update can trigger the observer.
+        function sendSuppressToBridge(this)
+            % Tell the bridge to stop reporting ColumnWidthChanged events.
+            % Queue this before DisplayTable.ColumnWidth changes so the
+            % ResizeObserver echo during our own DOM update is silently dropped.
             if isempty(this.ColumnWidthBridge_), return; end
-            jsmethods(this.ColumnWidthBridge_).suppress();
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Suppress", []);
         end
 
-        function restoreBridgeCallbacks(this)
-            % Re-enable ColumnWidthChanged reporting.  Normally not needed
-            % after applyColumnWidthToDisplay (SetTypes auto-restores), but
-            % useful when suppress() is called without a following SetTypes.
+        function sendRestoreToBridge(this)
+            % Tell the bridge to re-enable reporting, re-attach its observer,
+            % and poll the current DOM widths.  Queue this after SetTypes so
+            % drag-handler constraints are cleared before the poll fires.
             if isempty(this.ColumnWidthBridge_), return; end
-            jsmethods(this.ColumnWidthBridge_).restore();
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
         end
 
         function sendReadyToBridge(this)

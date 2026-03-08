@@ -9,32 +9,28 @@
   //
   // MATLAB API (events sent TO the bridge):
   //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
-  //   Ready                   — table DOM is settled; attach/re-attach ResizeObserver
-  //   Busy                    — table DOM is being updated; detach ResizeObserver
-  //   SetTypes   [bool,...]   — per-column Relative flag; clears drag px styles;
-  //                             also auto-restores callback suppression (see below)
+  //   Ready                   — attach/re-attach ResizeObserver (no poll)
+  //   Suppress                — stop ColumnWidthChanged from being sent to MATLAB
+  //   SetTypes   [bool,...]   — per-column Relative flag; clears drag px styles
+  //   Restore                 — re-enable ColumnWidthChanged; re-attach observer;
+  //                             poll current widths and send ColumnWidthChanged
   //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
-  //
-  // jsmethods (callable synchronously from MATLAB via jsmethods(component)):
-  //   suppress()  — stop ColumnWidthChanged from being sent to MATLAB
-  //   restore()   — re-enable ColumnWidthChanged; also called automatically by SetTypes
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
-  var COL_SELECTOR  = ".mw-table-header-column";
-  var DRAG_THRESHOLD = 2;
+  var COL_SELECTOR       = ".mw-table-header-column";
 
-  var resizeObserver      = null;
-  var tableTag            = null;
-  var htmlComponent       = null;
-  var colAutoFlags        = null;
-  var isMoving            = false;
-  var callbackSuppressed  = false;
-  var diagEnabled         = true;
-  var diagQueue           = [];
+  var resizeObserver     = null;
+  var tableTag           = null;
+  var htmlComponent      = null;
+  var colAutoFlags       = null;
+  var isMoving           = false;
+  var callbackSuppressed = false;
+  var diagEnabled        = true;
+  var diagQueue          = [];
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -89,7 +85,7 @@
     } catch (e) {}
   }
 
-  // ---- Observer management (MATLAB-driven via Ready / Busy) ----
+  // ---- Observer management ----
 
   function attachObserver() {
     if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
@@ -99,11 +95,6 @@
     if (cols.length === 0) return;
     resizeObserver = new ResizeObserver(onResize);
     cols.forEach(function(col) { resizeObserver.observe(col); });
-  }
-
-  function detachObserver() {
-    if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
-    bridgeLog("[Bridge] " + ts() + " detachObserver");
   }
 
   // ---- clearRelativeConstraints: remove stale drag-handler px styles ----
@@ -156,9 +147,9 @@
       flushDiag();
     });
 
-    htmlComponent.addEventListener("Busy", function() {
-      bridgeLog("[Bridge] " + ts() + " Busy");
-      detachObserver();
+    htmlComponent.addEventListener("Suppress", function() {
+      callbackSuppressed = true;
+      bridgeLog("[Bridge] " + ts() + " Suppress");
       flushDiag();
     });
 
@@ -169,10 +160,14 @@
       bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
                 data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
       clearRelativeConstraints();
-      // SetTypes is the last signal sent in every MATLAB layout update
-      // (applyColumnWidthToDisplay).  Auto-restore suppression here so
-      // MATLAB callers don't need an explicit restore() after each update.
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("Restore", function() {
       callbackSuppressed = false;
+      bridgeLog("[Bridge] " + ts() + " Restore");
+      attachObserver();
+      onResize();
       flushDiag();
     });
 
@@ -180,16 +175,6 @@
       diagEnabled = !!(event.Data);
       console.log("[Bridge] " + ts() + " Diag: " + diagEnabled);
     });
-
-    // jsmethods — callable from MATLAB via jsmethods(component).suppress() / .restore()
-    component.suppress = function() {
-      callbackSuppressed = true;
-      bridgeLog("[Bridge] " + ts() + " suppress");
-    };
-    component.restore = function() {
-      callbackSuppressed = false;
-      bridgeLog("[Bridge] " + ts() + " restore");
-    };
 
     htmlComponent.Data = { event: "BridgeReady" };
   }
