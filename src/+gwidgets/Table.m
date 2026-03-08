@@ -62,7 +62,6 @@ classdef Table < gwidgets.internal.Reparentable
 
         % Column-width bridge
         DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
-        LastSentSeq_ (1,1) double = 0   % Monotonic counter; echoed back by bridge so MATLAB can ignore programmatic echoes
 
         % Column-width stores — three parallel arrays aligned to DataColumnNames.
         % DataColumnWidthTypes_ is the "truth"; the other two are both updated on
@@ -1517,49 +1516,16 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function applyColumnWidthToDisplay(this)
-            % Push the current visible column widths to the display table and
-            % to the DOM via the bridge.
-            %
-            % SetWidths payload: pixel columns → positive pixel value;
-            % relative columns → -1 (tells bridge to remove constraints and
-            % let MATLAB's proportional CSS control the width).
-            %
-            % Each call increments LastSentSeq_; the bridge echoes the seq back
-            % in ColumnWidthChanged so MATLAB can distinguish programmatic
-            % echoes (seq matches) from genuine user drags (seq = 0).
-            this.LastSentSeq_ = this.LastSentSeq_ + 1;
-
-            visIdxs  = find(this.ColumnVisible);
-            nVisible = numel(visIdxs);
-            types    = this.DataColumnWidthTypes_;
-            px       = this.PixelDataColumnWidths_;
-
-            % Build JS widths: Pixel cols → actual pixel value; Relative → -1
-            jsWidths = -ones(1, nVisible);
-            for k = 1:nVisible
-                i = visIdxs(k);
-                if ~isempty(types) && i <= numel(types) && types(i) == "Pixel" && ...
-                        ~isempty(px) && i <= numel(px) && ~isnan(px(i))
-                    jsWidths(k) = px(i);
-                end
-            end
-            this.sendWidthsToBridge(jsWidths);
-
-            % Update DisplayTable.ColumnWidth with the mixed cell representation
-            % so MATLAB's own proportional CSS is applied for relative columns.
+            % Push the current visible column widths to the display table.
+            % The bridge observes the resulting DOM change and reports back via
+            % ColumnWidthChanged; MATLAB compares against PixelDataColumnWidths_
+            % to distinguish its own CSS settling from a genuine user drag.
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
                 this.DisplayTable.ColumnWidth = visWidths;
-            end
-        end
-
-        function sendWidthsToBridge(this, jsWidths)
-            if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "SetWidths", ...
-                    struct("w", jsWidths, "seq", this.LastSentSeq_));
             end
         end
 
@@ -1845,33 +1811,15 @@ classdef Table < gwidgets.internal.Reparentable
                         struct("tableTag", this.DisplayTableTag_));
 
                 case "ColumnWidthChanged"
-                    % Bridge sends actual positive pixel widths for all visible
-                    % columns.  The seq field distinguishes three cases:
+                    % Bridge reports actual positive pixel widths for all
+                    % visible columns after any drag or window resize.
                     %
-                    %   seq > 0, matches LastSentSeq_  → programmatic echo
-                    %     Update pixel/relative stores.  Re-apply only if the
-                    %     stores changed (breaks the echo→apply→echo loop once
-                    %     values converge).
-                    %
-                    %   seq > 0, does not match         → stale echo from a
-                    %     superseded SetWidths.  Ignore.
-                    %
-                    %   seq = 0 (user drag, mouseup)    → genuine drag.
-                    %     Update stores and always re-apply so the bridge gets
-                    %     the correct colAutoFlags for the new drag state.
-                    seq = 0;
-                    if isfield(d, "seq"), seq = d.seq; end
-
-                    if seq > 0
-                        if seq ~= this.LastSentSeq_
-                            return  % stale echo — ignore
-                        end
-                        % Current programmatic echo: update stores, re-apply if changed
-                        if this.updateStoresFromBridgeWidths(d.widths)
-                            this.applyColumnWidthToDisplay();
-                        end
-                    else
-                        % User drag: update stores and echo back
+                    % If the incoming widths match PixelDataColumnWidths_ (within
+                    % 1 px browser-rounding tolerance) the event was caused by
+                    % MATLAB's own CSS settling — ignore it to avoid a loop.
+                    % Otherwise it is a genuine user-initiated change; update
+                    % stores and re-apply so the display reflects the new state.
+                    if this.didBridgeWidthsChange(d.widths)
                         this.updateStoresFromBridgeWidths(d.widths);
                         this.applyColumnWidthToDisplay();
                     end
@@ -1897,16 +1845,33 @@ classdef Table < gwidgets.internal.Reparentable
 
         function simulateBridgeDrag(this, pixelWidths)
             % Simulate a ColumnWidthChanged notification from the bridge
-            % (seq=0, i.e. user drag) without requiring a live DOM/figure.
+            % without requiring a live DOM/figure.
             % pixelWidths: positive pixel widths for all visible columns.
-            % Used by unit tests to exercise store-update logic headlessly.
             this.updateStoresFromBridgeWidths(pixelWidths);
             this.applyColumnWidthToDisplay();
         end
 
-        function seq = getLastSentSeq(this)
-            % Return the current LastSentSeq_ value for test assertions.
-            seq = this.LastSentSeq_;
+        function changed = didBridgeWidthsChange(this, incomingPx)
+            % Return true when the incoming pixel widths differ from the stored
+            % PixelDataColumnWidths_ by more than 1 px (browser-rounding
+            % tolerance).  NaN in the store (Relative column not yet resolved)
+            % is always treated as changed so the first report is processed.
+            nData  = numel(this.DataColumnNames);
+            nVis   = sum(this.ColumnVisible);
+            if numel(incomingPx) ~= nVis
+                changed = false;   % count mismatch — updateStoresFromBridgeWidths handles it
+                return
+            end
+            visIdxs = find(this.ColumnVisible);
+            px = this.extendStore(this.PixelDataColumnWidths_, NaN, nData);
+            for k = 1:nVis
+                stored = px(visIdxs(k));
+                if isnan(stored) || abs(stored - incomingPx(k)) > 1
+                    changed = true;
+                    return
+                end
+            end
+            changed = false;
         end
 
     end

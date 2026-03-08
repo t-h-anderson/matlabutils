@@ -2,7 +2,7 @@ classdef tColumnWidthBridge < test.WithExampleTables
     % Unit tests for the MATLAB-side column-width bridge logic.
     %
     % These tests run headlessly (no figure or DOM required) by inspecting
-    % the three backing stores and the seq counter.
+    % the three backing stores.
     %
     % Column width model
     % ------------------
@@ -18,12 +18,13 @@ classdef tColumnWidthBridge < test.WithExampleTables
     %   The GCD of all resolved pixel widths is used to express relative weights
     %   as small integers (e.g. [200, 110, 220] px → GCD=10 → ["20x","11x","22x"]).
     %
-    % Echo suppression (seq-based)
-    % ----------------------------
-    %   applyColumnWidthToDisplay increments LastSentSeq_ and embeds it in the
-    %   SetWidths payload.  The bridge echoes the seq back in ColumnWidthChanged.
-    %   MATLAB ignores echoes with matching seq (programmatic), processes seq=0
-    %   as a genuine user drag (mouseup).
+    % Echo suppression (comparison-based)
+    % ------------------------------------
+    %   The bridge never sends SetWidths; MATLAB drives all layout via
+    %   DisplayTable.ColumnWidth.  On receiving ColumnWidthChanged, MATLAB
+    %   calls didBridgeWidthsChange to compare the incoming pixel widths against
+    %   PixelDataColumnWidths_.  A match (within 1 px) means MATLAB's own CSS
+    %   settling — ignored.  A difference means a genuine user drag or resize.
 
     % ------------------------------------------------------------------ %
     %  normalizeColumnWidths static helper
@@ -227,15 +228,6 @@ classdef tColumnWidthBridge < test.WithExampleTables
                 "Types must be unchanged after a drag")
         end
 
-        function tDragIncrementsSeq(testCase)
-            % simulateBridgeDrag calls applyColumnWidthToDisplay which must
-            % increment LastSentSeq_ so the bridge gets a new seq.
-            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
-            seqBefore = t.getLastSentSeq();
-            t.simulateBridgeDrag([150, 150]);
-            testCase.verifyGreaterThan(t.getLastSentSeq(), seqBefore)
-        end
-
         function tDragPixelWidthsReflectedInColumnWidth(testCase)
             % After a drag the public ColumnWidth getter must read from the
             % correct store based on type: Pixel → pixel value, Relative → weight.
@@ -254,34 +246,42 @@ classdef tColumnWidthBridge < test.WithExampleTables
     end
 
     % ------------------------------------------------------------------ %
-    %  Seq / echo-guard tests
+    %  Echo suppression — didBridgeWidthsChange
     % ------------------------------------------------------------------ %
     methods (Test)
 
-        function tSeqIncrementedOnEachApply(testCase)
-            t = gwidgets.Table(Data=testCase.multivariableData());
-            seq0 = t.getLastSentSeq();
-
-            t.DataColumnWidth = {100, 100, 100, 100};
-            seq1 = t.getLastSentSeq();
-
-            t.DataColumnWidth = {200, 200, 200, 200};
-            seq2 = t.getLastSentSeq();
-
-            testCase.verifyGreaterThan(seq1, seq0)
-            testCase.verifyGreaterThan(seq2, seq1)
+        function tEchoSuppressedWhenWidthsMatch(testCase)
+            % If stored pixel widths match the incoming values (within 1 px)
+            % didBridgeWidthsChange must return false so the event is ignored.
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.simulateBridgeDrag([200, 100]);  % stores: px=[200,100]
+            testCase.verifyFalse(t.didBridgeWidthsChange([200, 100]))
+            testCase.verifyFalse(t.didBridgeWidthsChange([200, 101]))  % within 1 px
             delete(t);
         end
 
-        function tSeqIncrementedByDrag(testCase)
+        function tEchoNotSuppressedWhenWidthsDiffer(testCase)
             t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
-            t.DataColumnWidth = {100, 200};
-            seqBefore = t.getLastSentSeq();
+            t.simulateBridgeDrag([200, 100]);
+            testCase.verifyTrue(t.didBridgeWidthsChange([200, 102]))  % > 1 px
+            testCase.verifyTrue(t.didBridgeWidthsChange([150, 100]))
+            delete(t);
+        end
 
-            t.simulateBridgeDrag([120, 180]);
+        function tEchoNotSuppressedWhenStoredNaN(testCase)
+            % Relative columns start with NaN pixel store — any reported width
+            % must count as changed so the first event is always processed.
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            % default state: all Relative, PixelDataColumnWidths_ = [NaN, NaN]
+            testCase.verifyTrue(t.didBridgeWidthsChange([200, 100]))
+            delete(t);
+        end
 
-            testCase.verifyGreaterThan(t.getLastSentSeq(), seqBefore, ...
-                "simulateBridgeDrag must call applyColumnWidthToDisplay")
+        function tEchoSuppressedOnCountMismatch(testCase)
+            % Count mismatch (bridge mid-reattach) must return false, not error.
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.simulateBridgeDrag([200, 100]);
+            testCase.verifyFalse(t.didBridgeWidthsChange([200, 100, 50]))  % 3 widths for 2 cols
             delete(t);
         end
 
