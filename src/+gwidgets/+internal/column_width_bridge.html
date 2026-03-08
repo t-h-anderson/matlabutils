@@ -11,8 +11,13 @@
   //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
   //   Ready                   — table DOM is settled; attach/re-attach ResizeObserver
   //   Busy                    — table DOM is being updated; detach ResizeObserver
-  //   SetTypes   [bool,...]   — per-column Relative flag; also clears drag px styles
+  //   SetTypes   [bool,...]   — per-column Relative flag; clears drag px styles;
+  //                             also auto-restores callback suppression (see below)
   //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
+  //
+  // jsmethods (callable synchronously from MATLAB via jsmethods(component)):
+  //   suppress()  — stop ColumnWidthChanged from being sent to MATLAB
+  //   restore()   — re-enable ColumnWidthChanged; also called automatically by SetTypes
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
@@ -22,13 +27,14 @@
   var COL_SELECTOR  = ".mw-table-header-column";
   var DRAG_THRESHOLD = 2;
 
-  var resizeObserver = null;
-  var tableTag       = null;
-  var htmlComponent  = null;
-  var colAutoFlags   = null;
-  var isMoving       = false;
-  var diagEnabled    = true;
-  var diagQueue      = [];
+  var resizeObserver      = null;
+  var tableTag            = null;
+  var htmlComponent       = null;
+  var colAutoFlags        = null;
+  var isMoving            = false;
+  var callbackSuppressed  = false;
+  var diagEnabled         = true;
+  var diagQueue           = [];
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -120,6 +126,7 @@
   // ---- ResizeObserver callback ----
 
   function onResize() {
+    if (callbackSuppressed) return;
     var cols = findColumns();
     if (cols.length === 0) return;
     var widths = colWidthsFromDOM(cols);
@@ -162,6 +169,10 @@
       bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
                 data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
       clearRelativeConstraints();
+      // SetTypes is the last signal sent in every MATLAB layout update
+      // (applyColumnWidthToDisplay).  Auto-restore suppression here so
+      // MATLAB callers don't need an explicit restore() after each update.
+      callbackSuppressed = false;
       flushDiag();
     });
 
@@ -169,6 +180,16 @@
       diagEnabled = !!(event.Data);
       console.log("[Bridge] " + ts() + " Diag: " + diagEnabled);
     });
+
+    // jsmethods — callable from MATLAB via jsmethods(component).suppress() / .restore()
+    component.suppress = function() {
+      callbackSuppressed = true;
+      bridgeLog("[Bridge] " + ts() + " suppress");
+    };
+    component.restore = function() {
+      callbackSuppressed = false;
+      bridgeLog("[Bridge] " + ts() + " restore");
+    };
 
     htmlComponent.Data = { event: "BridgeReady" };
   }

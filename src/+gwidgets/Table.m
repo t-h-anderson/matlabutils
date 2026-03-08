@@ -1517,10 +1517,11 @@ classdef Table < gwidgets.internal.Reparentable
 
         function applyColumnWidthToDisplay(this)
             % Push the current visible column widths to the display table.
-            % Bracket the DOM update with Busy/Ready so the bridge suppresses
-            % ResizeObserver events caused by our own layout change, and
-            % re-attaches to the (possibly re-rendered) header afterwards.
-            this.sendBusyToBridge();
+            % Suppress bridge callbacks before the DOM update so the
+            % ResizeObserver echo is not reported back to MATLAB.  SetTypes
+            % (sent at the end) auto-restores suppression on the JS side.
+            % Ready re-attaches the observer to any re-rendered DOM elements.
+            this.suppressBridgeCallbacks();
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
@@ -1845,11 +1846,22 @@ classdef Table < gwidgets.internal.Reparentable
             this.sendReadyToBridge();
         end
 
-        function sendBusyToBridge(this)
-            % Signal the bridge to detach its ResizeObserver before a MATLAB-
-            % driven layout change, preventing echo ColumnWidthChanged events.
+        function suppressBridgeCallbacks(this)
+            % Prevent ColumnWidthChanged from being sent to MATLAB until the
+            % next SetTypes event (which auto-restores suppression) or an
+            % explicit call to restoreBridgeCallbacks().
+            % Uses the synchronous jsmethods channel so suppression takes
+            % effect before any async DOM update can trigger the observer.
             if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Busy", []);
+            jsmethods(this.ColumnWidthBridge_).suppress();
+        end
+
+        function restoreBridgeCallbacks(this)
+            % Re-enable ColumnWidthChanged reporting.  Normally not needed
+            % after applyColumnWidthToDisplay (SetTypes auto-restores), but
+            % useful when suppress() is called without a following SetTypes.
+            if isempty(this.ColumnWidthBridge_), return; end
+            jsmethods(this.ColumnWidthBridge_).restore();
         end
 
         function sendReadyToBridge(this)
