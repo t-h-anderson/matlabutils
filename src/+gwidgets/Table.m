@@ -1835,9 +1835,11 @@ classdef Table < gwidgets.internal.Reparentable
                         this.applyColumnWidthToDisplay();
                     else
                         % Drag produced no net width change, but the bridge
-                        % self-suppressed on mouseup.  Send Restore so it is
-                        % not left permanently suppressed.
-                        this.sendRestoreToBridge();
+                        % self-suppressed on mouseup.  Un-suppress without
+                        % re-attaching the observer — Restore would call
+                        % attachObserver, which fires ResizeObserver immediately
+                        % and creates an infinite loop.
+                        this.sendUnsuppressToBridge();
                     end
 
                 case "BridgeDiag"
@@ -1865,6 +1867,15 @@ classdef Table < gwidgets.internal.Reparentable
             % drag-handler constraints are cleared before the poll fires.
             if isempty(this.ColumnWidthBridge_), return; end
             sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
+        end
+
+        function sendUnsuppressToBridge(this)
+            % Re-enable ColumnWidthChanged reporting without re-attaching the
+            % ResizeObserver.  Used for the no-change ColumnWidthChanged path:
+            % Restore would call attachObserver which fires ResizeObserver
+            % immediately and creates an infinite loop.
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Unsuppress", []);
         end
 
         function sendReadyToBridge(this)
