@@ -8,14 +8,19 @@
   // ColumnWidthBridge — reactive observer, MATLAB owns all width-setting
   //
   // Observes column-header resize events and reports width changes to MATLAB
-  // via ColumnWidthChanged.  MATLAB drives all layout (DisplayTable.ColumnWidth);
-  // the bridge never writes to the DOM.
+  // via ColumnWidthChanged.  MATLAB drives all layout (DisplayTable.ColumnWidth).
   //
   // Echo suppression lives entirely in MATLAB: on receiving ColumnWidthChanged
   // MATLAB compares the incoming pixel widths against PixelDataColumnWidths_.
   // A match (within 1 px) means the event was caused by MATLAB's own CSS
   // settling — ignored.  A difference means a genuine user drag or window
   // resize — MATLAB updates its stores and re-applies ColumnWidth.
+  //
+  // The bridge does one targeted DOM write: on receiving SetTypes from MATLAB
+  // it clears any px inline styles (width/minWidth/maxWidth) from relative
+  // columns.  This is needed because MATLAB's native drag handler stamps px
+  // values on all <th> elements and MATLAB's renderer does not clear them
+  // when re-applying %-based CSS for relative columns.
 
   var COL_SELECTOR   = ".mw-table-header-column";
   var RETRY_INTERVAL = 600;
@@ -26,8 +31,6 @@
   var resizeObserver   = null;
   var mutationObserver = null;
   var debounceTimer    = null;
-  var isDragging       = false;
-  var pendingPublish   = false;
   var tableTag         = null;
   var htmlComponent    = null;
   var attachAttempts   = 0;
@@ -35,6 +38,9 @@
   // Settled column pixel widths from the last reported state.
   // Used as the baseline to detect changes worth reporting.
   var prevWidths       = null;
+  // Per-column relative flags from the most recent SetTypes (true = Relative).
+  // Used by clearRelativeConstraints to target only relative columns.
+  var colAutoFlags     = null;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -148,17 +154,30 @@
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths };
   }
 
+  // ---- clearRelativeConstraints: remove stale drag-handler px styles ----
+
+  function clearRelativeConstraints() {
+    if (!colAutoFlags) return;
+    var cols = findColumns();
+    if (cols.length !== colAutoFlags.length) return;
+    for (var i = 0; i < cols.length; i++) {
+      if (colAutoFlags[i]) {
+        // Clear any px inline styles so MATLAB's %-based CSS can settle.
+        // Preserve %-based values that MATLAB itself may have applied.
+        var w = cols[i].style.width;
+        if (!w || w.indexOf('%') < 0) cols[i].style.removeProperty("width");
+        var mn = cols[i].style.minWidth;
+        if (!mn || mn.indexOf('%') < 0) cols[i].style.removeProperty("min-width");
+        var mx = cols[i].style.maxWidth;
+        if (!mx || mx.indexOf('%') < 0) cols[i].style.removeProperty("max-width");
+      }
+    }
+  }
+
   // ---- debouncedPublish: ResizeObserver entry point ----
 
   function debouncedPublish() {
-    bridgeLog("[Bridge] " + ts() + " resize: isDragging=" + isDragging);
-
-    if (isDragging) {
-      // Defer until mouseup so a MATLAB response cannot interrupt a live drag.
-      pendingPublish = true;
-      return;
-    }
-
+    bridgeLog("[Bridge] " + ts() + " resize");
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(publishWidths, DEBOUNCE_MS);
   }
@@ -214,40 +233,6 @@
   function setup(component) {
     htmlComponent = component;
 
-    // Track mouse state in the parent document (where column dividers live).
-    // Defer ColumnWidthChanged until mouseup so a MATLAB CSS update cannot
-    // interrupt an in-progress drag.
-    try {
-      var parentDoc = window.parent.document;
-      parentDoc.addEventListener("mousedown", function() {
-        isDragging     = true;
-        pendingPublish = false;
-        bridgeLog("[Bridge] " + ts() + " mousedown");
-      }, true);
-      parentDoc.addEventListener("mouseup", function() {
-        isDragging = false;
-        if (pendingPublish) {
-          pendingPublish = false;
-          clearTimeout(debounceTimer);
-          bridgeLog("[Bridge] " + ts() + " mouseup: firing deferred publishWidths");
-          publishWidths();
-        }
-      }, true);
-      // Safety net: cursor left page while dragging.
-      parentDoc.addEventListener("mouseleave", function(e) {
-        if (isDragging && e.buttons === 0) {
-          isDragging = false;
-          if (pendingPublish) {
-            pendingPublish = false;
-            clearTimeout(debounceTimer);
-            publishWidths();
-          }
-        }
-      }, true);
-    } catch (e) {
-      bridgeLog("[Bridge] Could not attach parent mousedown/mouseup listeners: " + e);
-    }
-
     htmlComponent.addEventListener("Init", function(event) {
       tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
       bridgeLog("[Bridge] " + ts() + " Init: tableTag=" + tableTag);
@@ -258,6 +243,15 @@
       bridgeLog("[Bridge] " + ts() + " Reattach");
       attachAttempts = 0;
       setTimeout(function() { attachObserver("Reattach"); }, RETRY_INTERVAL);
+    });
+
+    htmlComponent.addEventListener("SetTypes", function(event) {
+      var data = event.Data;
+      if (!Array.isArray(data)) return;
+      colAutoFlags = data;
+      bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
+                data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
+      clearRelativeConstraints();
     });
 
     htmlComponent.Data = { event: "BridgeReady" };

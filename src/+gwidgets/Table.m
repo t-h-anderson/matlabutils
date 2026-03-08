@@ -1527,6 +1527,9 @@ classdef Table < gwidgets.internal.Reparentable
                 end
                 this.DisplayTable.ColumnWidth = visWidths;
             end
+            % Tell the bridge which visible columns are Relative so it can
+            % clear any px drag-handler styles that would block %-based CSS.
+            this.sendTypesToBridge();
         end
 
         % ---- Column-width store helpers ----------------------------------------
@@ -1836,6 +1839,17 @@ classdef Table < gwidgets.internal.Reparentable
             if ~isempty(this.ColumnWidthBridge_)
                 sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
             end
+        end
+
+        function sendTypesToBridge(this)
+            % Send a SetTypes event so the bridge knows which visible columns
+            % are Relative and can clear stale px drag-handler styles from them.
+            if isempty(this.ColumnWidthBridge_), return; end
+            visIdxs = find(this.ColumnVisible);
+            types   = this.extendStore(this.DataColumnWidthTypes_, "Relative", ...
+                                       numel(this.DataColumnNames));
+            isRel   = arrayfun(@(i) types(i) == "Relative", visIdxs);
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTypes", isRel);
         end
 
     end
