@@ -12,10 +12,20 @@ classdef Table < gwidgets.internal.Reparentable
 
         Multiselect (1,1) matlab.lang.OnOffSwitchState % Enable/disable multiple selection
         SelectionType (1,1) string % Type of selection: 'cell', 'row', or 'column'
-        
-        ColumnWidth (1,:) % Column Width
-        DataColumnWidth (1,:) % Column Width
+
+        ColumnWidth (1,:) % Mixed pixel/relative widths for visible columns ({100, "2x", ...})
+        DataColumnWidth (1,:) % Mixed pixel/relative widths for all data columns
         DefaultColumnWidths (1,:) % Default column widths restored when ColumnWidth is reset to {}
+
+        % Per-column width details (all data columns)
+        PixelDataColumnWidths  (1,:) double  % Pixel width per data column (NaN for Relative until bridge resolves)
+        RelativeDataColumnWidths (1,:) string % Relative weight per data column (missing for Pixel until bridge resolves)
+        DataColumnWidthTypes   (1,:) string  % Width type per data column: "Pixel" or "Relative"
+
+        % Per-column width details (visible columns only)
+        PixelColumnWidths   (1,:) double  % Pixel width per visible column (NaN for Relative until bridge resolves)
+        RelativeColumnWidths (1,:) string  % Relative weight per visible column
+        ColumnWidthTypes    (1,:) string   % Width type per visible column: "Pixel" or "Relative"
 
         Selection (:,:) double % Data selection. Either (:,2) for cell or (1,:) otherwise
         DisplaySelection (:,:) double % Display Selection. Either (:,2) for cell or (1,:) otherwise
@@ -52,10 +62,17 @@ classdef Table < gwidgets.internal.Reparentable
 
         % Column-width bridge
         DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
-        IsPushingWidthToDisplay_ (1,1) logical = false % True while programmatic widths are being applied
+        LastPollWidths_  (1,:) double   % Widths from most recent PollResponse; [] if none yet
 
-        DataColumnWidth_ (1,:) cell % Width of data columns
-        DefaultColumnWidths_ (1,:) cell % Default column widths used as reset target
+        % Column-width stores — three parallel arrays aligned to DataColumnNames.
+        % DataColumnWidthTypes_ is the "truth"; the other two are both updated on
+        % every graphical update (bridge → MATLAB) so callers can query either
+        % representation.  Empty arrays mean "all 1x Relative" (default state).
+        PixelDataColumnWidths_    (1,:) double  % Pixel widths; NaN for Relative cols until bridge resolves
+        RelativeDataColumnWidths_ (1,:) string  % "Nx" weights; missing for Pixel cols until bridge resolves
+        DataColumnWidthTypes_     (1,:) string  % "Pixel" | "Relative" per column; empty = all Relative
+
+        DefaultColumnWidths_ (1,:) cell % Default column widths restored when ColumnWidth is reset to {}
 
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
 
@@ -174,22 +191,20 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function val = get.DataColumnWidth(this)
-            val = this.DataColumnWidth_;
-            if isempty(val) && ~isempty(this.DataColumnNames)
-                val = repelem({"auto"}, 1, numel(this.DataColumnNames));
-            end
+            val = this.buildMixedWidthCell(true(1, numel(this.DataColumnNames)));
         end
 
         function set.DataColumnWidth(this, val)
             val = gwidgets.Table.normalizeColumnWidths(val);
+            nData = numel(this.DataColumnNames);
             if isscalar(val)
-                val = repelem(val, 1, numel(this.DataColumnNames));
+                val = repelem(val, 1, nData);
             end
-            if ~isempty(val) && numel(val) ~= numel(this.DataColumnNames)
+            if ~isempty(val) && numel(val) ~= nData
                 error("GraphicsWidgets:Table:DataColumnWidthSize", ...
                     "Size of DataColumnWidth must match the number of data columns, be scalar, or be empty (restore to default)");
             end
-            this.DataColumnWidth_ = val;
+            this.setColumnWidthStores(val, true(1, nData));
             if this.UpdateManager.doRun("DataColumnWidth")
                 this.doUpdateSequence(StartFrom="Interaction");
             end
@@ -197,6 +212,11 @@ classdef Table < gwidgets.internal.Reparentable
 
         function val = get.DefaultColumnWidths(this)
             val = this.DefaultColumnWidths_;
+            val = convertCharsToStrings(val);
+            if ~iscell(val)
+                val = num2cell(val);
+            end
+            val = gwidgets.Table.normalizeColumnWidths(val);
         end
 
         function set.DefaultColumnWidths(this, val)
@@ -212,26 +232,20 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function val = get.ColumnWidth(this)
-            if isempty(this.DataColumnWidth_)
-                % No explicit widths set — read the display table's current value
-                val = this.DisplayTable.ColumnWidth;
-                if ~iscell(val)
-                    val = {val};
-                end
-            else
-                val = this.DataColumnWidth_(this.ColumnVisible);
-            end
+            val = this.buildMixedWidthCell(this.ColumnVisible);
         end
 
         function set.ColumnWidth(this, val)
             val = gwidgets.Table.normalizeColumnWidths(val);
+            nData = numel(this.DataColumnNames);
 
             if isempty(val)
-                % Empty resets to DefaultColumnWidths if set, otherwise clears to auto
+                % Empty resets to DefaultColumnWidths if set, otherwise all "1x" Relative
                 if ~isempty(this.DefaultColumnWidths_)
-                    this.DataColumnWidth_ = this.DefaultColumnWidths_;
+                    defVal = gwidgets.Table.normalizeColumnWidths(this.DefaultColumnWidths_);
+                    this.setColumnWidthStores(defVal, true(1, nData));
                 else
-                    this.DataColumnWidth_ = {};
+                    this.resetToDefaultWidths();
                 end
             else
                 if isscalar(val)
@@ -241,16 +255,40 @@ classdef Table < gwidgets.internal.Reparentable
                     error("GraphicsWidgets:Table:ColumnWidthSize", ...
                         "Size of ColumnWidth must match the number of visible columns, be scalar, or be empty (restore to default)");
                 end
-                % Map visible widths back into the per-data-column array,
-                % preserving any explicitly stored width for hidden columns
-                dataWidths = this.DataColumnWidth;
-                dataWidths(this.ColumnVisible) = val;
-                this.DataColumnWidth_ = dataWidths;
+                % Map visible widths into the per-data-column stores,
+                % preserving the stored widths of hidden columns.
+                this.setColumnWidthStores(val, this.ColumnVisible);
             end
 
             if this.UpdateManager.doRun("DataColumnWidth")
                 this.doUpdateSequence(StartFrom="Interaction");
             end
+        end
+
+        % ---- New width-detail getters (read-only, derived from backing stores) ----
+
+        function val = get.PixelDataColumnWidths(this)
+            val = this.resolvedPixelWidths(true(1, numel(this.DataColumnNames)));
+        end
+
+        function val = get.PixelColumnWidths(this)
+            val = this.resolvedPixelWidths(this.ColumnVisible);
+        end
+
+        function val = get.RelativeDataColumnWidths(this)
+            val = this.resolvedRelativeWidths(true(1, numel(this.DataColumnNames)));
+        end
+
+        function val = get.RelativeColumnWidths(this)
+            val = this.resolvedRelativeWidths(this.ColumnVisible);
+        end
+
+        function val = get.DataColumnWidthTypes(this)
+            val = this.resolvedTypes(true(1, numel(this.DataColumnNames)));
+        end
+
+        function val = get.ColumnWidthTypes(this)
+            val = this.resolvedTypes(this.ColumnVisible);
         end
 
         function val = get.ColumnVisible(this)
@@ -964,6 +1002,10 @@ classdef Table < gwidgets.internal.Reparentable
         HiddenGroups (1,:) string % Groups that are hidden
     end
 
+    properties (Hidden)
+        VisibleGroupHeaderRowIdx (1,:) double % (1,nVisGroups) Indices of header rows
+    end
+
     properties (Access = private)
         % Grouping
         GroupingVariable_ (1,:) string = string.empty(1,0)
@@ -974,7 +1016,6 @@ classdef Table < gwidgets.internal.Reparentable
         GroupedVisibleData (:,:) cell % Headers and data before sorting
         GroupedDataVariables  (1,:) string % Table variable names after grouping
         GroupHeaderRowIdx (1,:) double % (1,nGroups) Indices of group header rows
-        VisibleGroupHeaderRowIdx (1,:) double % (1,nVisGroups) Indices of header rows
 
         GroupFilteredCount (1,:) double % (1,nGroups) Group filtered counts
 
@@ -1476,95 +1517,170 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function applyColumnWidthToDisplay(this)
-            % Push the current visible column widths to the display table
-            % AND directly to the DOM via the bridge.
-            %
-            % Setting DisplayTable.ColumnWidth alone is insufficient when the
-            % user has manually dragged a column — MATLAB ignores the property
-            % setter in that case.  We send a SetWidths event so the bridge
-            % applies the widths directly to the header elements, bypassing
-            % MATLAB's user-drag override.
-            %
-            % The Pause event is sent first so the ResizeObserver does not
-            % echo the resulting DOM changes back as user-driven resize events.
-            if isempty(this.DataColumnWidth_)
-                % Widths cleared or never set — restore display to "auto".
-                % Pause and SetWidths are sent BEFORE touching DisplayTable so
-                % the JS echo-suppression window is already active when
-                % MATLAB's rendering pipeline fires our ResizeObserver.
-                this.pauseColumnWidthBridge(1200);
-                this.sendWidthsToBridge(-ones(1, sum(this.ColumnVisible)));
-                if ~isequal(this.DisplayTable.ColumnWidth, "auto")
-                    this.DisplayTable.ColumnWidth = "auto";
+            % Push the current visible column widths to the display table.
+            % Suppress bridge callbacks before the update so ResizeObserver
+            % echoes are silently dropped.  waitForBridgeWidths polls the bridge
+            % until the DOM has settled before SetTypes clears drag-handler
+            % constraints.  Restore re-attaches the observer; ResizeObserver
+            % fires naturally after layout and didBridgeWidthsChange suppresses
+            % the echo since it matches what was just stored.
+            this.sendSuppressToBridge();
+            visWidths = this.buildMixedWidthCell(this.ColumnVisible);
+            if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
+                if isempty(visWidths)
+                    visWidths = {"Auto"};
                 end
+
+                % Clear the table col data types
+                this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
+                % TODo: wait for update
+                pause(0)
+
+                % Update with the new value
+                this.DisplayTable.ColumnWidth = visWidths;
+
+                % TODO: wait for the update
+                pause(0)
+            end
+            this.waitForBridgeWidths();   % poll until DOM settles before clearing constraints
+            this.sendTypesToBridge();
+            this.sendRestoreToBridge();
+        end
+
+        % ---- Column-width store helpers ----------------------------------------
+
+        function setColumnWidthStores(this, val, mask)
+            % Parse a cell array of widths into the three backing stores.
+            %
+            % val  – cell array of widths for the columns selected by mask.
+            %        Each element is either a positive numeric (Pixel) or a
+            %        string "Nx" (Relative).  Empty cell resets all masked
+            %        columns to "1x" Relative.
+            % mask – logical row vector over all data columns.
+            nData = numel(this.DataColumnNames);
+            types = this.extendStore(this.DataColumnWidthTypes_, "Relative", nData);
+            px    = this.extendStore(this.PixelDataColumnWidths_, NaN,       nData);
+            rel   = this.extendStore(this.RelativeDataColumnWidths_, "1x",   nData);
+
+            maskIdxs = find(mask);
+            if isempty(val)
+                % Reset masked columns to "1x" Relative
+                types(mask) = "Relative";
+                px(mask)    = NaN;
+                rel(mask)   = "1x";
             else
-                visWidths = this.DataColumnWidth_(this.ColumnVisible);
-                % Push pixel widths directly to DOM via bridge.
-                % Non-numeric values ("auto", "fit", "1x") map to -1 so JS
-                % removes any explicit width and lets the browser auto-size.
-                jsWidths = this.widthsToJsArray(visWidths);
-                allAuto = all(jsWidths < 0);
-                if allAuto
-                    this.pauseColumnWidthBridge(1200);
-                else
-                    this.pauseColumnWidthBridge();
-                end
-                % Same ordering rationale as above: bridge events before render.
-                this.sendWidthsToBridge(jsWidths);
-                if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
-                    this.DisplayTable.ColumnWidth = visWidths;
+                for k = 1:numel(val)
+                    i = maskIdxs(k);
+                    v = val{k};
+                    if isnumeric(v) && isscalar(v) && v > 0
+                        types(i) = "Pixel";
+                        px(i)    = v;
+                        rel(i)   = string(missing);  % resolved by bridge later
+                    else
+                        types(i) = "Relative";
+                        px(i)    = NaN;
+                        rel(i)   = string(v);  % e.g. "1x", "2x"
+                    end
                 end
             end
+            this.DataColumnWidthTypes_     = types;
+            this.PixelDataColumnWidths_    = px;
+            this.RelativeDataColumnWidths_ = rel;
         end
 
-        function sendWidthsToBridge(this, jsWidths)
-            if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "SetWidths", jsWidths);
-            end
+        function resetToDefaultWidths(this)
+            % Reset all columns to "1x" Relative (the "unset" state).
+            nData = numel(this.DataColumnNames);
+            this.DataColumnWidthTypes_     = repelem("Relative", 1, nData);
+            this.PixelDataColumnWidths_    = nan(1, nData);
+            this.RelativeDataColumnWidths_ = repelem("1x", 1, nData);
         end
 
-        function jsWidths = widthsToJsArray(~, visWidths)
-            % Convert a cell array of MATLAB column widths to a numeric
-            % row vector for JSON transport.  Pixel widths pass through;
-            % anything else ("auto", "fit", "1x") becomes -1 so the JS
-            % handler knows to remove the explicit width style.
-            jsWidths = -ones(1, numel(visWidths));
-            for i = 1:numel(visWidths)
-                w = visWidths{i};
-                if isnumeric(w) && isscalar(w) && w > 0
-                    jsWidths(i) = w;
-                end
-            end
-        end
-
-        function pauseColumnWidthBridge(this, pauseMs)
-            % Tell the bridge to ignore resize events for a short window.
-            % Also set the MATLAB-side flag as a belt-and-braces guard.
+        function changed = updateStoresFromBridgeWidths(this, pixelWidths)
+            % Process actual positive pixel widths from the bridge.
             %
-            % pauseMs: duration in ms (default 500).  Use a larger value when
-            %   sending auto widths (-1) because the ResizeObserver echo from
-            %   the re-attached observer can arrive up to 800 ms after SetWidths
-            %   (600 ms delayed-attach + 200 ms debounce).  1200 ms ensures the
-            %   echo is still within the suppression window.
-            if nargin < 2
-                pauseMs = 500;  % must exceed DEBOUNCE_MS (200 ms)
+            % Updates PixelDataColumnWidths_ for all visible columns, then
+            % recomputes RelativeDataColumnWidths_ for every column (including
+            % hidden) using the GCD of all finite pixel widths.
+            % DataColumnWidthTypes_ is never modified here.
+            % Returns true when any stored value changed.
+            nVisible = sum(this.ColumnVisible);
+            if numel(pixelWidths) ~= nVisible
+                this.onBridgeReattachNeeded();
+                changed = false;
+                return
             end
-            this.IsPushingWidthToDisplay_ = true;
-            if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "Pause", ...
-                    struct("durationMs", pauseMs));
+
+            nData   = numel(this.DataColumnNames);
+            visIdxs = find(this.ColumnVisible);
+            px      = this.extendStore(this.PixelDataColumnWidths_, NaN,  nData);
+            rel     = this.extendStore(this.RelativeDataColumnWidths_, "1x", nData);
+
+            for k = 1:nVisible
+                px(visIdxs(k)) = pixelWidths(k);
             end
-            % Clear the MATLAB flag after the same window.
-            % The timer is deleted inside its own callback to avoid leaking
-            % timer objects when this method is called repeatedly (e.g. each
-            % column drag creates a new timer).
-            t = timer("StartDelay", pauseMs/1000, "ExecutionMode", "singleShot", ...
-                "TimerFcn", @(src,~) [this.clearPushingFlag(), delete(src)]);
-            start(t);
+
+            % Recompute GCD-normalised relative weights for all columns that
+            % have a resolved pixel width (visible or hidden).
+            g = gwidgets.Table.gcdPixelWidths(px);
+            for i = 1:nData
+                if ~isnan(px(i)) && px(i) > 0
+                    rel(i) = string(round(px(i) / g)) + "x";
+                end
+            end
+
+            changed = ~isequaln(px,  this.PixelDataColumnWidths_) || ...
+                      ~isequaln(rel, this.RelativeDataColumnWidths_);
+            this.PixelDataColumnWidths_    = px;
+            this.RelativeDataColumnWidths_ = rel;
         end
 
-        function clearPushingFlag(this)
-            this.IsPushingWidthToDisplay_ = false;
+        function val = buildMixedWidthCell(this, mask)
+            % Build a cell array of column widths for the columns given by mask.
+            % "Pixel" columns → numeric pixel value.
+            % "Relative" columns → "Nx" string (or "1x" if not yet resolved).
+            nData   = numel(this.DataColumnNames);
+            nResult = sum(mask);
+            if nResult == 0
+                val = {};
+                return
+            end
+            types = this.extendStore(this.DataColumnWidthTypes_, "Relative", nData);
+            px    = this.extendStore(this.PixelDataColumnWidths_, NaN,       nData);
+            rel   = this.extendStore(this.RelativeDataColumnWidths_, "1x",   nData);
+            maskIdxs = find(mask);
+            val = cell(1, nResult);
+            for k = 1:nResult
+                i = maskIdxs(k);
+                if types(i) == "Pixel"
+                    val{k} = px(i);
+                else
+                    r = rel(i);
+                    if ismissing(r) || r == ""
+                        val{k} = "1x";
+                    else
+                        val{k} = r;
+                    end
+                end
+            end
+        end
+
+        function val = resolvedPixelWidths(this, mask)
+            nData   = numel(this.DataColumnNames);
+            px      = this.extendStore(this.PixelDataColumnWidths_, NaN, nData);
+            val     = px(mask);
+        end
+
+        function val = resolvedRelativeWidths(this, mask)
+            nData = numel(this.DataColumnNames);
+            rel   = this.extendStore(this.RelativeDataColumnWidths_, "1x", nData);
+            val   = rel(mask);
+        end
+
+        function val = resolvedTypes(this, mask)
+            nData = numel(this.DataColumnNames);
+            val   = this.extendStore(this.DataColumnWidthTypes_, "Relative", nData);
+            val   = val(mask);
         end
 
         function updateDisplayTable(this, vars)
@@ -1708,12 +1824,34 @@ classdef Table < gwidgets.internal.Reparentable
             switch d.event
 
                 case "BridgeReady"
-                    % setup() has run — safe to send Init now.
+                    % setup() has run — send Init then Ready so the bridge
+                    % attaches its ResizeObserver to the (already-rendered) table.
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
+                    this.sendReadyToBridge();
 
                 case "ColumnWidthChanged"
-                    this.onColumnWidthChanged(d.widths);
+                    % Bridge fires on every ResizeObserver callback.
+                    % Ignore mid-drag (moving=true) events — only process the
+                    % settled value when the user releases the mouse.
+                    if isfield(d, "moving") && d.moving
+                        return
+                    end
+                    % If the incoming widths match PixelDataColumnWidths_ (within
+                    % 1 px browser-rounding tolerance) the event was caused by
+                    % MATLAB's own CSS settling — ignore it to avoid a loop.
+                    % Otherwise it is a genuine user-initiated change; update
+                    % stores and re-apply so the display reflects the new state.
+                    if this.didBridgeWidthsChange(d.widths)
+                        this.updateStoresFromBridgeWidths(d.widths);
+                        this.applyColumnWidthToDisplay();
+                    end
+
+                case "PollResponse"
+                    % Store widths for waitForBridgeWidths stability check.
+                    if isfield(d, "widths") && isvector(d.widths)
+                        this.LastPollWidths_ = d.widths;
+                    end
 
                 case "BridgeDiag"
                     fprintf("%s\n", d.msg);
@@ -1721,52 +1859,107 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function onColumnWidthChanged(this, widths)
-            % Called when the user finishes dragging a column divider.
-            %
-            % widths is a numeric row vector with one entry per visible column.
-            %   widths(i) >= 0  →  pixel column; value is the new pixel width.
-            %   widths(i) <  0  →  proportional column; the new nx weight is
-            %                      -widths(i), e.g. -1.25 → "1.25x".
-            %
-            % Proportional columns are never converted to pixel on drag — only
-            % their weights change to reflect the new rendered proportions.
-            if this.IsPushingWidthToDisplay_
+        function onBridgeReattachNeeded(this)
+            % Column count mismatch — tell bridge to re-attach to current DOM.
+            this.sendReadyToBridge();
+        end
+
+        function sendSuppressToBridge(this)
+            % Tell the bridge to stop reporting ColumnWidthChanged events.
+            % Queue this before DisplayTable.ColumnWidth changes so the
+            % ResizeObserver echo during our own DOM update is silently dropped.
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Suppress", []);
+        end
+
+        function sendRestoreToBridge(this)
+            % Tell the bridge to re-enable reporting, re-attach its observer,
+            % and poll the current DOM widths.  Queue this after SetTypes so
+            % drag-handler constraints are cleared before the poll fires.
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
+        end
+
+        function sendReadyToBridge(this)
+            % Signal the bridge to (re-)attach its ResizeObserver once the
+            % table DOM has settled.
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Ready", []);
+        end
+
+        function sendPollToBridge(this)
+            % Ask the bridge for current DOM column widths (bypasses callbackSuppressed).
+            % The response arrives as a PollResponse event in onBridgeData.
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Poll", []);
+        end
+
+        function waitForBridgeWidths(this, maxIter)
+            % Poll the bridge until column widths stabilise (two consecutive polls
+            % return the same values), confirming the DOM has settled after a
+            % DisplayTable.ColumnWidth assignment.
+            % drawnow limitrate is used to let MATLAB flush its widget update and
+            % let the bridge respond between polls.
+            if isempty(this.ColumnWidthBridge_), return; end
+            if nargin < 2, maxIter = 10; end
+            prev = [];
+            for k = 1:maxIter %#ok<FXUP>
+                this.LastPollWidths_ = [];
+                this.sendPollToBridge();
+                drawnow limitrate
+                curr = this.LastPollWidths_;
+                if ~isempty(curr) && isequal(curr, prev)
+                    return   % widths stable — DOM has settled
+                end
+                prev = curr;
+            end
+        end
+
+        function sendTypesToBridge(this)
+            % % Send a SetTypes event so the bridge knows which visible columns
+            % % are Relative and can clear stale px drag-handler styles from them.
+            % if isempty(this.ColumnWidthBridge_), return; end
+            % visIdxs = find(this.ColumnVisible);
+            % types   = this.extendStore(this.DataColumnWidthTypes_, "Relative", ...
+            %                            numel(this.DataColumnNames));
+            % isRel   = arrayfun(@(i) types(i) == "Relative", visIdxs);
+            % sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTypes", isRel);
+        end
+
+    end
+
+    % Test hooks — accessible to matlab.unittest.TestCase but not public API
+    methods (Access = ?matlab.unittest.TestCase)
+
+        function simulateBridgeDrag(this, pixelWidths)
+            % Simulate a ColumnWidthChanged notification from the bridge
+            % without requiring a live DOM/figure.
+            % pixelWidths: positive pixel widths for all visible columns.
+            this.updateStoresFromBridgeWidths(pixelWidths);
+            this.applyColumnWidthToDisplay();
+        end
+
+        function changed = didBridgeWidthsChange(this, incomingPx)
+            % Return true when the incoming pixel widths differ from the stored
+            % PixelDataColumnWidths_ by more than 1 px (browser-rounding
+            % tolerance).  NaN in the store (Relative column not yet resolved)
+            % is always treated as changed so the first report is processed.
+            nData  = numel(this.DataColumnNames);
+            nVis   = sum(this.ColumnVisible);
+            if numel(incomingPx) ~= nVis
+                changed = false;   % count mismatch — updateStoresFromBridgeWidths handles it
                 return
             end
-
-            nVisible = sum(this.ColumnVisible);
-            if numel(widths) ~= nVisible
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "Reattach", []);
-                return
-            end
-
-            dataWidths = this.DataColumnWidth;
             visIdxs = find(this.ColumnVisible);
-            for i = 1:numel(widths)
-                if widths(i) >= 0
-                    dataWidths{visIdxs(i)} = widths(i);              % pixel
-                else
-                    dataWidths{visIdxs(i)} = sprintf('%gx', -widths(i)); % nx
+            px = this.extendStore(this.PixelDataColumnWidths_, NaN, nData);
+            for k = 1:nVis
+                stored = px(visIdxs(k));
+                if isnan(stored) || abs(stored - incomingPx(k)) > 1
+                    changed = true;
+                    return
                 end
             end
-
-            % Guard: if widths are identical to what we already have, this is
-            % an echo from our own applyColumnWidthToDisplay (e.g., the
-            % ResizeObserver re-fired after the SetWidths stamp).  Returning
-            % early breaks the potential update → echo → update loop.
-            if isequal(dataWidths, this.DataColumnWidth_)
-                return
-            end
-
-            this.DataColumnWidth_ = dataWidths;
-
-            % Push the new pixel widths to the display so that body cells
-            % (including newly rendered rows from virtual scrolling) pick up
-            % explicit min-width / max-width constraints.  The round-trip also
-            % sets the table-level widths via applyColumnWidths in JS, keeping
-            % header and body tables permanently in sync.
-            this.applyColumnWidthToDisplay();
+            changed = false;
         end
 
     end
@@ -2767,18 +2960,66 @@ classdef Table < gwidgets.internal.Reparentable
 
     end
 
-    methods (Static, Access = private)
+    methods (Static, Hidden)
+
+        function store = extendStore(store, defaultVal, nData)
+            % Ensure store has exactly nData elements, padding with defaultVal.
+            n = numel(store);
+            if n == nData
+                return
+            elseif n == 0
+                if isnumeric(defaultVal)
+                    store = repelem(defaultVal, 1, nData);
+                else
+                    store = repelem(string(defaultVal), 1, nData);
+                end
+            elseif n < nData
+                if isnumeric(defaultVal)
+                    store = [store, repelem(defaultVal, 1, nData - n)];
+                else
+                    store = [store, repelem(string(defaultVal), 1, nData - n)];
+                end
+            else
+                store = store(1:nData);
+            end
+        end
+
+        function g = gcdPixelWidths(px)
+            % GCD of all finite positive pixel widths (integer arithmetic).
+            vals = round(px(isfinite(px) & px > 0));
+            if isempty(vals)
+                g = 1;
+                return
+            end
+            g = vals(1);
+            for i = 2:numel(vals)
+                g = gcd(g, vals(i));
+            end
+            if g == 0, g = 1; end
+        end
 
         function val = normalizeColumnWidths(val)
             % Accept numeric arrays, string arrays, char, or cell.
             % Returns a cell array (or empty cell if input was empty).
+            % "auto" and "fit" are normalised to "1x" since only Pixel
+            % and Relative column types are supported.
+            val = convertCharsToStrings(val);
             if isempty(val)
                 val = {};
             elseif ~iscell(val)
-                if isnumeric(val)
-                    val = num2cell(val);
-                else
-                    val = cellstr(val);
+                val = num2cell(val);
+            else
+                val = cellfun(@(x) convertCharsToStrings(x), val, "UniformOutput", false);
+            end
+
+            if isscalar(val) && isstring(val{1}) && val{1} == ""
+                val = {};
+            end
+
+            for i = 1:numel(val)
+                v = val{i};
+                if isstring(v) && (v == "auto" || v == "fit")
+                    val{i} = "1x";
                 end
             end
         end
