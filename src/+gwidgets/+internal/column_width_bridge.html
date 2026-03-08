@@ -629,7 +629,11 @@
     bridgeLog("[Bridge] " + ts() + " publishWidths: drag" +
               " widths=[" + widths.join(",") + "]" +
               " seqToEcho=" + seqToEcho);
-    pendingRedistrib = true;
+    // Only redistribute when a pixel column was dragged.  If the drag was
+    // entirely within relative columns, MATLAB will emit new %-based CSS that
+    // already reflects the user's dragged ratio; redistribution would overwrite
+    // it with stale settledPropWidths and cause a snap-back on release.
+    pendingRedistrib = changedIdxs.some(function(i) { return !colFlags[i]; });
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, seq: seqToEcho };
   }
 
