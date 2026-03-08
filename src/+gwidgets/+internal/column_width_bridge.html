@@ -161,16 +161,21 @@
     var cols = findColumns();
     if (cols.length !== colAutoFlags.length) return;
     for (var i = 0; i < cols.length; i++) {
-      if (colAutoFlags[i]) {
-        // Clear any px inline styles so MATLAB's %-based CSS can settle.
-        // Preserve %-based values that MATLAB itself may have applied.
-        var w = cols[i].style.width;
-        if (!w || w.indexOf('%') < 0) cols[i].style.removeProperty("width");
-        var mn = cols[i].style.minWidth;
-        if (!mn || mn.indexOf('%') < 0) cols[i].style.removeProperty("min-width");
-        var mx = cols[i].style.maxWidth;
-        if (!mx || mx.indexOf('%') < 0) cols[i].style.removeProperty("max-width");
-      }
+      if (!colAutoFlags[i]) continue;
+      // Log what MATLAB's renderer has written (or not) at this moment.
+      // style.width is intentionally left alone: MATLAB's renderer always
+      // writes a new inline "Nx%" for relative columns, naturally overriding
+      // the drag handler's px value.  Clearing it ourselves risks revealing
+      // the previous drag's stale "%" before the new one has arrived.
+      // We only remove minWidth/maxWidth, which MATLAB's renderer never clears.
+      var mn = cols[i].style.minWidth;
+      var mx = cols[i].style.maxWidth;
+      bridgeLog("[Bridge] " + ts() + " col[" + i + "] (R):" +
+                " width=" + (cols[i].style.width || "''") +
+                " minWidth=" + (mn || "''") +
+                " maxWidth=" + (mx || "''"));
+      if (!mn || mn.indexOf('%') < 0) cols[i].style.removeProperty("min-width");
+      if (!mx || mx.indexOf('%') < 0) cols[i].style.removeProperty("max-width");
     }
   }
 
@@ -251,12 +256,10 @@
       colAutoFlags = data;
       bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
                 data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
-      // Defer until after MATLAB's CSS update has been written to the DOM.
-      // Clearing px constraints immediately lets the old stylesheet % take
-      // over before MATLAB's new %-based inline style arrives, causing the
-      // header to snap back.  The RAF ensures MATLAB's new width:% is
-      // already on the <th> before we remove the stale minWidth/maxWidth.
-      requestAnimationFrame(clearRelativeConstraints);
+      // Immediate: no RAF needed.  We no longer clear style.width, so there
+      // is no timing dependency on MATLAB's renderer.  Only minWidth/maxWidth
+      // are removed — those are drag-handler artifacts MATLAB never clears.
+      clearRelativeConstraints();
     });
 
     htmlComponent.Data = { event: "BridgeReady" };
