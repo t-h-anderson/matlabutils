@@ -84,6 +84,14 @@
         // release (size stopped changing), so we send one explicit report.
         isMoving = false;
         onResize();
+        // Self-suppress: block the snap-back ResizeObserver callback that fires
+        // ~120ms after mouseup when the drag handler releases its px constraints
+        // and the <th> reverts to the pre-drag <col> widths.  MATLAB takes ~133ms
+        // to process the ColumnWidthChanged above and deliver Suppress — too late.
+        // We suppress here instead; MATLAB un-suppresses via Restore as normal.
+        callbackSuppressed = true;
+        bridgeLog("[Bridge] " + ts() + " mouseup self-suppress");
+        flushDiag();
       }, true);
     } catch (e) {}
   }

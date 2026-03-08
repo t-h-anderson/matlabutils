@@ -1517,13 +1517,11 @@ classdef Table < gwidgets.internal.Reparentable
 
         function applyColumnWidthToDisplay(this)
             % Push the current visible column widths to the display table.
-            % Suppress bridge callbacks so ResizeObserver echoes during the
-            % DOM update are dropped.  The NaN flush resets MATLAB's internal
-            % column-type metadata so relative weights are correctly applied.
-            % drawnow flushes both DOM updates through the widget pipeline
-            % before SetTypes/Restore are queued, ensuring the bridge's deferred
-            % constraint clear (pendingSetTypes fallback in Restore) runs on the
-            % settled DOM rather than stale state.
+            % Suppress is sent first (bridge also self-suppresses on mouseup),
+            % so ResizeObserver echoes — including the snap-back that fires when
+            % the drag handler releases its px constraints — are silently dropped.
+            % The NaN flush resets MATLAB's internal column-type metadata so
+            % relative weights are correctly re-applied after each drag.
             this.sendSuppressToBridge();
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
@@ -1531,11 +1529,7 @@ classdef Table < gwidgets.internal.Reparentable
                     visWidths = {"Auto"};
                 end
                 this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
-                drawnow   % flush both DOM updates before queuing SetTypes/Restore
-                %pause(1)
                 this.DisplayTable.ColumnWidth = visWidths;
-                drawnow   % flush both DOM updates before queuing SetTypes/Restore
-                pause(1)
             end
             this.sendTypesToBridge();
             this.sendRestoreToBridge();
@@ -1839,6 +1833,11 @@ classdef Table < gwidgets.internal.Reparentable
                     if this.didBridgeWidthsChange(d.widths)
                         this.updateStoresFromBridgeWidths(d.widths);
                         this.applyColumnWidthToDisplay();
+                    else
+                        % Drag produced no net width change, but the bridge
+                        % self-suppressed on mouseup.  Send Restore so it is
+                        % not left permanently suppressed.
+                        this.sendRestoreToBridge();
                     end
 
                 case "BridgeDiag"
