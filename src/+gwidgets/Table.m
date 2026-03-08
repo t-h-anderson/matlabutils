@@ -1531,8 +1531,11 @@ classdef Table < gwidgets.internal.Reparentable
                     visWidths = {"Auto"};
                 end
                 this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
+                drawnow   % flush both DOM updates before queuing SetTypes/Restore
+                %pause(1)
                 this.DisplayTable.ColumnWidth = visWidths;
                 drawnow   % flush both DOM updates before queuing SetTypes/Restore
+                pause(1)
             end
             this.sendTypesToBridge();
             this.sendRestoreToBridge();
