@@ -209,13 +209,18 @@
     htmlComponent.addEventListener("Restore", function() {
       callbackSuppressed = false;
       bridgeLog("[Bridge] " + ts() + " Restore");
-      // Fallback: if the ColumnWidth update didn't trigger a suppressed resize
-      // (e.g. widths were unchanged, or update hasn't arrived yet but Restore
-      // fires first), apply the pending clear now on whatever DOM we have.
+      // Apply any deferred SetTypes clear now (fallback: DOM update hasn't
+      // arrived yet, so we clear on the current DOM).
       if (pendingSetTypes !== null) {
         applyPendingSetTypes("fallback");
       }
-      attachObserver();   // ResizeObserver fires naturally once DOM has settled
+      // Do NOT call attachObserver here.  The observer from the last Ready (or
+      // Restore-with-reattach) is still connected.  If we re-attach now, the
+      // browser fires ResizeObserver immediately on first observation and we
+      // read stale snap-back widths (MATLAB's DOM update hasn't propagated yet).
+      // Instead, the existing observer fires naturally when MATLAB's DOM update
+      // arrives — at that point callbackSuppressed is false and we send the
+      // correct ColumnWidthChanged.
       flushDiag();
     });
 
