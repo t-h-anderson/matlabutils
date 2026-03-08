@@ -62,7 +62,6 @@ classdef Table < gwidgets.internal.Reparentable
 
         % Column-width bridge
         DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
-        LastPollWidths_  (1,:) double   % Widths from most recent PollResponse; [] if none yet
 
         % Column-width stores — three parallel arrays aligned to DataColumnNames.
         % DataColumnWidthTypes_ is the "truth"; the other two are both updated on
@@ -1518,31 +1517,20 @@ classdef Table < gwidgets.internal.Reparentable
 
         function applyColumnWidthToDisplay(this)
             % Push the current visible column widths to the display table.
-            % Suppress bridge callbacks before the update so ResizeObserver
-            % echoes are silently dropped.  waitForBridgeWidths polls the bridge
-            % until the DOM has settled before SetTypes clears drag-handler
-            % constraints.  Restore re-attaches the observer; ResizeObserver
-            % fires naturally after layout and didBridgeWidthsChange suppresses
-            % the echo since it matches what was just stored.
+            % Suppress bridge callbacks so ResizeObserver echoes during the
+            % DOM update are dropped.  SetTypes stores pending constraint data
+            % in the bridge; the bridge applies clearRelativeConstraints() when
+            % the suppressed ResizeObserver fires (= DOM has settled), or as a
+            % fallback in Restore if the ColumnWidth update didn't change the DOM.
             this.sendSuppressToBridge();
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
-
-                % Clear the table col data types
-                this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
-                
-                this.waitForBridgeWidths();   % poll until DOM settles before clearing constraints
-
-                % Update with the new value
                 this.DisplayTable.ColumnWidth = visWidths;
-
-                this.waitForBridgeWidths();   % poll until DOM settles before clearing constraints
-
             end
-            
+            this.sendTypesToBridge();
             this.sendRestoreToBridge();
         end
 
@@ -1846,12 +1834,6 @@ classdef Table < gwidgets.internal.Reparentable
                         this.applyColumnWidthToDisplay();
                     end
 
-                case "PollResponse"
-                    % Store widths for waitForBridgeWidths stability check.
-                    if isfield(d, "widths") && isvector(d.widths)
-                        this.LastPollWidths_ = d.widths;
-                    end
-
                 case "BridgeDiag"
                     fprintf("%s\n", d.msg);
 
@@ -1886,34 +1868,18 @@ classdef Table < gwidgets.internal.Reparentable
             sendEventToHTMLSource(this.ColumnWidthBridge_, "Ready", []);
         end
 
-        function sendPollToBridge(this)
-            % Ask the bridge for current DOM column widths (bypasses callbackSuppressed).
-            % The response arrives as a PollResponse event in onBridgeData.
+        function sendTypesToBridge(this)
+            % Send a SetTypes event so the bridge knows which visible columns
+            % are Relative and can clear stale px drag-handler styles from them.
+            % The bridge defers the actual clear until the next suppressed
+            % ResizeObserver callback (= DOM settled), or applies it as a fallback
+            % in Restore if no resize fired during suppression.
             if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Poll", []);
-        end
-
-        function waitForBridgeWidths(this, maxIter)
-            pause(1);
-            return
-            % Poll the bridge until column widths stabilise (two consecutive polls
-            % return the same values), confirming the DOM has settled after a
-            % DisplayTable.ColumnWidth assignment.
-            % drawnow limitrate is used to let MATLAB flush its widget update and
-            % let the bridge respond between polls.
-            if isempty(this.ColumnWidthBridge_), return; end
-            if nargin < 2, maxIter = 100; end
-            prev = [];
-            for k = 1:maxIter %#ok<FXUP>
-                this.LastPollWidths_ = [];
-                this.sendPollToBridge();
-                drawnow limitrate
-                curr = this.LastPollWidths_;
-                if ~isempty(curr) && isequal(curr, prev)
-                    return   % widths stable — DOM has settled
-                end
-                prev = curr;
-            end
+            visIdxs = find(this.ColumnVisible);
+            types   = this.extendStore(this.DataColumnWidthTypes_, "Relative", ...
+                                       numel(this.DataColumnNames));
+            isRel   = arrayfun(@(i) types(i) == "Relative", visIdxs);
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTypes", isRel);
         end
 
     end

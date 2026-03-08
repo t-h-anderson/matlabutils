@@ -8,19 +8,19 @@
   // ColumnWidthBridge — timer-free, MATLAB-driven
   //
   // MATLAB API (events sent TO the bridge):
-  //   Poll                    — request current column widths; responds with PollResponse
   //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
-  //   Ready                   — attach/re-attach ResizeObserver (no poll)
+  //   Ready                   — attach/re-attach ResizeObserver
   //   Suppress                — stop ColumnWidthChanged from being sent to MATLAB
-  //   SetTypes   [bool,...]   — per-column Relative flag; clears drag px styles
-  //   Restore                 — re-enable ColumnWidthChanged; re-attach observer
-  //                             (ResizeObserver fires naturally after DOM settles)
+  //   SetTypes   [bool,...]   — per-column Relative flag; defers drag-px style clear
+  //                             until the next suppressed ResizeObserver callback
+  //                             (i.e. after the DOM has actually settled)
+  //   Restore                 — apply any deferred SetTypes clear; re-enable
+  //                             ColumnWidthChanged; re-attach observer
   //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
-  //   PollResponse            — {widths:[...]} response to a Poll request (bypasses suppress)
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
   var COL_SELECTOR       = ".mw-table-header-column";
@@ -29,6 +29,7 @@
   var tableTag           = null;
   var htmlComponent      = null;
   var colAutoFlags       = null;
+  var pendingSetTypes    = null;   // deferred colAutoFlags; applied when DOM settles
   var isMoving           = false;
   var callbackSuppressed = false;
   var diagEnabled        = true;
@@ -116,10 +117,28 @@
     }
   }
 
+  // ---- applyPendingSetTypes: commit deferred SetTypes data and clear constraints ----
+
+  function applyPendingSetTypes(reason) {
+    colAutoFlags    = pendingSetTypes;
+    pendingSetTypes = null;
+    bridgeLog("[Bridge] " + ts() + " clearConstraints (" + reason + ")");
+    clearRelativeConstraints();
+    flushDiag();
+  }
+
   // ---- ResizeObserver callback ----
 
   function onResize() {
-    if (callbackSuppressed) return;
+    if (callbackSuppressed) {
+      // DOM changed while suppressed — this means the DisplayTable.ColumnWidth
+      // update has landed and layout has completed.  Apply any deferred SetTypes
+      // now so constraints are cleared on the settled DOM.
+      if (pendingSetTypes !== null) {
+        applyPendingSetTypes("settled DOM");
+      }
+      return;
+    }
     var cols = findColumns();
     if (cols.length === 0) return;
     var widths = colWidthsFromDOM(cols);
@@ -158,24 +177,25 @@
     htmlComponent.addEventListener("SetTypes", function(event) {
       var data = event.Data;
       if (!Array.isArray(data)) return;
-      colAutoFlags = data;
-      bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
+      // Store as pending — do NOT clear constraints immediately.
+      // clearRelativeConstraints() will run in the next suppressed onResize()
+      // (when the DOM has settled after DisplayTable.ColumnWidth), or as a
+      // fallback in Restore if no resize fired during suppression.
+      pendingSetTypes = data;
+      bridgeLog("[Bridge] " + ts() + " SetTypes (deferred): [" +
                 data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
-      clearRelativeConstraints();
       flushDiag();
-    });
-
-    htmlComponent.addEventListener("Poll", function() {
-      var cols = findColumns();
-      var widths = cols.length > 0 ? colWidthsFromDOM(cols) : [];
-      bridgeLog("[Bridge] " + ts() + " Poll: widths=[" + widths.join(",") + "]");
-      flushDiag();
-      htmlComponent.Data = { event: "PollResponse", widths: widths };
     });
 
     htmlComponent.addEventListener("Restore", function() {
       callbackSuppressed = false;
       bridgeLog("[Bridge] " + ts() + " Restore");
+      // Fallback: if the ColumnWidth update didn't trigger a suppressed resize
+      // (e.g. widths were unchanged, or update hasn't arrived yet but Restore
+      // fires first), apply the pending clear now on whatever DOM we have.
+      if (pendingSetTypes !== null) {
+        applyPendingSetTypes("fallback");
+      }
       attachObserver();   // ResizeObserver fires naturally once DOM has settled
       flushDiag();
     });
