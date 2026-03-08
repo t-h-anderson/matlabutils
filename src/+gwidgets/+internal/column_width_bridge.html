@@ -72,8 +72,14 @@
   function setupMouseTracking() {
     try {
       var pd = window.parent.document;
-      pd.addEventListener("mousedown", function() { isMoving = true;  }, true);
-      pd.addEventListener("mouseup",   function() { isMoving = false; }, true);
+      pd.addEventListener("mousedown", function() { isMoving = true; }, true);
+      pd.addEventListener("mouseup", function() {
+        // isMoving must be false before we call onResize so the settled
+        // event carries moving=false.  ResizeObserver won't fire after
+        // release (size stopped changing), so we send one explicit report.
+        isMoving = false;
+        onResize();
+      }, true);
     } catch (e) {}
   }
 
