@@ -1522,6 +1522,11 @@ classdef Table < gwidgets.internal.Reparentable
             % the drag handler releases its px constraints — are silently dropped.
             % The NaN flush resets MATLAB's internal column-type metadata so
             % relative weights are correctly re-applied after each drag.
+            % drawnow flushes both ColumnWidth DOM updates before SetTypes/Restore
+            % are queued.  This ensures attachObserver (called from Restore) sees
+            % the settled DOM rather than the stale snap-back widths.  drawnow is
+            % safe here because the bridge self-suppresses on mouseup, so the
+            % snap-back never reaches MATLAB's DataChangedFcn queue.
             this.sendSuppressToBridge();
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
@@ -1530,6 +1535,7 @@ classdef Table < gwidgets.internal.Reparentable
                 end
                 this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
                 this.DisplayTable.ColumnWidth = visWidths;
+                drawnow   % flush DOM before Restore → attachObserver fires
             end
             this.sendTypesToBridge();
             this.sendRestoreToBridge();
