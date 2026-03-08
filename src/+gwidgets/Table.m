@@ -1533,17 +1533,16 @@ classdef Table < gwidgets.internal.Reparentable
 
                 % Clear the table col data types
                 this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
-                % TODo: wait for update
-                pause(0)
+                
+                this.waitForBridgeWidths();   % poll until DOM settles before clearing constraints
 
                 % Update with the new value
                 this.DisplayTable.ColumnWidth = visWidths;
 
-                % TODO: wait for the update
-                pause(0)
+                this.waitForBridgeWidths();   % poll until DOM settles before clearing constraints
+
             end
-            this.waitForBridgeWidths();   % poll until DOM settles before clearing constraints
-            this.sendTypesToBridge();
+            
             this.sendRestoreToBridge();
         end
 
@@ -1895,13 +1894,15 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function waitForBridgeWidths(this, maxIter)
+            pause(1);
+            return
             % Poll the bridge until column widths stabilise (two consecutive polls
             % return the same values), confirming the DOM has settled after a
             % DisplayTable.ColumnWidth assignment.
             % drawnow limitrate is used to let MATLAB flush its widget update and
             % let the bridge respond between polls.
             if isempty(this.ColumnWidthBridge_), return; end
-            if nargin < 2, maxIter = 10; end
+            if nargin < 2, maxIter = 100; end
             prev = [];
             for k = 1:maxIter %#ok<FXUP>
                 this.LastPollWidths_ = [];
@@ -1913,17 +1914,6 @@ classdef Table < gwidgets.internal.Reparentable
                 end
                 prev = curr;
             end
-        end
-
-        function sendTypesToBridge(this)
-            % % Send a SetTypes event so the bridge knows which visible columns
-            % % are Relative and can clear stale px drag-handler styles from them.
-            % if isempty(this.ColumnWidthBridge_), return; end
-            % visIdxs = find(this.ColumnVisible);
-            % types   = this.extendStore(this.DataColumnWidthTypes_, "Relative", ...
-            %                            numel(this.DataColumnNames));
-            % isRel   = arrayfun(@(i) types(i) == "Relative", visIdxs);
-            % sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTypes", isRel);
         end
 
     end
