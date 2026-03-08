@@ -31,7 +31,7 @@ classdef tGrouping < test.WithExampleTables
             testCase.verifyEqual(t.GroupingVariableName, "Var2")
             testCase.verifyEmpty(t.OpenGroups)
             testCase.verifyEqual(t.ClosedGroups, ["a", "b", "c"])
-            testCase.verifyEqual(t.HiddenGroups, ["a", "b", "c"]) % ???
+            testCase.verifyEmpty(t.HiddenGroups)
         end
 
         function tGroupByNumerical(testCase)
@@ -183,6 +183,30 @@ classdef tGrouping < test.WithExampleTables
 
             testCase.verifySize(t.DisplayData, [2 2])
             testCase.verifyEqual(t.Groups, ["x|false", "y|false"])
+        end
+
+        function tHiddenGroupsEmptyAfterFilter(testCase)
+            % When ShowEmptyGroups=false (default) and all groups have data,
+            % HiddenGroups is empty.
+            data = testCase.stringData();
+            t = gwidgets.Table(Data=data, ShowEmptyGroups=false);
+            t.GroupingVariable = "Var2";
+
+            testCase.verifyEmpty(t.HiddenGroups)
+        end
+
+        function tHiddenGroupsPopulatedByFilter(testCase)
+            % When ShowEmptyGroups=false and a filter removes all rows from
+            % a group, that group appears in HiddenGroups.
+            data = testCase.stringData();
+            t = gwidgets.Table(Data=data, ShowEmptyGroups=false);
+            t.GroupingVariable = "Var2";
+            t.Filter = "Var2=a";
+
+            % Groups b and c have no matching rows, so they should be hidden
+            testCase.verifyEqual(sort(t.HiddenGroups), ["b", "c"])
+            testCase.verifyEmpty(t.ClosedGroups)
+            testCase.verifyEmpty(t.OpenGroups)
         end
 
     end

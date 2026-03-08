@@ -16,7 +16,7 @@ classdef UpdateManager < handle
                 nvp.Times (1,1) double = NaN
             end
             if ismissing(nvp.Times)
-                this.FullySuppress = unique(this.FullySuppress, name);
+                this.FullySuppress = unique([this.FullySuppress, name]);
             else
                 name = repmat(name, 1, nvp.Times);
                 this.Suppress = [this.Suppress, name];
