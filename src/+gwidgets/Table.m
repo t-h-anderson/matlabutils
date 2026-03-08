@@ -1520,13 +1520,9 @@ classdef Table < gwidgets.internal.Reparentable
             % Suppress is sent first (bridge also self-suppresses on mouseup),
             % so ResizeObserver echoes — including the snap-back that fires when
             % the drag handler releases its px constraints — are silently dropped.
-            % The NaN flush resets MATLAB's internal column-type metadata so
-            % relative weights are correctly re-applied after each drag.
-            % drawnow flushes both ColumnWidth DOM updates before SetTypes/Restore
-            % are queued.  This ensures attachObserver (called from Restore) sees
-            % the settled DOM rather than the stale snap-back widths.  drawnow is
-            % safe here because the bridge self-suppresses on mouseup, so the
-            % snap-back never reaches MATLAB's DataChangedFcn queue.
+            % Setting pixel widths first resets MATLAB's internal column-type
+            % metadata (clearing drag-handler constraints), then forceRefresh
+            % flushes that DOM update before the final relative widths are applied.
             this.sendSuppressToBridge();
             visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
@@ -1867,9 +1863,8 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function sendRestoreToBridge(this)
-            % Tell the bridge to re-enable reporting, re-attach its observer,
-            % and poll the current DOM widths.  Queue this after SetTypes so
-            % drag-handler constraints are cleared before the poll fires.
+            % Tell the bridge to re-enable ColumnWidthChanged reporting.
+            % The existing ResizeObserver fires naturally on the next DOM change.
             if isempty(this.ColumnWidthBridge_), return; end
             sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
         end
