@@ -251,7 +251,12 @@
       colAutoFlags = data;
       bridgeLog("[Bridge] " + ts() + " SetTypes: [" +
                 data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
-      clearRelativeConstraints();
+      // Defer until after MATLAB's CSS update has been written to the DOM.
+      // Clearing px constraints immediately lets the old stylesheet % take
+      // over before MATLAB's new %-based inline style arrives, causing the
+      // header to snap back.  The RAF ensures MATLAB's new width:% is
+      // already on the <th> before we remove the stale minWidth/maxWidth.
+      requestAnimationFrame(clearRelativeConstraints);
     });
 
     htmlComponent.Data = { event: "BridgeReady" };
