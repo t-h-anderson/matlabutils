@@ -1528,7 +1528,17 @@ classdef Table < gwidgets.internal.Reparentable
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
+
+                % Clear the table col data types
+                this.DisplayTable.ColumnWidth = num2cell(nan(size(visWidths)));
+                % TODo: wait for update
+                pause(0)
+
+                % Update with the new value
                 this.DisplayTable.ColumnWidth = visWidths;
+
+                % TODO: wait for the update
+                pause(0)
             end
             this.sendTypesToBridge();
             this.sendRestoreToBridge();
@@ -1869,14 +1879,14 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function sendTypesToBridge(this)
-            % Send a SetTypes event so the bridge knows which visible columns
-            % are Relative and can clear stale px drag-handler styles from them.
-            if isempty(this.ColumnWidthBridge_), return; end
-            visIdxs = find(this.ColumnVisible);
-            types   = this.extendStore(this.DataColumnWidthTypes_, "Relative", ...
-                                       numel(this.DataColumnNames));
-            isRel   = arrayfun(@(i) types(i) == "Relative", visIdxs);
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTypes", isRel);
+            % % Send a SetTypes event so the bridge knows which visible columns
+            % % are Relative and can clear stale px drag-handler styles from them.
+            % if isempty(this.ColumnWidthBridge_), return; end
+            % visIdxs = find(this.ColumnVisible);
+            % types   = this.extendStore(this.DataColumnWidthTypes_, "Relative", ...
+            %                            numel(this.DataColumnNames));
+            % isRel   = arrayfun(@(i) types(i) == "Relative", visIdxs);
+            % sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTypes", isRel);
         end
 
     end
