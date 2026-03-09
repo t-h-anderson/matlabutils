@@ -14,8 +14,10 @@
   //   Restore                       — re-enable ColumnWidthChanged (leave existing observer)
   //   Diag             true|false   — enable/disable diagnostic messages to MATLAB
   //   SetColumnBounds  {minWidths:[...], maxWidths:[...]}
-  //                    — apply CSS style.minWidth/maxWidth to <th> elements;
-  //                      arrays cover visible columns in order; NaN/Inf = no constraint
+  //                    — inject a <style> into the parent document that applies
+  //                      CSS min-width/max-width to both <th> header elements and
+  //                      <td> body cells at each column position; covers virtual-
+  //                      scroll rows automatically; NaN/Inf = no constraint
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
@@ -156,21 +158,58 @@
     });
 
     htmlComponent.addEventListener("SetColumnBounds", function(event) {
-      // Apply CSS min-width / max-width directly to <th> elements so the browser
-      // enforces column size constraints without going through DisplayTable.ColumnWidth.
-      // Columns remain "Relative" in MATLAB's internal model; CSS provides the floor/ceiling.
+      // Inject a <style> element into the parent document head with rules that
+      // target both header <th> and body <td> cells at each column position.
+      // Using a stylesheet (rather than stamping individual elements) means:
+      //   • body cells are covered without needing a separate selector pass
+      //   • virtual-scroll rows rendered after this call automatically inherit
+      //     the rules — no re-stamping needed on new rows
+      // Columns remain "Relative" in MATLAB's internal model; CSS min/max
+      // provides the floor/ceiling without touching DisplayTable.ColumnWidth.
       var mins = (event.Data && event.Data.minWidths) ? event.Data.minWidths : [];
       var maxs = (event.Data && event.Data.maxWidths) ? event.Data.maxWidths : [];
+
+      var parentDoc;
+      try { parentDoc = window.parent.document; } catch (e) { return; }
+
       var cols = findColumns();
       bridgeLog("[Bridge] " + ts() + " SetColumnBounds: cols=" + cols.length);
+
+      // Build one CSS rule per constrained column, scoped to this table's
+      // data-tag so multiple tables in the same figure don't interfere.
+      // nth-child is derived from HTMLTableCellElement.cellIndex (0-based) to
+      // correctly handle any leading non-data columns (e.g. row-selector).
+      var scope = tableTag ? '[data-tag="' + tableTag + '"] ' : '';
+      var rules = [];
       cols.forEach(function(col, i) {
         var mn = mins[i];
         var mx = maxs[i];
-        col.style.minWidth = (typeof mn === "number" && isFinite(mn) && mn > 0)
-            ? mn + "px" : "";
-        col.style.maxWidth = (typeof mx === "number" && isFinite(mx))
-            ? mx + "px" : "";
+        var hasMin = typeof mn === "number" && isFinite(mn) && mn > 0;
+        var hasMax = typeof mx === "number" && isFinite(mx);
+        if (!hasMin && !hasMax) return;
+        var nth = (typeof col.cellIndex === "number") ? col.cellIndex + 1 : i + 1;
+        var sel = scope + "th:nth-child(" + nth + "), " +
+                  scope + "td:nth-child(" + nth + ")";
+        var decls = [];
+        if (hasMin) decls.push("min-width: " + mn + "px");
+        if (hasMax) decls.push("max-width: " + mx + "px");
+        rules.push(sel + " { " + decls.join("; ") + " }");
       });
+
+      // Replace or remove the per-table bounds stylesheet.
+      var styleId = "mw-bridge-col-bounds" + (tableTag ? "-" + tableTag : "");
+      var styleEl = parentDoc.getElementById(styleId);
+      if (rules.length > 0) {
+        if (!styleEl) {
+          styleEl = parentDoc.createElement("style");
+          styleEl.id = styleId;
+          parentDoc.head.appendChild(styleEl);
+        }
+        styleEl.textContent = rules.join("\n");
+      } else if (styleEl) {
+        styleEl.remove();
+      }
+
       flushDiag();
     });
 
