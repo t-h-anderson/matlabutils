@@ -1275,6 +1275,7 @@ classdef Table < gwidgets.internal.Reparentable
                     "DataColumnMinWidth must not exceed DataColumnMaxWidth for any column.");
             end
             this.ColumnMinWidths_ = val;
+            this.sendColumnBoundsToBridge();
         end
 
         function val = get.DataColumnMaxWidth(this)
@@ -1298,6 +1299,7 @@ classdef Table < gwidgets.internal.Reparentable
                     "DataColumnMaxWidth must not be less than DataColumnMinWidth for any column.");
             end
             this.ColumnMaxWidths_ = val;
+            this.sendColumnBoundsToBridge();
         end
 
     end
@@ -1576,7 +1578,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         end
 
-        function applyColumnWidthToDisplay(this, options)
+        function applyColumnWidthToDisplay(this)
             % Push the current visible column widths to the display table.
             % Suppress is sent first (bridge also self-suppresses on mouseup),
             % so ResizeObserver echoes — including the snap-back that fires when
@@ -1584,14 +1586,10 @@ classdef Table < gwidgets.internal.Reparentable
             % Setting pixel widths first resets MATLAB's internal column-type
             % metadata (clearing drag-handler constraints), then forceRefresh
             % flushes that DOM update before the final relative widths are applied.
-            % ApplyBounds=false skips per-column constraints so Relative columns
-            % revert to their natural widths (used by tryNaturalRelativeDisplay).
-            arguments
-                this
-                options.ApplyBounds (1,1) logical = true
-            end
+            % CSS min/max bounds are applied directly to <th> elements via the
+            % bridge (SetColumnBounds) so Relative columns stay responsive.
             this.sendSuppressToBridge();
-            visWidths = this.buildMixedWidthCell(this.ColumnVisible, ApplyBounds=options.ApplyBounds);
+            visWidths = this.buildMixedWidthCell(this.ColumnVisible);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
                     visWidths = {"Auto"};
@@ -1600,6 +1598,7 @@ classdef Table < gwidgets.internal.Reparentable
                 this.forceRefresh();
                 this.DisplayTable.ColumnWidth = visWidths;
             end
+            this.sendColumnBoundsToBridge();
             this.sendRestoreToBridge();
         end
 
@@ -1694,23 +1693,11 @@ classdef Table < gwidgets.internal.Reparentable
             this.RelativeDataColumnWidths_ = rel;
         end
 
-        function val = buildMixedWidthCell(this, mask, options)
+        function val = buildMixedWidthCell(this, mask)
             % Build a cell array of column widths for the columns given by mask.
             % "Pixel" columns → numeric pixel value.
-            % "Relative" columns → "Nx" string, unless ApplyBounds=true and the
-            % resolved pixel width is at or outside a per-column constraint — in
-            % that case the clamped pixel value is returned so the table scrolls.
-            %
-            % The "at or outside" test (px <= min OR px >= max) rather than a
-            % simple "clamped != px" comparison is intentional: after clamping,
-            % the stored pixel value equals the minimum, so a strict inequality
-            % would miss the pinned state and display the column as relative again,
-            % letting the browser render it below the minimum (infinite loop).
-            arguments
-                this
-                mask
-                options.ApplyBounds (1,1) logical = true
-            end
+            % "Relative" columns → "Nx" string (CSS min/max bounds are enforced
+            % directly on the <th> elements via SetColumnBounds, not here).
             nData   = numel(this.DataColumnNames);
             nResult = sum(mask);
             if nResult == 0
@@ -1720,10 +1707,6 @@ classdef Table < gwidgets.internal.Reparentable
             types = this.extendStore(this.DataColumnWidthTypes_, "Relative", nData);
             px    = this.extendStore(this.PixelDataColumnWidths_, NaN,       nData);
             rel   = this.extendStore(this.RelativeDataColumnWidths_, "1x",   nData);
-            if options.ApplyBounds
-                lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
-                hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
-            end
             maskIdxs = find(mask);
             val = cell(1, nResult);
             for k = 1:nResult
@@ -1731,16 +1714,6 @@ classdef Table < gwidgets.internal.Reparentable
                 if types(i) == "Pixel"
                     val{k} = px(i);
                 else
-                    % Relative column.  Pin to pixel when the resolved width is
-                    % at or outside a finite constraint (enables horizontal scroll).
-                    if options.ApplyBounds && ~isnan(px(i))
-                        loK = lo(i); if isnan(loK), loK = 0;   end
-                        hiK = hi(i); if isnan(hiK), hiK = Inf; end
-                        if (loK > 0 && px(i) <= loK) || (isfinite(hiK) && px(i) >= hiK)
-                            val{k} = max(loK, min(hiK, px(i)));
-                            continue
-                        end
-                    end
                     r = rel(i);
                     if ismissing(r) || r == ""
                         val{k} = "1x";
@@ -1917,14 +1890,7 @@ classdef Table < gwidgets.internal.Reparentable
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", ...
                         this.BridgeDiagEnabled);
                     this.sendReadyToBridge();
-
-                case "DragStarted"
-                    % First resize during a drag — reinitialise MATLAB's column
-                    % drag model with current pixel widths so all columns (including
-                    % Relative-type) are draggable.
-                    if isfield(d, "widths")
-                        this.initDragColumnWidths(d.widths);
-                    end
+                    this.sendColumnBoundsToBridge();
 
                 case "ColumnWidthChanged"
                     % Bridge fires on every ResizeObserver callback.
@@ -1947,48 +1913,27 @@ classdef Table < gwidgets.internal.Reparentable
                         this.sendRestoreToBridge();
                     end
 
-                case "ContainerWidened"
-                    % Table container grew — try reverting any pixel-pinned
-                    % Relative columns back to responsive mode.
-                    this.tryNaturalRelativeDisplay();
-
                 case "BridgeDiag"
                     fprintf("%s\n", d.msg);
 
             end
         end
 
-        function tryNaturalRelativeDisplay(this)
-            % Container widened — try reverting pixel-pinned Relative columns to
-            % their natural responsive widths.  The bridge will report the new
-            % pixel widths; if they still violate constraints, applyColumnWidthToDisplay
-            % (ApplyBounds=true, the default) will re-pin them.
-            this.applyColumnWidthToDisplay(ApplyBounds=false);
-        end
-
-        function initDragColumnWidths(this, bridgeWidths)
-            % DragStarted — reinitialise MATLAB's column drag model so that
-            % Relative-type columns (displayed as "Nx") become draggable.
-            % MATLAB's drag handler only tracks pixel-type columns; setting all
-            % columns to their current pixel values and then restoring the mixed
-            % display resets the internal model without changing the visual state.
-            %
-            % bridgeWidths: pixel widths of all visible columns from the DOM.
-            this.sendSuppressToBridge();
-            nVis = sum(this.ColumnVisible);
-            if numel(bridgeWidths) == nVis
-                % Use actual DOM widths — avoids NaN for Relative columns that
-                % have no stored pixel width yet.
-                this.DisplayTable.ColumnWidth = num2cell(bridgeWidths(:)');
-            else
-                this.DisplayTable.ColumnWidth = this.normalizeColumnWidths( ...
-                    this.PixelDataColumnWidths_);
-            end
-            this.forceRefresh();
-            visWidths = this.buildMixedWidthCell(this.ColumnVisible);
-            if isempty(visWidths), visWidths = {"Auto"}; end
-            this.DisplayTable.ColumnWidth = visWidths;
-            this.sendRestoreToBridge();
+        function sendColumnBoundsToBridge(this)
+            % Push per-column CSS min/max constraints to the bridge.
+            % The bridge applies them as style.minWidth/maxWidth on <th> elements,
+            % enforcing column size limits visually without touching DisplayTable.ColumnWidth
+            % or changing the stored DataColumnWidthTypes_ (columns stay Relative).
+            % Called inside the Suppress window so any layout-triggered ResizeObserver
+            % callbacks are silently dropped.
+            if isempty(this.ColumnWidthBridge_), return; end
+            nData = numel(this.DataColumnNames);
+            lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
+            hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
+            vis = this.ColumnVisible;
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetColumnBounds", ...
+                struct("minWidths", num2cell(lo(vis)), ...
+                       "maxWidths", num2cell(hi(vis))));
         end
 
         function onBridgeReattachNeeded(this)

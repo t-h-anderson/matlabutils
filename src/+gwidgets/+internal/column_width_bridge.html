@@ -8,35 +8,29 @@
   // ColumnWidthBridge — timer-free, MATLAB-driven
   //
   // MATLAB API (events sent TO the bridge):
-  //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
-  //   Ready                   — attach/re-attach ResizeObserver
-  //   Suppress                — stop ColumnWidthChanged from being sent to MATLAB
-  //   Restore                 — re-enable ColumnWidthChanged (leave existing observer)
-  //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
+  //   Init             {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
+  //   Ready                         — attach/re-attach ResizeObserver
+  //   Suppress                      — stop ColumnWidthChanged from being sent to MATLAB
+  //   Restore                       — re-enable ColumnWidthChanged (leave existing observer)
+  //   Diag             true|false   — enable/disable diagnostic messages to MATLAB
+  //   SetColumnBounds  {minWidths:[...], maxWidths:[...]}
+  //                    — apply CSS style.minWidth/maxWidth to <th> elements;
+  //                      arrays cover visible columns in order; NaN/Inf = no constraint
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
-  //   DragStarted             — {widths:[...]} sent from mousemove on first horizontal
-  //                             movement after mousedown on a <th>; MATLAB should
-  //                             reinitialise column widths so dragging works
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
-  //   ContainerWidened        — table container grew wider; MATLAB should try
-  //                             reverting pixel-pinned Relative columns
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
-  var COL_SELECTOR       = ".mw-table-header-column";
+  var COL_SELECTOR      = ".mw-table-header-column";
 
-  var resizeObserver        = null;
-  var containerObserver     = null;
-  var lastContainerWidth    = 0;
-  var tableTag              = null;
-  var htmlComponent         = null;
-  var isMoving              = false;
-  var dragStartReported     = false;
-  var headerMousedownTarget = null;   // <th> element clicked; null if not on a header
-  var callbackSuppressed    = false;
-  var diagEnabled           = false;
-  var diagQueue             = [];
+  var resizeObserver    = null;
+  var tableTag          = null;
+  var htmlComponent     = null;
+  var isMoving          = false;
+  var callbackSuppressed = false;
+  var diagEnabled       = false;
+  var diagQueue         = [];
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -80,35 +74,8 @@
   function setupMouseTracking() {
     try {
       var pd = window.parent.document;
-      pd.addEventListener("mousedown", function(e) {
-        isMoving = true;
-        dragStartReported = false;
-        // Track whether the click landed on (or inside) a column header <th>.
-        // A subsequent horizontal mousemove means a column-resize drag started.
-        headerMousedownTarget = (e.target && e.target.closest)
-            ? e.target.closest("th")
-            : null;
-      }, true);
-      pd.addEventListener("mousemove", function(e) {
-        // Fire DragStarted on the first horizontal movement after a mousedown
-        // on a column header.  MATLAB's drag handler does not commit DOM widths
-        // until mouseup, so the ResizeObserver won't fire during the drag;
-        // mousemove is therefore the only reliable drag-start signal.
-        if (!headerMousedownTarget || dragStartReported || callbackSuppressed) return;
-        if (Math.abs(e.movementX) > 2) {
-          headerMousedownTarget = null;   // only fire once per drag gesture
-          var cols = findColumns();
-          if (cols.length === 0) return;
-          var widths = colWidthsFromDOM(cols);
-          if (widths.every(function(w) { return w === 0; })) return;
-          dragStartReported = true;
-          bridgeLog("[Bridge] " + ts() + " DragStarted widths=[" + widths.join(",") + "]");
-          flushDiag();
-          htmlComponent.Data = { event: "DragStarted", widths: widths };
-        }
-      }, true);
+      pd.addEventListener("mousedown", function() { isMoving = true; }, true);
       pd.addEventListener("mouseup", function() {
-        headerMousedownTarget = null;
         // isMoving must be false before we call onResize so the settled
         // event carries moving=false.  ResizeObserver won't fire after
         // release (size stopped changing), so we send one explicit report.
@@ -136,30 +103,6 @@
     if (cols.length === 0) return;
     resizeObserver = new ResizeObserver(onResize);
     cols.forEach(function(col) { resizeObserver.observe(col); });
-
-    // Secondary observer: detect table container growth so MATLAB can revert
-    // pixel-pinned Relative columns back to responsive mode.  Column <th>
-    // elements don't resize when the container grows (they are pixel-pinned),
-    // so the primary observer would not fire — this fills that gap.
-    var parentDoc;
-    try { parentDoc = window.parent.document; } catch (e) { parentDoc = null; }
-    var tableEl = (parentDoc && tableTag)
-        ? parentDoc.querySelector('[data-tag="' + tableTag + '"]')
-        : null;
-    if (tableEl) {
-      if (containerObserver) containerObserver.disconnect();
-      lastContainerWidth = tableEl.getBoundingClientRect().width;
-      containerObserver = new ResizeObserver(function() {
-        var w = tableEl.getBoundingClientRect().width;
-        if (!callbackSuppressed && w > lastContainerWidth) {
-          bridgeLog("[Bridge] " + ts() + " ContainerWidened: " + w);
-          flushDiag();
-          htmlComponent.Data = { event: "ContainerWidened" };
-        }
-        lastContainerWidth = w;
-      });
-      containerObserver.observe(tableEl);
-    }
   }
 
   // ---- ResizeObserver callback ----
@@ -176,11 +119,6 @@
     bridgeLog("[Bridge] " + ts() + " resize: widths=[" + widths.join(",") + "]" +
               " moving=" + isMoving);
     flushDiag();
-    if (isMoving && !dragStartReported) {
-      dragStartReported = true;
-      htmlComponent.Data = { event: "DragStarted", widths: widths };
-      return;
-    }
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, moving: isMoving };
   }
 
@@ -214,6 +152,25 @@
       // Do NOT call attachObserver here.  The existing observer fires naturally
       // when MATLAB's DOM update arrives; at that point callbackSuppressed is
       // false and we send the correct ColumnWidthChanged.
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("SetColumnBounds", function(event) {
+      // Apply CSS min-width / max-width directly to <th> elements so the browser
+      // enforces column size constraints without going through DisplayTable.ColumnWidth.
+      // Columns remain "Relative" in MATLAB's internal model; CSS provides the floor/ceiling.
+      var mins = (event.Data && event.Data.minWidths) ? event.Data.minWidths : [];
+      var maxs = (event.Data && event.Data.maxWidths) ? event.Data.maxWidths : [];
+      var cols = findColumns();
+      bridgeLog("[Bridge] " + ts() + " SetColumnBounds: cols=" + cols.length);
+      cols.forEach(function(col, i) {
+        var mn = mins[i];
+        var mx = maxs[i];
+        col.style.minWidth = (typeof mn === "number" && isFinite(mn) && mn > 0)
+            ? mn + "px" : "";
+        col.style.maxWidth = (typeof mx === "number" && isFinite(mx))
+            ? mx + "px" : "";
+      });
       flushDiag();
     });
 

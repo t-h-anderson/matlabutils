@@ -411,21 +411,6 @@ classdef tColumnWidthBridge < test.WithExampleTables
             testCase.verifyEqual(t.PixelColumnWidths, [80, 80])
         end
 
-        function tRelativeDragBelowMinPinsToPixel(testCase)
-            % After drag below min, ColumnWidth should return the clamped pixel
-            % value (not the relative string) for the constrained column so that
-            % the table can scroll horizontally.
-            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
-            t.DataColumnMinWidth = [NaN, 100];
-            t.simulateBridgeDrag([200, 60]);  % col 2 dragged below min
-
-            % PixelColumnWidths reflects clamped value
-            testCase.verifyEqual(t.PixelColumnWidths(2), 100)
-            % DataColumnWidthTypes stays Relative (drag doesn't change type)
-            testCase.verifyEqual(t.DataColumnWidthTypes(2), "Relative")
-            % ColumnWidth uses ApplyBounds=true — pinned col returns pixel value
-            testCase.verifyEqual(t.ColumnWidth{2}, 100)
-        end
 
     end
 
