@@ -1918,6 +1918,14 @@ classdef Table < gwidgets.internal.Reparentable
                         this.BridgeDiagEnabled);
                     this.sendReadyToBridge();
 
+                case "DragStarted"
+                    % First resize during a drag — reinitialise MATLAB's column
+                    % drag model with current pixel widths so all columns (including
+                    % Relative-type) are draggable.
+                    if isfield(d, "widths")
+                        this.initDragColumnWidths(d.widths);
+                    end
+
                 case "ColumnWidthChanged"
                     % Bridge fires on every ResizeObserver callback.
                     % Ignore mid-drag (moving=true) events — only process the
@@ -1956,6 +1964,31 @@ classdef Table < gwidgets.internal.Reparentable
             % pixel widths; if they still violate constraints, applyColumnWidthToDisplay
             % (ApplyBounds=true, the default) will re-pin them.
             this.applyColumnWidthToDisplay(ApplyBounds=false);
+        end
+
+        function initDragColumnWidths(this, bridgeWidths)
+            % DragStarted — reinitialise MATLAB's column drag model so that
+            % Relative-type columns (displayed as "Nx") become draggable.
+            % MATLAB's drag handler only tracks pixel-type columns; setting all
+            % columns to their current pixel values and then restoring the mixed
+            % display resets the internal model without changing the visual state.
+            %
+            % bridgeWidths: pixel widths of all visible columns from the DOM.
+            this.sendSuppressToBridge();
+            nVis = sum(this.ColumnVisible);
+            if numel(bridgeWidths) == nVis
+                % Use actual DOM widths — avoids NaN for Relative columns that
+                % have no stored pixel width yet.
+                this.DisplayTable.ColumnWidth = num2cell(bridgeWidths(:)');
+            else
+                this.DisplayTable.ColumnWidth = this.normalizeColumnWidths( ...
+                    this.PixelDataColumnWidths_);
+            end
+            this.forceRefresh();
+            visWidths = this.buildMixedWidthCell(this.ColumnVisible);
+            if isempty(visWidths), visWidths = {"Auto"}; end
+            this.DisplayTable.ColumnWidth = visWidths;
+            this.sendRestoreToBridge();
         end
 
         function onBridgeReattachNeeded(this)

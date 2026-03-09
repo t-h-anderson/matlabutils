@@ -16,6 +16,8 @@
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
+  //   DragStarted             — {widths:[...]} first resize during a drag; MATLAB
+  //                             should reinitialise column widths so dragging works
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
   //   ContainerWidened        — table container grew wider; MATLAB should try
   //                             reverting pixel-pinned Relative columns
@@ -29,6 +31,7 @@
   var tableTag           = null;
   var htmlComponent      = null;
   var isMoving           = false;
+  var dragStartReported  = false;
   var callbackSuppressed = false;
   var diagEnabled        = false;
   var diagQueue          = [];
@@ -75,7 +78,7 @@
   function setupMouseTracking() {
     try {
       var pd = window.parent.document;
-      pd.addEventListener("mousedown", function() { isMoving = true; }, true);
+      pd.addEventListener("mousedown", function() { isMoving = true; dragStartReported = false; }, true);
       pd.addEventListener("mouseup", function() {
         // isMoving must be false before we call onResize so the settled
         // event carries moving=false.  ResizeObserver won't fire after
@@ -144,6 +147,11 @@
     bridgeLog("[Bridge] " + ts() + " resize: widths=[" + widths.join(",") + "]" +
               " moving=" + isMoving);
     flushDiag();
+    if (isMoving && !dragStartReported) {
+      dragStartReported = true;
+      htmlComponent.Data = { event: "DragStarted", widths: widths };
+      return;
+    }
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, moving: isMoving };
   }
 
