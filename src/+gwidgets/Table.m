@@ -1921,19 +1921,23 @@ classdef Table < gwidgets.internal.Reparentable
 
         function sendColumnBoundsToBridge(this)
             % Push per-column CSS min/max constraints to the bridge.
-            % The bridge applies them as style.minWidth/maxWidth on <th> elements,
-            % enforcing column size limits visually without touching DisplayTable.ColumnWidth
-            % or changing the stored DataColumnWidthTypes_ (columns stay Relative).
-            % Called inside the Suppress window so any layout-triggered ResizeObserver
-            % callbacks are silently dropped.
+            % The bridge injects a <style> into the parent document that applies
+            % CSS min-width/max-width to both <th> header elements and <td> body
+            % cells at each column position, covering virtual-scroll rows
+            % automatically without touching DisplayTable.ColumnWidth or changing
+            % the stored DataColumnWidthTypes_ (columns stay Relative).
             if isempty(this.ColumnWidthBridge_), return; end
             nData = numel(this.DataColumnNames);
             lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
             hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
             vis = this.ColumnVisible;
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetColumnBounds", ...
-                struct("minWidths", num2cell(lo(vis)), ...
-                       "maxWidths", num2cell(hi(vis))));
+            % Assign cell-array fields via dot-notation to avoid struct(field,cellarray)
+            % expanding the cell array into a struct array instead of a scalar struct
+            % with an array-valued field.  JSON serializes {v1,...} as [v1,...].
+            boundsData = struct();
+            boundsData.minWidths = num2cell(lo(vis));
+            boundsData.maxWidths = num2cell(hi(vis));
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetColumnBounds", boundsData);
         end
 
         function onBridgeReattachNeeded(this)
