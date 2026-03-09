@@ -1262,6 +1262,7 @@ classdef Table < gwidgets.internal.Reparentable
                     "MinColumnWidth must not exceed MaxColumnWidth.");
             end
             this.MinColumnWidth = val;
+            this.sendBoundsToBridge();
         end
 
         function set.MaxColumnWidth(this, val)
@@ -1274,6 +1275,7 @@ classdef Table < gwidgets.internal.Reparentable
                     "MaxColumnWidth must not be less than MinColumnWidth.");
             end
             this.MaxColumnWidth = val;
+            this.sendBoundsToBridge();
         end
 
     end
@@ -1859,6 +1861,7 @@ classdef Table < gwidgets.internal.Reparentable
                         struct("tableTag", this.DisplayTableTag_));
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", ...
                         this.BridgeDiagEnabled);
+                    this.sendBoundsToBridge();
                     this.sendReadyToBridge();
 
                 case "ColumnWidthChanged"
@@ -1900,6 +1903,21 @@ classdef Table < gwidgets.internal.Reparentable
             hi = this.MaxColumnWidth;
             finite = ~isnan(px);
             px(finite) = max(lo, min(hi, px(finite)));
+        end
+
+        function sendBoundsToBridge(this)
+            % Forward MinColumnWidth / MaxColumnWidth to the bridge as CSS
+            % constraints on the column <th> elements.  Fields are omitted
+            % when the limit is not in effect so that Inf is never serialised.
+            if isempty(this.ColumnWidthBridge_), return; end
+            bounds = struct();
+            if this.MinColumnWidth > 0
+                bounds.min = this.MinColumnWidth;
+            end
+            if isfinite(this.MaxColumnWidth)
+                bounds.max = this.MaxColumnWidth;
+            end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Bounds", bounds);
         end
 
         function sendSuppressToBridge(this)

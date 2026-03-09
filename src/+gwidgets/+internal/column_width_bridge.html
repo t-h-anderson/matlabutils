@@ -13,6 +13,7 @@
   //   Suppress                — stop ColumnWidthChanged from being sent to MATLAB
   //   Restore                 — re-enable ColumnWidthChanged (leave existing observer)
   //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
+  //   Bounds     {min?,max?}  — set CSS min/max-width on column headers (pixels)
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
@@ -28,6 +29,8 @@
   var callbackSuppressed = false;
   var diagEnabled        = false;
   var diagQueue          = [];
+  var minColWidth        = 0;
+  var maxColWidth        = Infinity;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -66,6 +69,18 @@
     return Array.from(parentDoc.querySelectorAll(COL_SELECTOR));
   }
 
+  // ---- Column width bounds (CSS min/max-width on <th> elements) ----
+
+  function applyBoundsToDOM() {
+    var cols = findColumns();
+    var minStr = minColWidth > 0 ? minColWidth + "px" : "";
+    var maxStr = isFinite(maxColWidth) ? maxColWidth + "px" : "";
+    cols.forEach(function(th) {
+      th.style.minWidth = minStr;
+      th.style.maxWidth = maxStr;
+    });
+  }
+
   // ---- Mouse tracking — drives the moving flag ----
 
   function setupMouseTracking() {
@@ -98,6 +113,7 @@
     bridgeLog("[Bridge] " + ts() + " attachObserver: found=" + cols.length +
               (cols.length ? " widths=[" + colWidthsFromDOM(cols).join(",") + "]" : ""));
     if (cols.length === 0) return;
+    applyBoundsToDOM();
     resizeObserver = new ResizeObserver(onResize);
     cols.forEach(function(col) { resizeObserver.observe(col); });
   }
@@ -149,12 +165,22 @@
       // Do NOT call attachObserver here.  The existing observer fires naturally
       // when MATLAB's DOM update arrives; at that point callbackSuppressed is
       // false and we send the correct ColumnWidthChanged.
+      applyBoundsToDOM();  // Re-apply in case MATLAB's re-render cleared the styles.
       flushDiag();
     });
 
     htmlComponent.addEventListener("Diag", function(event) {
       diagEnabled = !!(event.Data);
       console.log("[Bridge] " + ts() + " Diag: " + diagEnabled);
+    });
+
+    htmlComponent.addEventListener("Bounds", function(event) {
+      var d = event.Data;
+      minColWidth = (d && d.min) ? d.min : 0;
+      maxColWidth = (d && d.max) ? d.max : Infinity;
+      bridgeLog("[Bridge] " + ts() + " Bounds: min=" + minColWidth + " max=" + maxColWidth);
+      applyBoundsToDOM();
+      flushDiag();
     });
 
     htmlComponent.Data = { event: "BridgeReady" };
