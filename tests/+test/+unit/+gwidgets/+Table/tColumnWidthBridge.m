@@ -315,4 +315,76 @@ classdef tColumnWidthBridge < test.WithExampleTables
 
     end
 
+    % ------------------------------------------------------------------ %
+    %  MinColumnWidth / MaxColumnWidth constraints
+    % ------------------------------------------------------------------ %
+    methods (Test)
+
+        function tMinWidthClampsDragBelow(testCase)
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.MinColumnWidth = 80;
+            t.simulateBridgeDrag([50, 120]);
+
+            testCase.verifyEqual(t.PixelColumnWidths, [80, 120])
+        end
+
+        function tMaxWidthClampsDragAbove(testCase)
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.MaxColumnWidth = 200;
+            t.simulateBridgeDrag([150, 300]);
+
+            testCase.verifyEqual(t.PixelColumnWidths, [150, 200])
+        end
+
+        function tWidthInBoundsNotClamped(testCase)
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.MinColumnWidth = 50;
+            t.MaxColumnWidth = 300;
+            t.simulateBridgeDrag([100, 200]);
+
+            testCase.verifyEqual(t.PixelColumnWidths, [100, 200])
+        end
+
+        function tMinWidthClampsPixelSet(testCase)
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.MinColumnWidth = 100;
+            t.DataColumnWidth = {40, 200};
+
+            testCase.verifyEqual(t.PixelColumnWidths, [100, 200])
+        end
+
+        function tMaxWidthClampsPixelSet(testCase)
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.MaxColumnWidth = 150;
+            t.DataColumnWidth = {100, 400};
+
+            testCase.verifyEqual(t.PixelColumnWidths, [100, 150])
+        end
+
+        function tRelativeSetNotClamped(testCase)
+            % Relative ("Nx") widths have no pixel value — bounds don't apply
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.MinColumnWidth = 500;
+            t.DataColumnWidth = {"1x", "2x"};
+
+            testCase.verifyEqual(t.DataColumnWidthTypes, ["Relative", "Relative"])
+        end
+
+        function tMinExceedsMaxErrors(testCase)
+            t = gwidgets.Table(Data=testCase.stringData());
+            t.MaxColumnWidth = 200;
+
+            testCase.verifyError(@() set(t, "MinColumnWidth", 300), ...
+                "GraphicsWidgets:Table:InvalidMinColumnWidth");
+        end
+
+        function tNegativeMinErrors(testCase)
+            t = gwidgets.Table(Data=testCase.stringData());
+
+            testCase.verifyError(@() set(t, "MinColumnWidth", -10), ...
+                "GraphicsWidgets:Table:InvalidMinColumnWidth");
+        end
+
+    end
+
 end

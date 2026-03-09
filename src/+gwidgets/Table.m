@@ -92,6 +92,11 @@ classdef Table < gwidgets.internal.Reparentable
         DisplayDataChangedCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
     end
 
+    properties
+        MinColumnWidth (1,1) double = 0   % Minimum column pixel width; 0 = no limit
+        MaxColumnWidth (1,1) double = Inf % Maximum column pixel width; Inf = no limit
+    end
+
     methods
         function this = Table(namedArgs)
             arguments (Input)
@@ -1247,6 +1252,30 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
+        function set.MinColumnWidth(this, val)
+            if ~isnumeric(val) || ~isscalar(val) || val < 0 || isnan(val)
+                error("GraphicsWidgets:Table:InvalidMinColumnWidth", ...
+                    "MinColumnWidth must be a non-negative finite scalar.");
+            end
+            if val > this.MaxColumnWidth
+                error("GraphicsWidgets:Table:InvalidMinColumnWidth", ...
+                    "MinColumnWidth must not exceed MaxColumnWidth.");
+            end
+            this.MinColumnWidth = val;
+        end
+
+        function set.MaxColumnWidth(this, val)
+            if ~isnumeric(val) || ~isscalar(val) || val <= 0 || isnan(val)
+                error("GraphicsWidgets:Table:InvalidMaxColumnWidth", ...
+                    "MaxColumnWidth must be a positive scalar (use Inf for no limit).");
+            end
+            if val < this.MinColumnWidth
+                error("GraphicsWidgets:Table:InvalidMaxColumnWidth", ...
+                    "MaxColumnWidth must not be less than MinColumnWidth.");
+            end
+            this.MaxColumnWidth = val;
+        end
+
     end
 
     methods (Access = protected)
@@ -1570,6 +1599,7 @@ classdef Table < gwidgets.internal.Reparentable
                     i = maskIdxs(k);
                     v = val{k};
                     if isnumeric(v) && isscalar(v) && v > 0
+                        v        = this.applyWidthBounds(v);
                         types(i) = "Pixel";
                         px(i)    = v;
                         rel(i)   = string(missing);  % resolved by bridge later
@@ -1607,6 +1637,8 @@ classdef Table < gwidgets.internal.Reparentable
                 changed = false;
                 return
             end
+
+            pixelWidths = this.applyWidthBounds(pixelWidths);
 
             nData   = numel(this.DataColumnNames);
             visIdxs = find(this.ColumnVisible);
@@ -1859,6 +1891,15 @@ classdef Table < gwidgets.internal.Reparentable
         function onBridgeReattachNeeded(this)
             % Column count mismatch — tell bridge to re-attach to current DOM.
             this.sendReadyToBridge();
+        end
+
+        function px = applyWidthBounds(this, px)
+            % Clamp pixel widths to [MinColumnWidth, MaxColumnWidth].
+            % NaN entries (unresolved Relative columns) are left untouched.
+            lo = this.MinColumnWidth;
+            hi = this.MaxColumnWidth;
+            finite = ~isnan(px);
+            px(finite) = max(lo, min(hi, px(finite)));
         end
 
         function sendSuppressToBridge(this)
