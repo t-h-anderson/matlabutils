@@ -16,8 +16,9 @@
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
-  //   DragStarted             — {widths:[...]} first resize during a drag; MATLAB
-  //                             should reinitialise column widths so dragging works
+  //   DragStarted             — {widths:[...]} sent from mousemove on first horizontal
+  //                             movement after mousedown on a <th>; MATLAB should
+  //                             reinitialise column widths so dragging works
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
   //   ContainerWidened        — table container grew wider; MATLAB should try
   //                             reverting pixel-pinned Relative columns
@@ -25,16 +26,17 @@
 
   var COL_SELECTOR       = ".mw-table-header-column";
 
-  var resizeObserver     = null;
-  var containerObserver  = null;
-  var lastContainerWidth = 0;
-  var tableTag           = null;
-  var htmlComponent      = null;
-  var isMoving           = false;
-  var dragStartReported  = false;
-  var callbackSuppressed = false;
-  var diagEnabled        = false;
-  var diagQueue          = [];
+  var resizeObserver        = null;
+  var containerObserver     = null;
+  var lastContainerWidth    = 0;
+  var tableTag              = null;
+  var htmlComponent         = null;
+  var isMoving              = false;
+  var dragStartReported     = false;
+  var headerMousedownTarget = null;   // <th> element clicked; null if not on a header
+  var callbackSuppressed    = false;
+  var diagEnabled           = false;
+  var diagQueue             = [];
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -78,8 +80,35 @@
   function setupMouseTracking() {
     try {
       var pd = window.parent.document;
-      pd.addEventListener("mousedown", function() { isMoving = true; dragStartReported = false; }, true);
+      pd.addEventListener("mousedown", function(e) {
+        isMoving = true;
+        dragStartReported = false;
+        // Track whether the click landed on (or inside) a column header <th>.
+        // A subsequent horizontal mousemove means a column-resize drag started.
+        headerMousedownTarget = (e.target && e.target.closest)
+            ? e.target.closest("th")
+            : null;
+      }, true);
+      pd.addEventListener("mousemove", function(e) {
+        // Fire DragStarted on the first horizontal movement after a mousedown
+        // on a column header.  MATLAB's drag handler does not commit DOM widths
+        // until mouseup, so the ResizeObserver won't fire during the drag;
+        // mousemove is therefore the only reliable drag-start signal.
+        if (!headerMousedownTarget || dragStartReported || callbackSuppressed) return;
+        if (Math.abs(e.movementX) > 2) {
+          headerMousedownTarget = null;   // only fire once per drag gesture
+          var cols = findColumns();
+          if (cols.length === 0) return;
+          var widths = colWidthsFromDOM(cols);
+          if (widths.every(function(w) { return w === 0; })) return;
+          dragStartReported = true;
+          bridgeLog("[Bridge] " + ts() + " DragStarted widths=[" + widths.join(",") + "]");
+          flushDiag();
+          htmlComponent.Data = { event: "DragStarted", widths: widths };
+        }
+      }, true);
       pd.addEventListener("mouseup", function() {
+        headerMousedownTarget = null;
         // isMoving must be false before we call onResize so the settled
         // event carries moving=false.  ResizeObserver won't fire after
         // release (size stopped changing), so we send one explicit report.
