@@ -27,6 +27,10 @@ classdef Table < gwidgets.internal.Reparentable
         RelativeColumnWidths (1,:) string  % Relative weight per visible column
         ColumnWidthTypes    (1,:) string   % Width type per visible column: "Pixel" or "Relative"
 
+        % Per-column width constraints (NaN = no limit for that column)
+        DataColumnMinWidth (1,:) double  % Minimum pixel width per data column; NaN = no limit
+        DataColumnMaxWidth (1,:) double  % Maximum pixel width per data column; NaN = no limit
+
         Selection (:,:) double % Data selection. Either (:,2) for cell or (1,:) otherwise
         DisplaySelection (:,:) double % Display Selection. Either (:,2) for cell or (1,:) otherwise
 
@@ -71,6 +75,9 @@ classdef Table < gwidgets.internal.Reparentable
         RelativeDataColumnWidths_ (1,:) string  % "Nx" weights; missing for Pixel cols until bridge resolves
         DataColumnWidthTypes_     (1,:) string  % "Pixel" | "Relative" per column; empty = all Relative
 
+        ColumnMinWidths_ (1,:) double   % Per-column minimum pixel widths; NaN = no limit
+        ColumnMaxWidths_ (1,:) double   % Per-column maximum pixel widths; NaN = no limit
+
         DefaultColumnWidths_ (1,:) cell % Default column widths restored when ColumnWidth is reset to {}
 
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
@@ -90,11 +97,6 @@ classdef Table < gwidgets.internal.Reparentable
         CellDoubleClickCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
         CellEditCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
         DisplayDataChangedCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
-    end
-
-    properties
-        MinColumnWidth (1,1) double = 0   % Minimum column pixel width; 0 = no limit
-        MaxColumnWidth (1,1) double = Inf % Maximum column pixel width; Inf = no limit
     end
 
     methods
@@ -1252,28 +1254,50 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function set.MinColumnWidth(this, val)
-            if ~isnumeric(val) || ~isscalar(val) || val < 0 || isnan(val)
-                error("GraphicsWidgets:Table:InvalidMinColumnWidth", ...
-                    "MinColumnWidth must be a non-negative finite scalar.");
-            end
-            if val > this.MaxColumnWidth
-                error("GraphicsWidgets:Table:InvalidMinColumnWidth", ...
-                    "MinColumnWidth must not exceed MaxColumnWidth.");
-            end
-            this.MinColumnWidth = val;
+        function val = get.DataColumnMinWidth(this)
+            val = this.extendStore(this.ColumnMinWidths_, NaN, numel(this.DataColumnNames));
         end
 
-        function set.MaxColumnWidth(this, val)
-            if ~isnumeric(val) || ~isscalar(val) || val <= 0 || isnan(val)
-                error("GraphicsWidgets:Table:InvalidMaxColumnWidth", ...
-                    "MaxColumnWidth must be a positive scalar (use Inf for no limit).");
+        function set.DataColumnMinWidth(this, val)
+            nData = numel(this.DataColumnNames);
+            if isscalar(val), val = repelem(val, 1, nData); end
+            if ~isempty(val) && numel(val) ~= nData
+                error("GraphicsWidgets:Table:DataColumnMinWidthSize", ...
+                    "DataColumnMinWidth must be scalar, empty, or match the number of data columns.");
             end
-            if val < this.MinColumnWidth
-                error("GraphicsWidgets:Table:InvalidMaxColumnWidth", ...
-                    "MaxColumnWidth must not be less than MinColumnWidth.");
+            if any(val < 0 & ~isnan(val))
+                error("GraphicsWidgets:Table:InvalidMinColumnWidth", ...
+                    "DataColumnMinWidth values must be non-negative or NaN (no limit).");
             end
-            this.MaxColumnWidth = val;
+            hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
+            if any(~isnan(val) & ~isnan(hi) & val > hi)
+                error("GraphicsWidgets:Table:InvalidMinColumnWidth", ...
+                    "DataColumnMinWidth must not exceed DataColumnMaxWidth for any column.");
+            end
+            this.ColumnMinWidths_ = val;
+        end
+
+        function val = get.DataColumnMaxWidth(this)
+            val = this.extendStore(this.ColumnMaxWidths_, NaN, numel(this.DataColumnNames));
+        end
+
+        function set.DataColumnMaxWidth(this, val)
+            nData = numel(this.DataColumnNames);
+            if isscalar(val), val = repelem(val, 1, nData); end
+            if ~isempty(val) && numel(val) ~= nData
+                error("GraphicsWidgets:Table:DataColumnMaxWidthSize", ...
+                    "DataColumnMaxWidth must be scalar, empty, or match the number of data columns.");
+            end
+            if any(val <= 0 & ~isnan(val))
+                error("GraphicsWidgets:Table:InvalidMaxColumnWidth", ...
+                    "DataColumnMaxWidth values must be positive or NaN (no limit).");
+            end
+            lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
+            if any(~isnan(val) & ~isnan(lo) & val < lo)
+                error("GraphicsWidgets:Table:InvalidMaxColumnWidth", ...
+                    "DataColumnMaxWidth must not be less than DataColumnMinWidth for any column.");
+            end
+            this.ColumnMaxWidths_ = val;
         end
 
     end
@@ -1552,7 +1576,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         end
 
-        function applyColumnWidthToDisplay(this)
+        function applyColumnWidthToDisplay(this, options)
             % Push the current visible column widths to the display table.
             % Suppress is sent first (bridge also self-suppresses on mouseup),
             % so ResizeObserver echoes — including the snap-back that fires when
@@ -1560,8 +1584,14 @@ classdef Table < gwidgets.internal.Reparentable
             % Setting pixel widths first resets MATLAB's internal column-type
             % metadata (clearing drag-handler constraints), then forceRefresh
             % flushes that DOM update before the final relative widths are applied.
+            % ApplyBounds=false skips per-column constraints so Relative columns
+            % revert to their natural widths (used by tryNaturalRelativeDisplay).
+            arguments
+                this
+                options.ApplyBounds (1,1) logical = true
+            end
             this.sendSuppressToBridge();
-            visWidths = this.buildMixedWidthCell(this.ColumnVisible);
+            visWidths = this.buildMixedWidthCell(this.ColumnVisible, ApplyBounds=options.ApplyBounds);
             if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
                     visWidths = {"Auto"};
@@ -1599,7 +1629,7 @@ classdef Table < gwidgets.internal.Reparentable
                     i = maskIdxs(k);
                     v = val{k};
                     if isnumeric(v) && isscalar(v) && v > 0
-                        v        = this.applyWidthBounds(v);
+                        v        = this.applyWidthBounds(v, i);
                         types(i) = "Pixel";
                         px(i)    = v;
                         rel(i)   = string(missing);  % resolved by bridge later
@@ -1638,7 +1668,7 @@ classdef Table < gwidgets.internal.Reparentable
                 return
             end
 
-            pixelWidths = this.applyWidthBounds(pixelWidths);
+            pixelWidths = this.applyWidthBounds(pixelWidths, find(this.ColumnVisible));
 
             nData   = numel(this.DataColumnNames);
             visIdxs = find(this.ColumnVisible);
@@ -1664,10 +1694,23 @@ classdef Table < gwidgets.internal.Reparentable
             this.RelativeDataColumnWidths_ = rel;
         end
 
-        function val = buildMixedWidthCell(this, mask)
+        function val = buildMixedWidthCell(this, mask, options)
             % Build a cell array of column widths for the columns given by mask.
             % "Pixel" columns → numeric pixel value.
-            % "Relative" columns → "Nx" string (or "1x" if not yet resolved).
+            % "Relative" columns → "Nx" string, unless ApplyBounds=true and the
+            % resolved pixel width is at or outside a per-column constraint — in
+            % that case the clamped pixel value is returned so the table scrolls.
+            %
+            % The "at or outside" test (px <= min OR px >= max) rather than a
+            % simple "clamped != px" comparison is intentional: after clamping,
+            % the stored pixel value equals the minimum, so a strict inequality
+            % would miss the pinned state and display the column as relative again,
+            % letting the browser render it below the minimum (infinite loop).
+            arguments
+                this
+                mask
+                options.ApplyBounds (1,1) logical = true
+            end
             nData   = numel(this.DataColumnNames);
             nResult = sum(mask);
             if nResult == 0
@@ -1677,6 +1720,10 @@ classdef Table < gwidgets.internal.Reparentable
             types = this.extendStore(this.DataColumnWidthTypes_, "Relative", nData);
             px    = this.extendStore(this.PixelDataColumnWidths_, NaN,       nData);
             rel   = this.extendStore(this.RelativeDataColumnWidths_, "1x",   nData);
+            if options.ApplyBounds
+                lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
+                hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
+            end
             maskIdxs = find(mask);
             val = cell(1, nResult);
             for k = 1:nResult
@@ -1684,6 +1731,16 @@ classdef Table < gwidgets.internal.Reparentable
                 if types(i) == "Pixel"
                     val{k} = px(i);
                 else
+                    % Relative column.  Pin to pixel when the resolved width is
+                    % at or outside a finite constraint (enables horizontal scroll).
+                    if options.ApplyBounds && ~isnan(px(i))
+                        loK = lo(i); if isnan(loK), loK = 0;   end
+                        hiK = hi(i); if isnan(hiK), hiK = Inf; end
+                        if (loK > 0 && px(i) <= loK) || (isfinite(hiK) && px(i) >= hiK)
+                            val{k} = max(loK, min(hiK, px(i)));
+                            continue
+                        end
+                    end
                     r = rel(i);
                     if ismissing(r) || r == ""
                         val{k} = "1x";
@@ -1882,10 +1939,23 @@ classdef Table < gwidgets.internal.Reparentable
                         this.sendRestoreToBridge();
                     end
 
+                case "ContainerWidened"
+                    % Table container grew — try reverting any pixel-pinned
+                    % Relative columns back to responsive mode.
+                    this.tryNaturalRelativeDisplay();
+
                 case "BridgeDiag"
                     fprintf("%s\n", d.msg);
 
             end
+        end
+
+        function tryNaturalRelativeDisplay(this)
+            % Container widened — try reverting pixel-pinned Relative columns to
+            % their natural responsive widths.  The bridge will report the new
+            % pixel widths; if they still violate constraints, applyColumnWidthToDisplay
+            % (ApplyBounds=true, the default) will re-pin them.
+            this.applyColumnWidthToDisplay(ApplyBounds=false);
         end
 
         function onBridgeReattachNeeded(this)
@@ -1893,13 +1963,19 @@ classdef Table < gwidgets.internal.Reparentable
             this.sendReadyToBridge();
         end
 
-        function px = applyWidthBounds(this, px)
-            % Clamp pixel widths to [MinColumnWidth, MaxColumnWidth].
-            % NaN entries (unresolved Relative columns) are left untouched.
-            lo = this.MinColumnWidth;
-            hi = this.MaxColumnWidth;
-            finite = ~isnan(px);
-            px(finite) = max(lo, min(hi, px(finite)));
+        function px = applyWidthBounds(this, px, colIdxs)
+            % Clamp pixel widths to per-column [DataColumnMinWidth, DataColumnMaxWidth].
+            % px      — pixel width(s), NaN entries left untouched.
+            % colIdxs — index/indices into DataColumnNames for each element of px.
+            nData = numel(this.DataColumnNames);
+            lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
+            hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
+            for k = 1:numel(px)
+                if isnan(px(k)), continue; end
+                loK = lo(colIdxs(k)); if isnan(loK), loK = 0;   end
+                hiK = hi(colIdxs(k)); if isnan(hiK), hiK = Inf; end
+                px(k) = max(loK, min(hiK, px(k)));
+            end
         end
 
         function sendSuppressToBridge(this)

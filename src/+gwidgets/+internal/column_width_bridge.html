@@ -17,11 +17,15 @@
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
+  //   ContainerWidened        — table container grew wider; MATLAB should try
+  //                             reverting pixel-pinned Relative columns
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
   var COL_SELECTOR       = ".mw-table-header-column";
 
   var resizeObserver     = null;
+  var containerObserver  = null;
+  var lastContainerWidth = 0;
   var tableTag           = null;
   var htmlComponent      = null;
   var isMoving           = false;
@@ -100,6 +104,30 @@
     if (cols.length === 0) return;
     resizeObserver = new ResizeObserver(onResize);
     cols.forEach(function(col) { resizeObserver.observe(col); });
+
+    // Secondary observer: detect table container growth so MATLAB can revert
+    // pixel-pinned Relative columns back to responsive mode.  Column <th>
+    // elements don't resize when the container grows (they are pixel-pinned),
+    // so the primary observer would not fire — this fills that gap.
+    var parentDoc;
+    try { parentDoc = window.parent.document; } catch (e) { parentDoc = null; }
+    var tableEl = (parentDoc && tableTag)
+        ? parentDoc.querySelector('[data-tag="' + tableTag + '"]')
+        : null;
+    if (tableEl) {
+      if (containerObserver) containerObserver.disconnect();
+      lastContainerWidth = tableEl.getBoundingClientRect().width;
+      containerObserver = new ResizeObserver(function() {
+        var w = tableEl.getBoundingClientRect().width;
+        if (!callbackSuppressed && w > lastContainerWidth) {
+          bridgeLog("[Bridge] " + ts() + " ContainerWidened: " + w);
+          flushDiag();
+          htmlComponent.Data = { event: "ContainerWidened" };
+        }
+        lastContainerWidth = w;
+      });
+      containerObserver.observe(tableEl);
+    }
   }
 
   // ---- ResizeObserver callback ----
