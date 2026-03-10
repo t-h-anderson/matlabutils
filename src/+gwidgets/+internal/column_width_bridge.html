@@ -14,10 +14,10 @@
   //   Restore                       — re-enable ColumnWidthChanged (leave existing observer)
   //   Diag             true|false   — enable/disable diagnostic messages to MATLAB
   //   SetColumnBounds  {minWidths:[...], maxWidths:[...]}
-  //                    — inject a <style> into the parent document that applies
-  //                      CSS min-width/max-width to both <th> header elements and
-  //                      <td> body cells at each column position; covers virtual-
-  //                      scroll rows automatically; NaN/Inf = no constraint
+  //                    — stamp inline min-width/max-width !important directly on each
+  //                      <th> header element and all currently-visible <td> body cells;
+  //                      a MutationObserver re-stamps any new rows added by virtual
+  //                      scroll; NaN/null = no constraint for that column
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
@@ -33,6 +33,11 @@
   var callbackSuppressed = false;
   var diagEnabled       = false;
   var diagQueue         = [];
+
+  // ---- Column-bounds state (populated by SetColumnBounds) ----
+  // boundsMap: cellIndex (number) -> {hasMin, mn, hasMax, mx}
+  var boundsMap     = {};
+  var boundsObserver = null;   // MutationObserver watching for new virtual-scroll rows
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -69,6 +74,65 @@
       }
     }
     return Array.from(parentDoc.querySelectorAll(COL_SELECTOR));
+  }
+
+  function findTableEl() {
+    try {
+      var parentDoc = window.parent.document;
+      return tableTag ? parentDoc.querySelector('[data-tag="' + tableTag + '"]') : null;
+    } catch (e) { return null; }
+  }
+
+  // ---- Inline-style bounds stamping ----
+
+  function applyBoundsToCell(el) {
+    // el must have a numeric cellIndex property (HTMLTableCellElement <th> or <td>).
+    var ci = el.cellIndex;
+    if (typeof ci !== "number") return;
+    var b = boundsMap[ci];
+    if (!b) return;
+    if (b.hasMin) {
+      el.style.setProperty("min-width", b.mn + "px", "important");
+    } else {
+      el.style.removeProperty("min-width");
+    }
+    if (b.hasMax) {
+      el.style.setProperty("max-width", b.mx + "px", "important");
+    } else {
+      el.style.removeProperty("max-width");
+    }
+  }
+
+  function stampAllVisible(tableEl, cols) {
+    // Stamp header <th> elements.
+    cols.forEach(applyBoundsToCell);
+    // Stamp all currently-rendered body <td> elements.
+    if (tableEl) {
+      Array.from(tableEl.querySelectorAll("td")).forEach(applyBoundsToCell);
+    }
+  }
+
+  function teardownBoundsObserver() {
+    if (boundsObserver) { boundsObserver.disconnect(); boundsObserver = null; }
+  }
+
+  function setupBoundsObserver(tableEl) {
+    teardownBoundsObserver();
+    if (!tableEl) return;
+    // Watch for rows added by virtual scroll and stamp their cells immediately.
+    boundsObserver = new MutationObserver(function(mutations) {
+      mutations.forEach(function(m) {
+        m.addedNodes.forEach(function(node) {
+          if (node.nodeType !== 1) return;
+          // node might be a <tr> directly or a container holding <tr> elements.
+          var tds = (node.tagName === "TR")
+            ? Array.from(node.cells || [])
+            : Array.from(node.querySelectorAll ? node.querySelectorAll("tr > td") : []);
+          tds.forEach(applyBoundsToCell);
+        });
+      });
+    });
+    boundsObserver.observe(tableEl, { childList: true, subtree: true });
   }
 
   // ---- Mouse tracking — drives the moving flag ----
@@ -139,6 +203,14 @@
     htmlComponent.addEventListener("Ready", function() {
       bridgeLog("[Bridge] " + ts() + " Ready");
       attachObserver();
+      // Re-apply any bounds that were set before or during the last Ready cycle.
+      var cols = findColumns();
+      var tableEl = findTableEl();
+      if (Object.keys(boundsMap).length > 0) {
+        stampAllVisible(tableEl, cols);
+        setupBoundsObserver(tableEl);
+        bridgeLog("[Bridge] " + ts() + " Ready: re-stamped bounds on " + cols.length + " header cols");
+      }
       flushDiag();
     });
 
@@ -158,74 +230,57 @@
     });
 
     htmlComponent.addEventListener("SetColumnBounds", function(event) {
-      // Inject a <style> element into the parent document head with rules that
-      // target both header <th> and body <td> cells at each column position.
-      // Using a stylesheet (rather than stamping individual elements) means:
-      //   • body cells are covered without needing a separate selector pass
-      //   • virtual-scroll rows rendered after this call automatically inherit
-      //     the rules — no re-stamping needed on new rows
-      // Columns remain "Relative" in MATLAB's internal model; CSS min/max
-      // provides the floor/ceiling without touching DisplayTable.ColumnWidth.
+      // Stamp inline min-width/max-width !important directly on each <th> and
+      // currently-visible <td>.  Using element.style.setProperty with priority
+      // "important" is the highest-specificity override available — it beats any
+      // stylesheet rule, including MATLAB's own, without cross-iframe or shadow-DOM
+      // restrictions (we have direct JS references to the elements from findColumns).
+      // A MutationObserver re-stamps new rows added by virtual scroll automatically.
       var mins = (event.Data && Array.isArray(event.Data.minWidths)) ? event.Data.minWidths : [];
       var maxs = (event.Data && Array.isArray(event.Data.maxWidths)) ? event.Data.maxWidths : [];
 
       bridgeLog("[Bridge] " + ts() + " SetColumnBounds.data: mins=[" + mins.join(",") + "] maxs=[" + maxs.join(",") + "]");
 
-      var parentDoc;
-      try { parentDoc = window.parent.document; } catch (e) {
-        bridgeLog("[Bridge] " + ts() + " SetColumnBounds: cannot access parent document: " + e);
-        flushDiag(); return;
-      }
-
       var cols = findColumns();
+      var tableEl = findTableEl();
+
       bridgeLog("[Bridge] " + ts() + " SetColumnBounds: cols=" + cols.length +
                 (cols.length ? " cellIndexes=[" + cols.map(function(c) { return c.cellIndex; }).join(",") + "]" : ""));
 
-      // Build one CSS rule per constrained column, scoped to this table's
-      // data-tag so multiple tables in the same figure don't interfere.
-      // nth-child is derived from HTMLTableCellElement.cellIndex (0-based) to
-      // correctly handle any leading non-data columns (e.g. row-selector).
-      // !important overrides any inline style="width:..." that MATLAB stamps.
-      var scope = tableTag ? '[data-tag="' + tableTag + '"] ' : '';
-      var rules = [];
+      // Rebuild boundsMap from the new constraints.
+      boundsMap = {};
+      var nConstrained = 0;
       cols.forEach(function(col, i) {
         var mn = mins[i];
         var mx = maxs[i];
         var hasMin = typeof mn === "number" && isFinite(mn) && mn > 0;
         var hasMax = typeof mx === "number" && isFinite(mx) && mx > 0;
-        if (!hasMin && !hasMax) return;
-        var nth = (typeof col.cellIndex === "number") ? col.cellIndex + 1 : i + 1;
-        var sel = scope + "th:nth-child(" + nth + "), " +
-                  scope + "td:nth-child(" + nth + ")";
-        var decls = [];
-        if (hasMin) decls.push("min-width: " + mn + "px !important");
-        if (hasMax) decls.push("max-width: " + mx + "px !important");
-        rules.push(sel + " { " + decls.join("; ") + " }");
+        // Always store an entry (even unconstrained) so applyBoundsToCell can
+        // remove stale inline styles when a constraint is cleared.
+        if (hasMin || hasMax) {
+          boundsMap[col.cellIndex] = { hasMin: hasMin, mn: mn, hasMax: hasMax, mx: mx };
+          nConstrained++;
+        }
       });
 
-      bridgeLog("[Bridge] " + ts() + " SetColumnBounds: " + rules.length + " rules generated");
-      if (rules.length > 0) {
-        bridgeLog("[Bridge] " + ts() + " SetColumnBounds.css:\n" + rules.join("\n"));
+      bridgeLog("[Bridge] " + ts() + " SetColumnBounds: " + nConstrained + " constrained cols");
+
+      // Stamp all currently-visible cells and set up virtual-scroll observer.
+      stampAllVisible(tableEl, cols);
+      if (nConstrained > 0) {
+        setupBoundsObserver(tableEl);
+      } else {
+        teardownBoundsObserver();
       }
 
-      // Replace or remove the per-table bounds stylesheet.
-      var styleId = "mw-bridge-col-bounds" + (tableTag ? "-" + tableTag : "");
-      var styleEl = parentDoc.getElementById(styleId);
-      if (rules.length > 0) {
-        if (!styleEl) {
-          styleEl = parentDoc.createElement("style");
-          styleEl.id = styleId;
-          parentDoc.head.appendChild(styleEl);
-          bridgeLog("[Bridge] " + ts() + " SetColumnBounds: created <style id=" + styleId + ">");
-        } else {
-          bridgeLog("[Bridge] " + ts() + " SetColumnBounds: updated <style id=" + styleId + ">");
-        }
-        styleEl.textContent = rules.join("\n");
-      } else if (styleEl) {
-        styleEl.remove();
-        bridgeLog("[Bridge] " + ts() + " SetColumnBounds: removed <style> (no active constraints)");
-      } else {
-        bridgeLog("[Bridge] " + ts() + " SetColumnBounds: no constraints, no <style> to remove");
+      // Verify: read back computed min-width on first constrained header.
+      if (diagEnabled && cols.length > 0) {
+        try {
+          var sample = cols[0];
+          var computed = window.parent.getComputedStyle(sample).minWidth;
+          bridgeLog("[Bridge] " + ts() + " SetColumnBounds: col[0] computed min-width=" + computed +
+                    " inline=" + sample.style.minWidth);
+        } catch(e) {}
       }
 
       flushDiag();
