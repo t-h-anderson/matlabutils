@@ -166,35 +166,47 @@
       //     the rules — no re-stamping needed on new rows
       // Columns remain "Relative" in MATLAB's internal model; CSS min/max
       // provides the floor/ceiling without touching DisplayTable.ColumnWidth.
-      var mins = (event.Data && event.Data.minWidths) ? event.Data.minWidths : [];
-      var maxs = (event.Data && event.Data.maxWidths) ? event.Data.maxWidths : [];
+      var mins = (event.Data && Array.isArray(event.Data.minWidths)) ? event.Data.minWidths : [];
+      var maxs = (event.Data && Array.isArray(event.Data.maxWidths)) ? event.Data.maxWidths : [];
+
+      bridgeLog("[Bridge] " + ts() + " SetColumnBounds.data: mins=[" + mins.join(",") + "] maxs=[" + maxs.join(",") + "]");
 
       var parentDoc;
-      try { parentDoc = window.parent.document; } catch (e) { return; }
+      try { parentDoc = window.parent.document; } catch (e) {
+        bridgeLog("[Bridge] " + ts() + " SetColumnBounds: cannot access parent document: " + e);
+        flushDiag(); return;
+      }
 
       var cols = findColumns();
-      bridgeLog("[Bridge] " + ts() + " SetColumnBounds: cols=" + cols.length);
+      bridgeLog("[Bridge] " + ts() + " SetColumnBounds: cols=" + cols.length +
+                (cols.length ? " cellIndexes=[" + cols.map(function(c) { return c.cellIndex; }).join(",") + "]" : ""));
 
       // Build one CSS rule per constrained column, scoped to this table's
       // data-tag so multiple tables in the same figure don't interfere.
       // nth-child is derived from HTMLTableCellElement.cellIndex (0-based) to
       // correctly handle any leading non-data columns (e.g. row-selector).
+      // !important overrides any inline style="width:..." that MATLAB stamps.
       var scope = tableTag ? '[data-tag="' + tableTag + '"] ' : '';
       var rules = [];
       cols.forEach(function(col, i) {
         var mn = mins[i];
         var mx = maxs[i];
         var hasMin = typeof mn === "number" && isFinite(mn) && mn > 0;
-        var hasMax = typeof mx === "number" && isFinite(mx);
+        var hasMax = typeof mx === "number" && isFinite(mx) && mx > 0;
         if (!hasMin && !hasMax) return;
         var nth = (typeof col.cellIndex === "number") ? col.cellIndex + 1 : i + 1;
         var sel = scope + "th:nth-child(" + nth + "), " +
                   scope + "td:nth-child(" + nth + ")";
         var decls = [];
-        if (hasMin) decls.push("min-width: " + mn + "px");
-        if (hasMax) decls.push("max-width: " + mx + "px");
+        if (hasMin) decls.push("min-width: " + mn + "px !important");
+        if (hasMax) decls.push("max-width: " + mx + "px !important");
         rules.push(sel + " { " + decls.join("; ") + " }");
       });
+
+      bridgeLog("[Bridge] " + ts() + " SetColumnBounds: " + rules.length + " rules generated");
+      if (rules.length > 0) {
+        bridgeLog("[Bridge] " + ts() + " SetColumnBounds.css:\n" + rules.join("\n"));
+      }
 
       // Replace or remove the per-table bounds stylesheet.
       var styleId = "mw-bridge-col-bounds" + (tableTag ? "-" + tableTag : "");
@@ -204,10 +216,16 @@
           styleEl = parentDoc.createElement("style");
           styleEl.id = styleId;
           parentDoc.head.appendChild(styleEl);
+          bridgeLog("[Bridge] " + ts() + " SetColumnBounds: created <style id=" + styleId + ">");
+        } else {
+          bridgeLog("[Bridge] " + ts() + " SetColumnBounds: updated <style id=" + styleId + ">");
         }
         styleEl.textContent = rules.join("\n");
       } else if (styleEl) {
         styleEl.remove();
+        bridgeLog("[Bridge] " + ts() + " SetColumnBounds: removed <style> (no active constraints)");
+      } else {
+        bridgeLog("[Bridge] " + ts() + " SetColumnBounds: no constraints, no <style> to remove");
       }
 
       flushDiag();
