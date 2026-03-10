@@ -22,8 +22,9 @@
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
-  //   ColumnWidthChanged      — {widths:[...], moving:bool}
-  //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
+  //   ColumnWidthChanged      — {widths:[...], moving:bool, drag:bool}
+  //                             drag=true  → user column drag; drag=false → whole-table resize
+  //   BridgeDiag              — {msg:"..."} diagnostic log (flushed on commit, not mid-drag)
 
   var COL_SELECTOR       = ".mw-table-header-column";
 
@@ -34,8 +35,9 @@
   var pendingSetTypes    = null;   // deferred colAutoFlags; applied when DOM settles
   var isMoving           = false;
   var callbackSuppressed = false;
-  var diagEnabled        = true;
+  var diagEnabled        = false;
   var diagQueue          = [];
+  var prevWidths         = null;   // pixel widths at last published event; null = unknown
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -51,6 +53,25 @@
     if (!diagEnabled || diagQueue.length === 0 || !htmlComponent) return;
     htmlComponent.Data = { event: "BridgeDiag", msg: diagQueue.join("\n") };
     diagQueue = [];
+  }
+
+  // ---- Drag-vs-resize classification ----
+
+  function classifyResize(prev, curr, autoFlags) {
+    // Returns true = user column drag, false = whole-table / window resize.
+    // Conservative: if no baseline exists, treat as drag so MATLAB processes it.
+    if (!prev || prev.length !== curr.length) return true;
+    var grew = false, shrank = false, changed = 0, changedIdx = -1;
+    for (var i = 0; i < curr.length; i++) {
+      if (Math.abs(curr[i] - prev[i]) > 1) {   // 1 px rounding tolerance
+        changed++;
+        changedIdx = i;
+        if (curr[i] > prev[i]) grew = true; else shrank = true;
+      }
+    }
+    var hasOpposing     = grew && shrank;
+    var singlePixelDrag = (changed === 1) && autoFlags && !autoFlags[changedIdx];
+    return hasOpposing || singlePixelDrag;
   }
 
   // ---- DOM helpers ----
@@ -102,6 +123,7 @@
 
   function attachObserver() {
     if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+    prevWidths = null;   // reset baseline so first observation is treated conservatively
     var cols = findColumns();
     bridgeLog("[Bridge] " + ts() + " attachObserver: found=" + cols.length +
               (cols.length ? " widths=[" + colWidthsFromDOM(cols).join(",") + "]" : ""));
@@ -154,10 +176,17 @@
     var widths = colWidthsFromDOM(cols);
     if (widths.every(function(w) { return w === 0; })) return;
 
+    var isDrag = classifyResize(prevWidths, widths, colAutoFlags);
     bridgeLog("[Bridge] " + ts() + " resize: widths=[" + widths.join(",") + "]" +
-              " moving=" + isMoving);
-    flushDiag();
-    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, moving: isMoving };
+              " moving=" + isMoving + " isDrag=" + isDrag);
+
+    if (!isMoving) {
+      // Values are being committed to MATLAB — update baseline and flush diagnostics.
+      prevWidths = widths.slice();
+      flushDiag();
+    }
+    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths,
+                           moving: isMoving, drag: isDrag };
   }
 
   // ---- Event wiring ----

@@ -264,6 +264,13 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
+        function set.ColumnWidthBridgeDiagnostics(this, val)
+            this.ColumnWidthBridgeDiagnostics = val;
+            if ~isempty(this.ColumnWidthBridge_)
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", val);
+            end
+        end
+
         % ---- New width-detail getters (read-only, derived from backing stores) ----
 
         function val = get.PixelDataColumnWidths(this)
@@ -1003,6 +1010,7 @@ classdef Table < gwidgets.internal.Reparentable
 
     properties (Hidden)
         VisibleGroupHeaderRowIdx (1,:) double % (1,nVisGroups) Indices of header rows
+        ColumnWidthBridgeDiagnostics (1,1) logical = false % Enable JS bridge diagnostic output to command window
     end
 
     properties (Access = private)
@@ -1821,6 +1829,8 @@ classdef Table < gwidgets.internal.Reparentable
                     % attaches its ResizeObserver to the (already-rendered) table.
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
+                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", ...
+                        this.ColumnWidthBridgeDiagnostics);
                     this.sendReadyToBridge();
 
                 case "ColumnWidthChanged"
@@ -1830,15 +1840,19 @@ classdef Table < gwidgets.internal.Reparentable
                     if isfield(d, "moving") && d.moving
                         return
                     end
-                    % If the incoming widths match PixelDataColumnWidths_ (within
-                    % 1 px browser-rounding tolerance) the event was caused by
-                    % MATLAB's own CSS settling — ignore it to avoid a loop.
-                    % Otherwise it is a genuine user-initiated change; update
-                    % stores and re-apply so the display reflects the new state.
+                    % drag=true  → user column drag   → update stores + re-apply CSS.
+                    % drag=false → whole-table resize → update stores only; don't
+                    %              fight the browser's proportional reflow.
+                    % Absent drag field → treat as drag (backward compatibility).
+                    isDrag = ~isfield(d, "drag") || d.drag;
                     if this.didBridgeWidthsChange(d.widths)
                         this.updateStoresFromBridgeWidths(d.widths);
-                        this.applyColumnWidthToDisplay();
-                    else
+                        if isDrag
+                            this.applyColumnWidthToDisplay();
+                        end
+                        % Resize path: stores updated, no CSS re-apply needed —
+                        % the browser already shows the correct layout.
+                    elseif isDrag
                         % Drag produced no net width change, but the bridge
                         % self-suppressed on mouseup.  Un-suppress without
                         % re-attaching the observer — Restore would call
@@ -1846,6 +1860,7 @@ classdef Table < gwidgets.internal.Reparentable
                         % and creates an infinite loop.
                         this.sendUnsuppressToBridge();
                     end
+                    % Resize with no change: nothing to do.
 
                 case "BridgeDiag"
                     fprintf("%s\n", d.msg);
