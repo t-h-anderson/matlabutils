@@ -82,9 +82,6 @@ classdef Table < gwidgets.internal.Reparentable
         % Flag to prevent selection callback recursion
         IsSettingSelectionProgrammatically (1,1) logical = false
 
-        % Flag to prevent bridge ColumnWidthChanged callbacks from
-        % interfering during a programmatic column-width update.
-        IsApplyingColumnWidths_ (1,1) logical = false
     end
 
     % Custom table callbacks
@@ -1532,8 +1529,8 @@ classdef Table < gwidgets.internal.Reparentable
 
             % The Auto flush resets MATLAB's internal column-type metadata so
             % relative weights are correctly re-applied after each drag.
-            % drawnow flushes both ColumnWidth DOM updates before SetTypes/Restore
-            % are queued.  This ensures attachObserver (called from Restore) sees
+            % drawnow flushes both ColumnWidth DOM updates before Restore
+            % is queued.  This ensures attachObserver (called from Restore) sees
             % the settled DOM rather than the stale snap-back widths.  drawnow is
             % safe here because the bridge self-suppresses on mouseup, so the
             % snap-back never reaches MATLAB's DataChangedFcn queue.
@@ -1855,11 +1852,8 @@ classdef Table < gwidgets.internal.Reparentable
                         this.applyColumnWidthToDisplay();
                     else
                         % Drag produced no net width change, but the bridge
-                        % self-suppressed on mouseup.  Un-suppress without
-                        % re-attaching the observer — Restore would call
-                        % attachObserver, which fires ResizeObserver immediately
-                        % and creates an infinite loop.
-                        this.sendUnsuppressToBridge();
+                        % self-suppressed on mouseup.  Re-enable callbacks.
+                        this.sendRestoreToBridge();
                     end
 
                 case "BridgeDiag"
@@ -1882,21 +1876,11 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function sendRestoreToBridge(this)
-            % Tell the bridge to re-enable reporting, re-attach its observer,
-            % and poll the current DOM widths.  Queue this after SetTypes so
-            % drag-handler constraints are cleared before the poll fires.
+            % Tell the bridge to re-enable reporting and re-enable
+            % ColumnWidthChanged callbacks.
 
             if isempty(this.ColumnWidthBridge_), return; end
             sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
-        end
-
-        function sendUnsuppressToBridge(this)
-            % Re-enable ColumnWidthChanged reporting without re-attaching the
-            % ResizeObserver.  Used for the no-change ColumnWidthChanged path:
-            % Restore would call attachObserver which fires ResizeObserver
-            % immediately and creates an infinite loop.
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Unsuppress", []);
         end
 
         function sendReadyToBridge(this)
