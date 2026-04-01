@@ -34,6 +34,9 @@
   var diagEnabled       = false;
   var diagQueue         = [];
 
+  // ---- Gesture tracking (prevents jitter on plain cell clicks) ----
+  var widthsAtMouseDown = null;   // snapshot of column widths at mousedown
+
   // ---- Column-bounds state (populated by SetColumnBounds) ----
   // boundsMap: cellIndex (number) -> {hasMin, mn, hasMax, mx}
   var boundsMap     = {};
@@ -140,20 +143,50 @@
   function setupMouseTracking() {
     try {
       var pd = window.parent.document;
-      pd.addEventListener("mousedown", function() { isMoving = true; }, true);
+      pd.addEventListener("mousedown", function() {
+        isMoving = true;
+        // Snapshot column widths so we can detect whether a real column
+        // resize occurred during this gesture (vs. a plain cell click).
+        var cols = findColumns();
+        widthsAtMouseDown = cols.length > 0 ? colWidthsFromDOM(cols) : null;
+      }, true);
       pd.addEventListener("mouseup", function() {
         // isMoving must be false before we call onResize so the settled
         // event carries moving=false.  ResizeObserver won't fire after
         // release (size stopped changing), so we send one explicit report.
         isMoving = false;
-        onResize();
-        // Self-suppress: block the snap-back ResizeObserver callback that fires
-        // ~120ms after mouseup when the drag handler releases its px constraints
-        // and the <th> reverts to the pre-drag <col> widths.  MATLAB takes ~133ms
-        // to process the ColumnWidthChanged above and deliver Suppress — too late.
-        // We suppress here instead; MATLAB un-suppresses via Restore as normal.
-        callbackSuppressed = true;
-        bridgeLog("[Bridge] " + ts() + " mouseup self-suppress");
+
+        // Compare current widths to the snapshot taken at mousedown.
+        // Only send ColumnWidthChanged (and self-suppress) if a column
+        // was actually resized — this prevents the rounding-error jitter
+        // that occurs when a plain cell click re-reports pixel widths for
+        // Relative columns and MATLAB converts them via GCD.
+        var cols = findColumns();
+        var currentWidths = cols.length > 0 ? colWidthsFromDOM(cols) : null;
+        var widthsChanged = false;
+        if (widthsAtMouseDown && currentWidths &&
+            widthsAtMouseDown.length === currentWidths.length) {
+          for (var i = 0; i < currentWidths.length; i++) {
+            if (Math.abs(currentWidths[i] - widthsAtMouseDown[i]) > 1) {
+              widthsChanged = true;
+              break;
+            }
+          }
+        }
+        widthsAtMouseDown = null;
+
+        if (widthsChanged) {
+          onResize();
+          // Self-suppress: block the snap-back ResizeObserver callback that fires
+          // ~120ms after mouseup when the drag handler releases its px constraints
+          // and the <th> reverts to the pre-drag <col> widths.  MATLAB takes ~133ms
+          // to process the ColumnWidthChanged above and deliver Suppress — too late.
+          // We suppress here instead; MATLAB un-suppresses via Restore as normal.
+          callbackSuppressed = true;
+          bridgeLog("[Bridge] " + ts() + " mouseup self-suppress (widths changed)");
+        } else {
+          bridgeLog("[Bridge] " + ts() + " mouseup skipped (no width change)");
+        }
         flushDiag();
       }, true);
     } catch (e) {}

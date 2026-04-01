@@ -1,12 +1,17 @@
 classdef UpdateManager < handle
    
-    properties
+    properties (SetAccess=protected)
+        SuppressAll (1,1) logical = false
         FullySuppress (1,:) string
         Suppress (1,:) string
     end
 
     methods
         function obj = UpdateManager()
+        end
+
+        function setSuppressAll(this,state)
+            this.SuppressAll = state;
         end
 
         function addSuppression(this, name, nvp)
@@ -50,10 +55,20 @@ classdef UpdateManager < handle
                 nvp.Remove (1,1) double = 1
             end
 
+            removeCount = nvp.Remove;
+
+            if this.SuppressAll
+                if removeCount ~= 0
+                    this.removeSuppression(name, Times=removeCount);
+                end
+                tf = false;
+                return
+            end
+
             tf = ~(ismember(name, this.Suppress) || ismember(name, this.FullySuppress));
 
-            if nvp.Remove
-                this.removeSuppression(name, "Times", nvp.Remove);
+            if removeCount ~= 0
+                this.removeSuppression(name, Times=removeCount);
             end
         end
     end
