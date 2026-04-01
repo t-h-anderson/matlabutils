@@ -667,7 +667,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         function result = translateNames(this, inputs, srcNames, destNames)
             arguments
-                this (1,1)
+                this (1,1) %#ok<INUSA>
                 inputs (1,:) string
                 srcNames (1,:) string = this.DataColumnNames
                 destNames (1,:) string = this.ColumnNames
@@ -1242,10 +1242,7 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function set.BridgeDiagEnabled(this, val)
-            this.BridgeDiagEnabled = val;
-            if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", val);
-            end
+            this.toggleBridgeDiag(val);
         end
 
     end
@@ -1393,6 +1390,13 @@ classdef Table < gwidgets.internal.Reparentable
             this.SortedDataToVisibleMap = d2vMap;
             this.SortedVisibleToDataMap = v2dMap;
 
+        end
+
+        function toggleBridgeDiag(this, val)
+            this.BridgeDiagEnabled = val;
+            if ~isempty(this.ColumnWidthBridge_)
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", val);
+            end
         end
 
     end
