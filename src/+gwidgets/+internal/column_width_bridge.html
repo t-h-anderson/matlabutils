@@ -8,39 +8,34 @@
   // ColumnWidthBridge — timer-free, MATLAB-driven
   //
   // MATLAB API (events sent TO the bridge):
-  //   Init             {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
-  //   Ready                         — attach/re-attach ResizeObserver
-  //   Suppress                      — stop ColumnWidthChanged from being sent to MATLAB
-  //   Restore                       — re-enable ColumnWidthChanged (leave existing observer)
-  //   Diag             true|false   — enable/disable diagnostic messages to MATLAB
-  //   SetColumnBounds  {minWidths:[...], maxWidths:[...]}
-  //                    — stamp inline min-width/max-width !important directly on each
-  //                      <th> header element and all currently-visible <td> body cells;
-  //                      a MutationObserver re-stamps any new rows added by virtual
-  //                      scroll; NaN/null = no constraint for that column
+  //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
+  //   Ready                   — attach/re-attach ResizeObserver
+  //   Suppress                — stop ColumnWidthChanged from being sent to MATLAB
+  //   Unsuppress              — re-enable ColumnWidthChanged without re-attaching
+  //                             the observer (no-change path; avoids loop)
+  //   SetTypes   [bool,...]   — per-column Relative flag; defers drag-px style clear
+  //                             until the next suppressed ResizeObserver callback
+  //                             (i.e. after the DOM has actually settled)
+  //   Restore                 — apply any deferred SetTypes clear; re-enable
+  //                             ColumnWidthChanged; re-attach observer
+  //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
-  var COL_SELECTOR      = ".mw-table-header-column";
+  var COL_SELECTOR       = ".mw-table-header-column";
 
-  var resizeObserver    = null;
-  var tableTag          = null;
-  var htmlComponent     = null;
-  var isMoving          = false;
+  var resizeObserver     = null;
+  var tableTag           = null;
+  var htmlComponent      = null;
+  var colAutoFlags       = null;
+  var pendingSetTypes    = null;   // deferred colAutoFlags; applied when DOM settles
+  var isMoving           = false;
   var callbackSuppressed = false;
-  var diagEnabled       = false;
-  var diagQueue         = [];
-
-  // ---- Gesture tracking (prevents jitter on plain cell clicks) ----
-  var widthsAtMouseDown = null;   // snapshot of column widths at mousedown
-
-  // ---- Column-bounds state (populated by SetColumnBounds) ----
-  // boundsMap: cellIndex (number) -> {hasMin, mn, hasMax, mx}
-  var boundsMap     = {};
-  var boundsObserver = null;   // MutationObserver watching for new virtual-scroll rows
+  var diagEnabled        = true;
+  var diagQueue          = [];
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -79,114 +74,25 @@
     return Array.from(parentDoc.querySelectorAll(COL_SELECTOR));
   }
 
-  function findTableEl() {
-    try {
-      var parentDoc = window.parent.document;
-      return tableTag ? parentDoc.querySelector('[data-tag="' + tableTag + '"]') : null;
-    } catch (e) { return null; }
-  }
-
-  // ---- Inline-style bounds stamping ----
-
-  function applyBoundsToCell(el) {
-    // el must have a numeric cellIndex property (HTMLTableCellElement <th> or <td>).
-    var ci = el.cellIndex;
-    if (typeof ci !== "number") return;
-    var b = boundsMap[ci];
-    if (!b) return;
-    if (b.hasMin) {
-      el.style.setProperty("min-width", b.mn + "px", "important");
-    } else {
-      el.style.removeProperty("min-width");
-    }
-    if (b.hasMax) {
-      el.style.setProperty("max-width", b.mx + "px", "important");
-    } else {
-      el.style.removeProperty("max-width");
-    }
-  }
-
-  function stampAllVisible(tableEl, cols) {
-    // Stamp header <th> elements.
-    cols.forEach(applyBoundsToCell);
-    // Stamp all currently-rendered body <td> elements.
-    if (tableEl) {
-      Array.from(tableEl.querySelectorAll("td")).forEach(applyBoundsToCell);
-    }
-  }
-
-  function teardownBoundsObserver() {
-    if (boundsObserver) { boundsObserver.disconnect(); boundsObserver = null; }
-  }
-
-  function setupBoundsObserver(tableEl) {
-    teardownBoundsObserver();
-    if (!tableEl) return;
-    // Watch for rows added by virtual scroll and stamp their cells immediately.
-    boundsObserver = new MutationObserver(function(mutations) {
-      mutations.forEach(function(m) {
-        m.addedNodes.forEach(function(node) {
-          if (node.nodeType !== 1) return;
-          // node might be a <tr> directly or a container holding <tr> elements.
-          var tds = (node.tagName === "TR")
-            ? Array.from(node.cells || [])
-            : Array.from(node.querySelectorAll ? node.querySelectorAll("tr > td") : []);
-          tds.forEach(applyBoundsToCell);
-        });
-      });
-    });
-    boundsObserver.observe(tableEl, { childList: true, subtree: true });
-  }
-
   // ---- Mouse tracking — drives the moving flag ----
 
   function setupMouseTracking() {
     try {
       var pd = window.parent.document;
-      pd.addEventListener("mousedown", function() {
-        isMoving = true;
-        // Snapshot column widths so we can detect whether a real column
-        // resize occurred during this gesture (vs. a plain cell click).
-        var cols = findColumns();
-        widthsAtMouseDown = cols.length > 0 ? colWidthsFromDOM(cols) : null;
-      }, true);
+      pd.addEventListener("mousedown", function() { isMoving = true; }, true);
       pd.addEventListener("mouseup", function() {
         // isMoving must be false before we call onResize so the settled
         // event carries moving=false.  ResizeObserver won't fire after
         // release (size stopped changing), so we send one explicit report.
         isMoving = false;
-
-        // Compare current widths to the snapshot taken at mousedown.
-        // Only send ColumnWidthChanged (and self-suppress) if a column
-        // was actually resized — this prevents the rounding-error jitter
-        // that occurs when a plain cell click re-reports pixel widths for
-        // Relative columns and MATLAB converts them via GCD.
-        var cols = findColumns();
-        var currentWidths = cols.length > 0 ? colWidthsFromDOM(cols) : null;
-        var widthsChanged = false;
-        if (widthsAtMouseDown && currentWidths &&
-            widthsAtMouseDown.length === currentWidths.length) {
-          for (var i = 0; i < currentWidths.length; i++) {
-            if (Math.abs(currentWidths[i] - widthsAtMouseDown[i]) > 1) {
-              widthsChanged = true;
-              break;
-            }
-          }
-        }
-        widthsAtMouseDown = null;
-
-        if (widthsChanged) {
-          onResize();
-          // Self-suppress: block the snap-back ResizeObserver callback that fires
-          // ~120ms after mouseup when the drag handler releases its px constraints
-          // and the <th> reverts to the pre-drag <col> widths.  MATLAB takes ~133ms
-          // to process the ColumnWidthChanged above and deliver Suppress — too late.
-          // We suppress here instead; MATLAB un-suppresses via Restore as normal.
-          callbackSuppressed = true;
-          bridgeLog("[Bridge] " + ts() + " mouseup self-suppress (widths changed)");
-        } else {
-          bridgeLog("[Bridge] " + ts() + " mouseup skipped (no width change)");
-        }
+        onResize();
+        // Self-suppress: block the snap-back ResizeObserver callback that fires
+        // ~120ms after mouseup when the drag handler releases its px constraints
+        // and the <th> reverts to the pre-drag <col> widths.  MATLAB takes ~133ms
+        // to process the ColumnWidthChanged above and deliver Suppress — too late.
+        // We suppress here instead; MATLAB un-suppresses via Restore as normal.
+        callbackSuppressed = true;
+        bridgeLog("[Bridge] " + ts() + " mouseup self-suppress");
         flushDiag();
       }, true);
     } catch (e) {}
@@ -204,10 +110,43 @@
     cols.forEach(function(col) { resizeObserver.observe(col); });
   }
 
+  // ---- clearRelativeConstraints: remove stale drag-handler px styles ----
+
+  function clearRelativeConstraints() {
+    if (!colAutoFlags) return;
+    var cols = findColumns();
+    if (cols.length !== colAutoFlags.length) return;
+    for (var i = 0; i < cols.length; i++) {
+      if (!colAutoFlags[i]) continue;
+      var mn = cols[i].style.minWidth;
+      var mx = cols[i].style.maxWidth;
+      bridgeLog("[Bridge] " + ts() + " col[" + i + "] (R):" +
+                " minWidth=" + (mn || "''") + " maxWidth=" + (mx || "''"));
+      if (!mn || mn.indexOf('%') < 0) cols[i].style.removeProperty("min-width");
+      if (!mx || mx.indexOf('%') < 0) cols[i].style.removeProperty("max-width");
+    }
+  }
+
+  // ---- applyPendingSetTypes: commit deferred SetTypes data and clear constraints ----
+
+  function applyPendingSetTypes(reason) {
+    colAutoFlags    = pendingSetTypes;
+    pendingSetTypes = null;
+    bridgeLog("[Bridge] " + ts() + " clearConstraints (" + reason + ")");
+    clearRelativeConstraints();
+    flushDiag();
+  }
+
   // ---- ResizeObserver callback ----
 
   function onResize() {
     if (callbackSuppressed) {
+      // DOM changed while suppressed — this means the DisplayTable.ColumnWidth
+      // update has landed and layout has completed.  Apply any deferred SetTypes
+      // now so constraints are cleared on the settled DOM.
+      if (pendingSetTypes !== null) {
+        applyPendingSetTypes("settled DOM");
+      }
       return;
     }
     var cols = findColumns();
@@ -236,14 +175,6 @@
     htmlComponent.addEventListener("Ready", function() {
       bridgeLog("[Bridge] " + ts() + " Ready");
       attachObserver();
-      // Re-apply any bounds that were set before or during the last Ready cycle.
-      var cols = findColumns();
-      var tableEl = findTableEl();
-      if (Object.keys(boundsMap).length > 0) {
-        stampAllVisible(tableEl, cols);
-        setupBoundsObserver(tableEl);
-        bridgeLog("[Bridge] " + ts() + " Ready: re-stamped bounds on " + cols.length + " header cols");
-      }
       flushDiag();
     });
 
@@ -253,69 +184,43 @@
       flushDiag();
     });
 
-    htmlComponent.addEventListener("Restore", function() {
+    htmlComponent.addEventListener("Unsuppress", function() {
+      // Un-suppress without re-attaching the ResizeObserver.
+      // Used for the no-change ColumnWidthChanged path: re-attaching would
+      // fire ResizeObserver immediately and create an infinite loop.
       callbackSuppressed = false;
-      bridgeLog("[Bridge] " + ts() + " Restore");
-      // Do NOT call attachObserver here.  The existing observer fires naturally
-      // when MATLAB's DOM update arrives; at that point callbackSuppressed is
-      // false and we send the correct ColumnWidthChanged.
+      bridgeLog("[Bridge] " + ts() + " Unsuppress");
       flushDiag();
     });
 
-    htmlComponent.addEventListener("SetColumnBounds", function(event) {
-      // Stamp inline min-width/max-width !important directly on each <th> and
-      // currently-visible <td>.  Using element.style.setProperty with priority
-      // "important" is the highest-specificity override available — it beats any
-      // stylesheet rule, including MATLAB's own, without cross-iframe or shadow-DOM
-      // restrictions (we have direct JS references to the elements from findColumns).
-      // A MutationObserver re-stamps new rows added by virtual scroll automatically.
-      var mins = (event.Data && Array.isArray(event.Data.minWidths)) ? event.Data.minWidths : [];
-      var maxs = (event.Data && Array.isArray(event.Data.maxWidths)) ? event.Data.maxWidths : [];
+    htmlComponent.addEventListener("SetTypes", function(event) {
+      var data = event.Data;
+      if (!Array.isArray(data)) return;
+      // Store as pending — do NOT clear constraints immediately.
+      // clearRelativeConstraints() will run in the next suppressed onResize()
+      // (when the DOM has settled after DisplayTable.ColumnWidth), or as a
+      // fallback in Restore if no resize fired during suppression.
+      pendingSetTypes = data;
+      bridgeLog("[Bridge] " + ts() + " SetTypes (deferred): [" +
+                data.map(function(f) { return f ? "R" : "P"; }).join(",") + "]");
+      flushDiag();
+    });
 
-      bridgeLog("[Bridge] " + ts() + " SetColumnBounds.data: mins=[" + mins.join(",") + "] maxs=[" + maxs.join(",") + "]");
-
-      var cols = findColumns();
-      var tableEl = findTableEl();
-
-      bridgeLog("[Bridge] " + ts() + " SetColumnBounds: cols=" + cols.length +
-                (cols.length ? " cellIndexes=[" + cols.map(function(c) { return c.cellIndex; }).join(",") + "]" : ""));
-
-      // Rebuild boundsMap from the new constraints.
-      boundsMap = {};
-      var nConstrained = 0;
-      cols.forEach(function(col, i) {
-        var mn = mins[i];
-        var mx = maxs[i];
-        var hasMin = typeof mn === "number" && isFinite(mn) && mn > 0;
-        var hasMax = typeof mx === "number" && isFinite(mx) && mx > 0;
-        // Always store an entry (even unconstrained) so applyBoundsToCell can
-        // remove stale inline styles when a constraint is cleared.
-        if (hasMin || hasMax) {
-          boundsMap[col.cellIndex] = { hasMin: hasMin, mn: mn, hasMax: hasMax, mx: mx };
-          nConstrained++;
-        }
-      });
-
-      bridgeLog("[Bridge] " + ts() + " SetColumnBounds: " + nConstrained + " constrained cols");
-
-      // Stamp all currently-visible cells and set up virtual-scroll observer.
-      stampAllVisible(tableEl, cols);
-      if (nConstrained > 0) {
-        setupBoundsObserver(tableEl);
-      } else {
-        teardownBoundsObserver();
+    htmlComponent.addEventListener("Restore", function() {
+      callbackSuppressed = false;
+      bridgeLog("[Bridge] " + ts() + " Restore");
+      // Apply any deferred SetTypes clear now (fallback: DOM update hasn't
+      // arrived yet, so we clear on the current DOM).
+      if (pendingSetTypes !== null) {
+        applyPendingSetTypes("fallback");
       }
-
-      // Verify: read back computed min-width on first constrained header.
-      if (diagEnabled && cols.length > 0) {
-        try {
-          var sample = cols[0];
-          var computed = window.parent.getComputedStyle(sample).minWidth;
-          bridgeLog("[Bridge] " + ts() + " SetColumnBounds: col[0] computed min-width=" + computed +
-                    " inline=" + sample.style.minWidth);
-        } catch(e) {}
-      }
-
+      // Do NOT call attachObserver here.  The observer from the last Ready (or
+      // Restore-with-reattach) is still connected.  If we re-attach now, the
+      // browser fires ResizeObserver immediately on first observation and we
+      // read stale snap-back widths (MATLAB's DOM update hasn't propagated yet).
+      // Instead, the existing observer fires naturally when MATLAB's DOM update
+      // arrives — at that point callbackSuppressed is false and we send the
+      // correct ColumnWidthChanged.
       flushDiag();
     });
 

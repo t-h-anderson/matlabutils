@@ -27,10 +27,6 @@ classdef Table < gwidgets.internal.Reparentable
         RelativeColumnWidths (1,:) string  % Relative weight per visible column
         ColumnWidthTypes    (1,:) string   % Width type per visible column: "Pixel" or "Relative"
 
-        % Per-column width constraints (NaN = no limit for that column)
-        DataColumnMinWidth (1,:) double  % Minimum pixel width per data column; NaN = no limit
-        DataColumnMaxWidth (1,:) double  % Maximum pixel width per data column; NaN = no limit
-
         Selection (:,:) double % Data selection. Either (:,2) for cell or (1,:) otherwise
         DisplaySelection (:,:) double % Display Selection. Either (:,2) for cell or (1,:) otherwise
 
@@ -75,9 +71,12 @@ classdef Table < gwidgets.internal.Reparentable
         RelativeDataColumnWidths_ (1,:) string  % "Nx" weights; missing for Pixel cols until bridge resolves
         DataColumnWidthTypes_     (1,:) string  % "Pixel" | "Relative" per column; empty = all Relative
 
+<<<<<<< HEAD
         ColumnMinWidths_ (1,:) double   % Per-column minimum pixel widths; NaN = no limit
         ColumnMaxWidths_ (1,:) double   % Per-column maximum pixel widths; NaN = no limit
 
+=======
+>>>>>>> main
         DefaultColumnWidths_ (1,:) cell % Default column widths restored when ColumnWidth is reset to {}
 
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
@@ -1258,54 +1257,6 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function val = get.DataColumnMinWidth(this)
-            val = this.extendStore(this.ColumnMinWidths_, NaN, numel(this.DataColumnNames));
-        end
-
-        function set.DataColumnMinWidth(this, val)
-            nData = numel(this.DataColumnNames);
-            if isscalar(val), val = repelem(val, 1, nData); end
-            if ~isempty(val) && numel(val) ~= nData
-                error("GraphicsWidgets:Table:DataColumnMinWidthSize", ...
-                    "DataColumnMinWidth must be scalar, empty, or match the number of data columns.");
-            end
-            if any(val < 0 & ~isnan(val))
-                error("GraphicsWidgets:Table:InvalidMinColumnWidth", ...
-                    "DataColumnMinWidth values must be non-negative or NaN (no limit).");
-            end
-            hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
-            if any(~isnan(val) & ~isnan(hi) & val > hi)
-                error("GraphicsWidgets:Table:InvalidMinColumnWidth", ...
-                    "DataColumnMinWidth must not exceed DataColumnMaxWidth for any column.");
-            end
-            this.ColumnMinWidths_ = val;
-            this.sendColumnBoundsToBridge();
-        end
-
-        function val = get.DataColumnMaxWidth(this)
-            val = this.extendStore(this.ColumnMaxWidths_, NaN, numel(this.DataColumnNames));
-        end
-
-        function set.DataColumnMaxWidth(this, val)
-            nData = numel(this.DataColumnNames);
-            if isscalar(val), val = repelem(val, 1, nData); end
-            if ~isempty(val) && numel(val) ~= nData
-                error("GraphicsWidgets:Table:DataColumnMaxWidthSize", ...
-                    "DataColumnMaxWidth must be scalar, empty, or match the number of data columns.");
-            end
-            if any(val <= 0 & ~isnan(val))
-                error("GraphicsWidgets:Table:InvalidMaxColumnWidth", ...
-                    "DataColumnMaxWidth values must be positive or NaN (no limit).");
-            end
-            lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
-            if any(~isnan(val) & ~isnan(lo) & val < lo)
-                error("GraphicsWidgets:Table:InvalidMaxColumnWidth", ...
-                    "DataColumnMaxWidth must not be less than DataColumnMinWidth for any column.");
-            end
-            this.ColumnMaxWidths_ = val;
-            this.sendColumnBoundsToBridge();
-        end
-
     end
 
     methods (Access = protected)
@@ -1584,36 +1535,25 @@ classdef Table < gwidgets.internal.Reparentable
             % Suppress is sent first (bridge also self-suppresses on mouseup),
             % so ResizeObserver echoes — including the snap-back that fires when
             % the drag handler releases its px constraints — are silently dropped.
-            % CSS min/max bounds are applied directly to <th> elements via the
-            % bridge (SetColumnBounds) so Relative columns stay responsive.
-            arguments
-                this
-            end
+
+            % The Auto flush resets MATLAB's internal column-type metadata so
+            % relative weights are correctly re-applied after each drag.
+            % drawnow flushes both ColumnWidth DOM updates before SetTypes/Restore
+            % are queued.  This ensures attachObserver (called from Restore) sees
+            % the settled DOM rather than the stale snap-back widths.  drawnow is
+            % safe here because the bridge self-suppresses on mouseup, so the
+            % snap-back never reaches MATLAB's DataChangedFcn queue.
             this.sendSuppressToBridge();
-
-            try
-                visWidths = this.buildMixedWidthCell(this.ColumnVisible);
-                if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
-                    if isempty(visWidths)
-                        visWidths = {"Auto"};
-                    end
-
-                    % Cycling the display table to "Auto" causes rubber
-                    % banding, but forces the table to refresh and return
-                    % to "api" mode, rather than "interactive" mode.
-                    this.DisplayTable.ColumnWidth = {"Auto"};
-                    this.forceRefresh();
-                    this.DisplayTable.ColumnWidth = visWidths;
-                    this.forceRefresh();
-
+            visWidths = this.buildMixedWidthCell(this.ColumnVisible);
+            if ~isequal(this.DisplayTable.ColumnWidth, visWidths)
+                if isempty(visWidths)
+                    visWidths = {"Auto"};
                 end
-                this.sendColumnBoundsToBridge();
-                this.sendRestoreToBridge();
-            catch ex
-                this.IsApplyingColumnWidths_ = false;
-                rethrow(ex);
+                this.DisplayTable.ColumnWidth = {"Auto"};
+                this.forceRefresh();
+                this.DisplayTable.ColumnWidth = visWidths;
             end
-            this.IsApplyingColumnWidths_ = false;
+            this.sendRestoreToBridge();
         end
 
         % ---- Column-width store helpers ----------------------------------------
@@ -1642,7 +1582,6 @@ classdef Table < gwidgets.internal.Reparentable
                     i = maskIdxs(k);
                     v = val{k};
                     if isnumeric(v) && isscalar(v) && v > 0
-                        v        = this.applyWidthBounds(v, i);
                         types(i) = "Pixel";
                         px(i)    = v;
                         rel(i)   = string(missing);  % resolved by bridge later
@@ -1681,8 +1620,6 @@ classdef Table < gwidgets.internal.Reparentable
                 return
             end
 
-            pixelWidths = this.applyWidthBounds(pixelWidths, find(this.ColumnVisible));
-
             nData   = numel(this.DataColumnNames);
             visIdxs = find(this.ColumnVisible);
             px      = this.extendStore(this.PixelDataColumnWidths_, NaN,  nData);
@@ -1710,8 +1647,7 @@ classdef Table < gwidgets.internal.Reparentable
         function val = buildMixedWidthCell(this, mask)
             % Build a cell array of column widths for the columns given by mask.
             % "Pixel" columns → numeric pixel value.
-            % "Relative" columns → "Nx" string (CSS min/max bounds are enforced
-            % directly on the <th> elements via SetColumnBounds, not here).
+            % "Relative" columns → "Nx" string (or "1x" if not yet resolved).
             nData   = numel(this.DataColumnNames);
             nResult = sum(mask);
             if nResult == 0
@@ -1880,6 +1816,7 @@ classdef Table < gwidgets.internal.Reparentable
                 "HTMLSource",   htmlFile, ...
                 "DataChangedFcn", @(src,~) this.onBridgeData(src), ...
                 "Visible","off");
+
             this.ColumnWidthBridge_.Layout.Row    = 4;
             this.ColumnWidthBridge_.Layout.Column = 1;
 
@@ -1903,10 +1840,7 @@ classdef Table < gwidgets.internal.Reparentable
                     % attaches its ResizeObserver to the (already-rendered) table.
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
-                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", ...
-                        this.BridgeDiagEnabled);
                     this.sendReadyToBridge();
-                    this.sendColumnBoundsToBridge();
 
                 case "ColumnWidthChanged"
                     % Bridge fires on every ResizeObserver callback.
@@ -1915,13 +1849,7 @@ classdef Table < gwidgets.internal.Reparentable
                     if isfield(d, "moving") && d.moving
                         return
                     end
-                    % Ignore events that arrive during a programmatic width
-                    % update — the intermediate type-toggle triggers a
-                    % ResizeObserver callback that can race ahead of the
-                    % JS-side Suppress event and overwrite our stores.
-                    if this.IsApplyingColumnWidths_
-                        return
-                    end
+
                     % If the incoming widths match PixelDataColumnWidths_ (within
                     % 1 px browser-rounding tolerance) the event was caused by
                     % MATLAB's own CSS settling — ignore it to avoid a loop.
@@ -1932,8 +1860,11 @@ classdef Table < gwidgets.internal.Reparentable
                         this.applyColumnWidthToDisplay();
                     else
                         % Drag produced no net width change, but the bridge
-                        % self-suppressed on mouseup.  Re-enable reporting.
-                        this.sendRestoreToBridge();
+                        % self-suppressed on mouseup.  Un-suppress without
+                        % re-attaching the observer — Restore would call
+                        % attachObserver, which fires ResizeObserver immediately
+                        % and creates an infinite loop.
+                        this.sendUnsuppressToBridge();
                     end
 
                 case "BridgeDiag"
@@ -1942,45 +1873,9 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function sendColumnBoundsToBridge(this)
-            % Push per-column CSS min/max constraints to the bridge.
-            % The bridge injects a <style> into the parent document that applies
-            % CSS min-width/max-width to both <th> header elements and <td> body
-            % cells at each column position, covering virtual-scroll rows
-            % automatically without touching DisplayTable.ColumnWidth or changing
-            % the stored DataColumnWidthTypes_ (columns stay Relative).
-            if isempty(this.ColumnWidthBridge_), return; end
-            nData = numel(this.DataColumnNames);
-            lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
-            hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
-            vis = this.ColumnVisible;
-            % Assign cell-array fields via dot-notation to avoid struct(field,cellarray)
-            % expanding the cell array into a struct array instead of a scalar struct
-            % with an array-valued field.  JSON serializes {v1,...} as [v1,...].
-            boundsData = struct();
-            boundsData.minWidths = num2cell(lo(vis));
-            boundsData.maxWidths = num2cell(hi(vis));
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetColumnBounds", boundsData);
-        end
-
         function onBridgeReattachNeeded(this)
             % Column count mismatch — tell bridge to re-attach to current DOM.
             this.sendReadyToBridge();
-        end
-
-        function px = applyWidthBounds(this, px, colIdxs)
-            % Clamp pixel widths to per-column [DataColumnMinWidth, DataColumnMaxWidth].
-            % px      — pixel width(s), NaN entries left untouched.
-            % colIdxs — index/indices into DataColumnNames for each element of px.
-            nData = numel(this.DataColumnNames);
-            lo = this.extendStore(this.ColumnMinWidths_, NaN, nData);
-            hi = this.extendStore(this.ColumnMaxWidths_, NaN, nData);
-            for k = 1:numel(px)
-                if isnan(px(k)), continue; end
-                loK = lo(colIdxs(k)); if isnan(loK), loK = 0;   end
-                hiK = hi(colIdxs(k)); if isnan(hiK), hiK = Inf; end
-                px(k) = max(loK, min(hiK, px(k)));
-            end
         end
 
         function sendSuppressToBridge(this)
@@ -1992,10 +1887,21 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function sendRestoreToBridge(this)
-            % Tell the bridge to re-enable ColumnWidthChanged reporting.
-            % The existing ResizeObserver fires naturally on the next DOM change.
+            % Tell the bridge to re-enable reporting, re-attach its observer,
+            % and poll the current DOM widths.  Queue this after SetTypes so
+            % drag-handler constraints are cleared before the poll fires.
+
             if isempty(this.ColumnWidthBridge_), return; end
             sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
+        end
+
+        function sendUnsuppressToBridge(this)
+            % Re-enable ColumnWidthChanged reporting without re-attaching the
+            % ResizeObserver.  Used for the no-change ColumnWidthChanged path:
+            % Restore would call attachObserver which fires ResizeObserver
+            % immediately and creates an infinite loop.
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "Unsuppress", []);
         end
 
         function sendReadyToBridge(this)
@@ -2380,6 +2286,10 @@ classdef Table < gwidgets.internal.Reparentable
 
             if this.HasAutoResizeColumns
                 uimenu("Parent", this.ContextMenu, "Text", "Auto-resize columns", "MenuSelectedFcn", @(s,e) this.onAutoResizeColumnsRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
+            end
+
+            if this.HasAutoResizeColumns
+                uimenu("Parent", this.ContextMenu, "Text", "Auto-resize columns", "MenuSelectedFcn", @(s,e) this.onAutoResizeColumnsRequest(s,e), "Tag", "GWidgetsTableContextMenu");
             end
 
             for i = 1:numel(this.CustomContextMenuItems)
