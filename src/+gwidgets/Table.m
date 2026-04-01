@@ -1000,11 +1000,13 @@ classdef Table < gwidgets.internal.Reparentable
         OpenGroups (1,:) string % Groups that are open
         ClosedGroups (1,:) string % Groups that are collapsed
         HiddenGroups (1,:) string % Groups that are hidden
+
+        BridgeDiagEnabled (1,1) logical % Enable JS bridge diagnostic output
     end
 
     properties (Hidden)
         VisibleGroupHeaderRowIdx (1,:) double % (1,nVisGroups) Indices of header rows
-        BridgeDiagEnabled (1,1) logical = false % Enable JS bridge diagnostic output
+        
     end
 
     properties (Access = private)
@@ -1019,6 +1021,9 @@ classdef Table < gwidgets.internal.Reparentable
         GroupHeaderRowIdx (1,:) double % (1,nGroups) Indices of group header rows
 
         GroupFilteredCount (1,:) double % (1,nGroups) Group filtered counts
+        
+        % Bridge diagnostics
+        BridgeDiagEnabled_ (1,1) logical = false % Enable JS bridge diagnostic output
 
         % List of open groups
         OpenGroups_ (1,:) string
@@ -1245,6 +1250,10 @@ classdef Table < gwidgets.internal.Reparentable
             this.toggleBridgeDiag(val);
         end
 
+        function val = get.BridgeDiagEnabled(this)
+            val = this.BridgeDiagEnabled_;
+        end
+
     end
 
     methods (Access = protected)
@@ -1393,7 +1402,7 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function toggleBridgeDiag(this, val)
-            this.BridgeDiagEnabled = val;
+            this.BridgeDiagEnabled_ = val;
             if ~isempty(this.ColumnWidthBridge_)
                 sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", val);
             end
@@ -1815,9 +1824,9 @@ classdef Table < gwidgets.internal.Reparentable
             this.ColumnWidthBridge_.Layout.Row    = 4;
             this.ColumnWidthBridge_.Layout.Column = 1;
 
-            % Do NOT call sendEventToHTMLSource here — the HTML page loads
-            % asynchronously.  The JS sets Data = {event:"BridgeReady"} once
-            % setup() completes, and onBridgeData responds with Init.
+            % Enforce default in JS
+            this.BridgeDiagEnabled = this.BridgeDiagEnabled;
+
         end
 
         function onBridgeData(this, src)
@@ -2705,7 +2714,7 @@ classdef Table < gwidgets.internal.Reparentable
 
     end
 
-    methods (Access = {?graphicscomponents.utils.WithWeakListeners})
+    methods (Access = {?gwidgets.internal.WithWeakListeners})
 
         function onFilterChanged(this, ~, ~)
             if this.UpdateManager.doRun("Filter")

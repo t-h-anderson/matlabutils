@@ -9,7 +9,7 @@ function DragLinkerDemo()
 %     • Alt+Drag  - Swap component positions
 
 % Clear factory and start fresh
-DragLinkerFactory.make(true);
+gwidgets.internal.DragLinkerFactory.make(true);
 
 % Create main figure
 fig = uifigure("Name", "DragLinker Factory Demo", ...
@@ -35,26 +35,26 @@ makePanel(grid, "3", 3, 3);
 
 % Define drag-drop relationships
 % ListBox ↔ ListBox
-DragLinkerFactory.addLink("ListBox1", "ListBox2");
-DragLinkerFactory.addLink("ListBox2", "ListBox1");
+gwidgets.internal.DragLinkerFactory.addLink("ListBox1", "ListBox2");
+gwidgets.internal.DragLinkerFactory.addLink("ListBox2", "ListBox1");
 
 % ListBox → Tree
-DragLinkerFactory.addLink("ListBox1", "Tree1");
-DragLinkerFactory.addLink("ListBox2", "Tree2");
+gwidgets.internal.DragLinkerFactory.addLink("ListBox1", "Tree1");
+gwidgets.internal.DragLinkerFactory.addLink("ListBox2", "Tree2");
 
 % Tree → ListBox
-DragLinkerFactory.addLink("Tree1", "ListBox1");
-DragLinkerFactory.addLink("Tree2", "ListBox2");
+gwidgets.internal.DragLinkerFactory.addLink("Tree1", "ListBox1");
+gwidgets.internal.DragLinkerFactory.addLink("Tree2", "ListBox2");
 
 % Tree ↔ Tree
-DragLinkerFactory.addLink("Tree1", "Tree2");
-DragLinkerFactory.addLink("Tree2", "Tree1");
+gwidgets.internal.DragLinkerFactory.addLink("Tree1", "Tree2");
+gwidgets.internal.DragLinkerFactory.addLink("Tree2", "Tree1");
 
 % Components → Axes (plotting)
-DragLinkerFactory.addLink("ListBox1", "Axes1");
-DragLinkerFactory.addLink("ListBox2", "Axes2");
-DragLinkerFactory.addLink("Tree1", "Axes1");
-DragLinkerFactory.addLink("Tree2", "Axes2");
+gwidgets.internal.DragLinkerFactory.addLink("ListBox1", "Axes1");
+gwidgets.internal.DragLinkerFactory.addLink("ListBox2", "Axes2");
+gwidgets.internal.DragLinkerFactory.addLink("Tree1", "Axes1");
+gwidgets.internal.DragLinkerFactory.addLink("Tree2", "Axes2");
 
 % Reparenting with Alt key
 components = ["ListBox1", "ListBox2", "Tree1", "Tree2", ...
@@ -63,7 +63,7 @@ components = ["ListBox1", "ListBox2", "Tree1", "Tree2", ...
 for i = 1:numel(components)
     for j = 1:numel(components)
         if i ~= j
-            DragLinkerFactory.addDragToReparentLink(components(i), ...
+            gwidgets.internal.DragLinkerFactory.addDragToReparentLink(components(i), ...
                 components(j));
         end
     end
@@ -95,8 +95,8 @@ lst = uilistbox(parent, ...
 lst.Layout.Row = row;
 lst.Layout.Column = col;
 
-DragLinkerFactory.addSource("ListBox" + name, lst);
-DragLinkerFactory.addDestination("ListBox" + name, lst);
+gwidgets.internal.DragLinkerFactory.addSource("ListBox" + name, lst);
+gwidgets.internal.DragLinkerFactory.addDestination("ListBox" + name, lst);
 end
 
 function tree = makeTree(parent, name, row, col)
@@ -115,8 +115,8 @@ uitreenode(node2, "Text", "Blue");
 tree.Layout.Row = row;
 tree.Layout.Column = col;
 
-DragLinkerFactory.addSource("Tree" + name, tree);
-DragLinkerFactory.addDestination("Tree" + name, tree);
+gwidgets.internal.DragLinkerFactory.addSource("Tree" + name, tree);
+gwidgets.internal.DragLinkerFactory.addDestination("Tree" + name, tree);
 end
 
 function ax = makeAxes(parent, name, row, col)
@@ -128,8 +128,8 @@ legend(ax);
 ax.Layout.Row = row;
 ax.Layout.Column = col;
 
-DragLinkerFactory.addSource("Axes" + name, ax);
-DragLinkerFactory.addDestination("Axes" + name, ax);
+gwidgets.internal.DragLinkerFactory.addSource("Axes" + name, ax);
+gwidgets.internal.DragLinkerFactory.addDestination("Axes" + name, ax);
 end
 
 function pnl = makePanel(parent, name, row, col)
@@ -141,6 +141,6 @@ pnl = uipanel(parent, ...
 pnl.Layout.Row = row;
 pnl.Layout.Column = col;
 
-DragLinkerFactory.addSource("Panel" + name, pnl);
-DragLinkerFactory.addDestination("Panel" + name, pnl);
+gwidgets.internal.DragLinkerFactory.addSource("Panel" + name, pnl);
+gwidgets.internal.DragLinkerFactory.addDestination("Panel" + name, pnl);
 end

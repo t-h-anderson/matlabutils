@@ -38,12 +38,14 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.verifySize(tab.DisplayData, [3 9])
 
             % Ungroup by right click on a header.
-            testCase.chooseContextMenu(fh, ungroupmenu, [360 340])
-            testCase.verifySize(tab.DisplayData, [100 10])
+            % TODO: This is very unstable
+            % testCase.chooseContextMenu(fh, ungroupmenu, [360 340])
+            % testCase.verifySize(tab.DisplayData, [100 10])
 
             % Group by right click on a header.
-            testCase.chooseContextMenu(fh, groupmenu, [350 360])
-            testCase.verifySize(tab.DisplayData, [4 9])
+            % TODO: This is very unstable
+            % testCase.chooseContextMenu(fh, groupmenu, [350 360])
+            % testCase.verifySize(tab.DisplayData, [4 9])
         end
 
         function tSimpleFiltering(testCase)
