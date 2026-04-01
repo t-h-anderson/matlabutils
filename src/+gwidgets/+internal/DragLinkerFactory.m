@@ -1,7 +1,5 @@
 classdef DragLinkerFactory < handle
-    %DRAGLINKER
-
-    % FACTORY Singleton factory for managing drag-drop relationships.
+    %DRAGLINKERFACTORY Singleton factory for managing drag-drop relationships.
     %
     %   The DragLinkerFactory enables components from different scopes
     %   to register as drag sources and drop targets, then automatically
@@ -359,8 +357,7 @@ function listBox2listBox(src, dst, cp)
     % Insert items at drop location
     dst.Items = [dst.Items(1:newIdx-1), selectedVals, dst.Items(newIdx:end)];
     newItems = false(1, numel(dst.Items));
-    newItems = [newItems(1:newIdx-1), true(1,numel(selectedVals)), ...
-                newItems(newIdx:end)];
+    newItems(newIdx:newIdx + numel(selectedVals) - 1) = true;
 
     % Remove from source
     if isequal(src, dst)
