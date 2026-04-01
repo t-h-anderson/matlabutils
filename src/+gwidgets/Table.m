@@ -71,12 +71,6 @@ classdef Table < gwidgets.internal.Reparentable
         RelativeDataColumnWidths_ (1,:) string  % "Nx" weights; missing for Pixel cols until bridge resolves
         DataColumnWidthTypes_     (1,:) string  % "Pixel" | "Relative" per column; empty = all Relative
 
-<<<<<<< HEAD
-        ColumnMinWidths_ (1,:) double   % Per-column minimum pixel widths; NaN = no limit
-        ColumnMaxWidths_ (1,:) double   % Per-column maximum pixel widths; NaN = no limit
-
-=======
->>>>>>> main
         DefaultColumnWidths_ (1,:) cell % Default column widths restored when ColumnWidth is reset to {}
 
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
