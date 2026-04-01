@@ -81,6 +81,10 @@ classdef Table < gwidgets.internal.Reparentable
 
         % Flag to prevent selection callback recursion
         IsSettingSelectionProgrammatically (1,1) logical = false
+
+        % Flag to prevent bridge ColumnWidthChanged callbacks from
+        % interfering during a programmatic column-width update.
+        IsApplyingColumnWidths_ (1,1) logical = false
     end
 
     % Custom table callbacks
@@ -1003,6 +1007,7 @@ classdef Table < gwidgets.internal.Reparentable
 
     properties (Hidden)
         VisibleGroupHeaderRowIdx (1,:) double % (1,nVisGroups) Indices of header rows
+        BridgeDiagEnabled (1,1) logical = false % Enable JS bridge diagnostic output
     end
 
     properties (Access = private)
@@ -1239,6 +1244,13 @@ classdef Table < gwidgets.internal.Reparentable
 
         end
 
+        function set.BridgeDiagEnabled(this, val)
+            this.BridgeDiagEnabled = val;
+            if ~isempty(this.ColumnWidthBridge_)
+                sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", val);
+            end
+        end
+
     end
 
     methods (Access = protected)
@@ -1448,10 +1460,7 @@ classdef Table < gwidgets.internal.Reparentable
         function setup(this)
             %SETUP Initialize the component's graphics.
 
-            % Add the card panel for the filter
-            p = uipanel("Parent", this, ...
-                "BorderType", "none");
-            this.Grid = uigridlayout(p, ...
+            this.Grid = uigridlayout(this, ...
                 "RowHeight", {"fit", 0, "1x", 2}, "ColumnWidth", {"1x", 0}, "Padding", 0);
 
             this.HelpPanel = uipanel(Parent=this.Grid);
@@ -1520,7 +1529,8 @@ classdef Table < gwidgets.internal.Reparentable
             % Suppress is sent first (bridge also self-suppresses on mouseup),
             % so ResizeObserver echoes — including the snap-back that fires when
             % the drag handler releases its px constraints — are silently dropped.
-            % The NaN flush resets MATLAB's internal column-type metadata so
+
+            % The Auto flush resets MATLAB's internal column-type metadata so
             % relative weights are correctly re-applied after each drag.
             % drawnow flushes both ColumnWidth DOM updates before SetTypes/Restore
             % are queued.  This ensures attachObserver (called from Restore) sees
@@ -1533,7 +1543,7 @@ classdef Table < gwidgets.internal.Reparentable
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
-                this.DisplayTable.ColumnWidth = this.normalizeColumnWidths(this.PixelDataColumnWidths_);
+                this.DisplayTable.ColumnWidth = {"Auto"};
                 this.forceRefresh();
                 this.DisplayTable.ColumnWidth = visWidths;
             end
@@ -1788,16 +1798,19 @@ classdef Table < gwidgets.internal.Reparentable
             % Assign a unique tag to the uitable so the bridge JS can scope
             % its DOM query to this table specifically (avoids cross-talk
             % when multiple Table widgets live in the same figure).
-            this.DisplayTableTag_ = "GwidgetsTable_" + mlut.uniqueID();
+            this.DisplayTableTag_ = "graphicscomponentsTable_" + gwidgets.internal.uniqueID();
             this.DisplayTable.Tag  = this.DisplayTableTag_;
 
             htmlFile = fullfile(fileparts(mfilename("fullpath")), ...
-                "+internal", "column_width_bridge.html");
+                "+internal", ...
+                "column_width_bridge.html");
 
             this.ColumnWidthBridge_ = uihtml( ...
                 "Parent",       this.Grid, ...
                 "HTMLSource",   htmlFile, ...
-                "DataChangedFcn", @(src,~) this.onBridgeData(src));
+                "DataChangedFcn", @(src,~) this.onBridgeData(src), ...
+                "Visible","off");
+
             this.ColumnWidthBridge_.Layout.Row    = 4;
             this.ColumnWidthBridge_.Layout.Column = 1;
 
@@ -1830,6 +1843,7 @@ classdef Table < gwidgets.internal.Reparentable
                     if isfield(d, "moving") && d.moving
                         return
                     end
+
                     % If the incoming widths match PixelDataColumnWidths_ (within
                     % 1 px browser-rounding tolerance) the event was caused by
                     % MATLAB's own CSS settling — ignore it to avoid a loop.
@@ -1870,6 +1884,7 @@ classdef Table < gwidgets.internal.Reparentable
             % Tell the bridge to re-enable reporting, re-attach its observer,
             % and poll the current DOM widths.  Queue this after SetTypes so
             % drag-handler constraints are cleared before the poll fires.
+
             if isempty(this.ColumnWidthBridge_), return; end
             sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
         end
@@ -2214,7 +2229,7 @@ classdef Table < gwidgets.internal.Reparentable
             % Save the custom context menu items
             for i = 1:numel(this.CustomContextMenuItems)
                 [this.CustomContextMenuItems.Parent] = deal([]);
-                [this.CustomContextMenuItems.Tag] = deal("GWidgetsTableContextMenu");
+                [this.CustomContextMenuItems.Tag] = deal("graphicscomponentsTableContextMenu");
             end
 
             % Delete the existing context menu and remake it to all changes
@@ -2224,43 +2239,47 @@ classdef Table < gwidgets.internal.Reparentable
             end
 
             fh = ancestor(this.DisplayTable, "figure");
-            this.ContextMenu = uicontextmenu("Parent", fh, "Tag", "GWidgetsTableContextMenu");
+            this.ContextMenu = uicontextmenu("Parent", fh, "Tag", "graphicscomponentsTableContextMenu");
 
             if this.HasChangeGroupingVariable || this.HasToggleShowEmptyGroups
-                m = uimenu("Parent", this.ContextMenu, "Text", "Grouping", "Tag", "GWidgetsTableContextMenu");
+                m = uimenu("Parent", this.ContextMenu, "Text", "Grouping", "Tag", "graphicscomponentsTableContextMenu");
                 if this.HasChangeGroupingVariable
-                    uimenu("Parent", m, "Text", "Group", "MenuSelectedFcn", @(s,e) this.onGroupByRequest(s,e), "Tag", "GWidgetsTableContextMenu");
-                    uimenu("Parent", m, "Text", "Ungroup", "MenuSelectedFcn", @(s,e) this.onUngroupByRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                    uimenu("Parent", m, "Text", "Group", "MenuSelectedFcn", @(s,e) this.onGroupByRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
+                    uimenu("Parent", m, "Text", "Ungroup", "MenuSelectedFcn", @(s,e) this.onUngroupByRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
                 end
                 if this.HasToggleShowEmptyGroups
-                    uimenu("Parent", m, "Text", "Show/hide empty groups", "MenuSelectedFcn", @(s,e) this.onToggleShowEmptyGroupsRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                    uimenu("Parent", m, "Text", "Show/hide empty groups", "MenuSelectedFcn", @(s,e) this.onToggleShowEmptyGroupsRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
                 end
             end
 
             if this.HasColumnSorting && any(this.ColumnSortable)
-                m = uimenu("Parent", this.ContextMenu, "Text", "Sort", "Tag", "GWidgetsTableContextMenu");
-                uimenu("Parent", m, "Text", "Ascending", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "Ascend"), "Tag", "GWidgetsTableContextMenu");
-                uimenu("Parent", m, "Text", "Descending", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "Descend"), "Tag", "GWidgetsTableContextMenu");
-                uimenu("Parent", m, "Text", "None", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "None"), "Tag", "GWidgetsTableContextMenu");
+                m = uimenu("Parent", this.ContextMenu, "Text", "Sort", "Tag", "graphicscomponentsTableContextMenu");
+                uimenu("Parent", m, "Text", "Ascending", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "Ascend"), "Tag", "graphicscomponentsTableContextMenu");
+                uimenu("Parent", m, "Text", "Descending", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "Descend"), "Tag", "graphicscomponentsTableContextMenu");
+                uimenu("Parent", m, "Text", "None", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "None"), "Tag", "graphicscomponentsTableContextMenu");
             end
 
             if numel(this.SupportedSelectionTypes) > 1
-                m = uimenu("Parent", this.ContextMenu, "Text", "Selection Mode", "Tag", "GWidgetsTableContextMenu");
+                m = uimenu("Parent", this.ContextMenu, "Text", "Selection Mode", "Tag", "graphicscomponentsTableContextMenu");
                 if contains("cell", this.SupportedSelectionTypes)
-                    uimenu("Parent", m, "Text", "Cell", "MenuSelectedFcn", @(s,e) this.onCellSelectionRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                    uimenu("Parent", m, "Text", "Cell", "MenuSelectedFcn", @(s,e) this.onCellSelectionRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
                 end
 
                 if contains("row", this.SupportedSelectionTypes)
-                    uimenu("Parent", m, "Text", "Row", "MenuSelectedFcn", @(s,e) this.onRowSelectionRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                    uimenu("Parent", m, "Text", "Row", "MenuSelectedFcn", @(s,e) this.onRowSelectionRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
                 end
 
                 if contains("column", this.SupportedSelectionTypes)
-                    uimenu("Parent", m, "Text", "Column", "MenuSelectedFcn", @(s,e) this.onColumnSelectionRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                    uimenu("Parent", m, "Text", "Column", "MenuSelectedFcn", @(s,e) this.onColumnSelectionRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
                 end
             end
 
             if this.HasToggleFilter
-                uimenu("Parent", this.ContextMenu, "Text", "Show/hide row filter", "MenuSelectedFcn", @(s,e) this.onToggleRowFilterRequest(s,e), "Tag", "GWidgetsTableContextMenu");
+                uimenu("Parent", this.ContextMenu, "Text", "Show/hide row filter", "MenuSelectedFcn", @(s,e) this.onToggleRowFilterRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
+            end
+
+            if this.HasAutoResizeColumns
+                uimenu("Parent", this.ContextMenu, "Text", "Auto-resize columns", "MenuSelectedFcn", @(s,e) this.onAutoResizeColumnsRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
             end
 
             if this.HasAutoResizeColumns
@@ -2697,7 +2716,7 @@ classdef Table < gwidgets.internal.Reparentable
 
     end
 
-    methods (Access = {?gwidgets.internal.WithWeakListeners})
+    methods (Access = {?graphicscomponents.utils.WithWeakListeners})
 
         function onFilterChanged(this, ~, ~)
             if this.UpdateManager.doRun("Filter")
@@ -2893,7 +2912,7 @@ classdef Table < gwidgets.internal.Reparentable
             this.ShowEmptyGroups = ~this.ShowEmptyGroups;
         end
 
-        function onSortByRequest(this, s, e, direction)
+        function onSortByRequest(this, ~, e, direction)
 
             this.UpdateManager.addSuppression("SortDirection", Times=1);
             this.SortDirection = direction;
