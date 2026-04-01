@@ -233,7 +233,10 @@ classdef DragLinker < handle
 
             % Start drag if cursor moved enough AND correct key is pressed
             if ~obj.IsDragging
-                distance = norm(currentPoint - obj.ClickPosition);
+                % Always compute distance in source figure coordinates
+                % to avoid mixed reference frames when crossing figures
+                srcPoint = obj.cursorPositionForFigure(obj.SourceFigure);
+                distance = norm(srcPoint - obj.ClickPosition);
                 correctKey = obj.isDragKeyPressed();
 
                 if distance < 5 || ~correctKey
