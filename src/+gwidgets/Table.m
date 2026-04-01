@@ -1834,6 +1834,7 @@ classdef Table < gwidgets.internal.Reparentable
                     % attaches its ResizeObserver to the (already-rendered) table.
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
+                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", this.BridgeDiagEnabled);
                     this.sendReadyToBridge();
 
                 case "ColumnWidthChanged"
