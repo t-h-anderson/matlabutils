@@ -135,10 +135,10 @@ classdef tColumns < test.WithExampleTables
         % --- Column width tests -----------------------------------------------
 
         function tDataColumnWidthDefault(testCase)
-            % DataColumnWidth returns one "auto" entry per data column when
+            % DataColumnWidth returns one "1x" entry per data column when
             % no width has been set explicitly.
             t = gwidgets.Table(Data=testCase.multivariableData());  % 4 columns
-            testCase.verifyEqual(t.DataColumnWidth, {"auto","auto","auto","auto"})
+            testCase.verifyEqual(t.DataColumnWidth, {"1x","1x","1x","1x"})
         end
 
         function tSetDataColumnWidth(testCase)
@@ -210,15 +210,15 @@ classdef tColumns < test.WithExampleTables
         end
 
         function tColumnWidthClearedByEmpty(testCase)
-            % Setting ColumnWidth to [] or {} resets all widths to "auto".
+            % Setting ColumnWidth to [] or {} resets all widths to "1x".
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.DataColumnWidth = {100, 200, 150, 80};
             t.ColumnWidth = {};
 
-            % DataColumnWidth now returns per-column "auto" defaults (no explicit widths)
-            testCase.verifyEqual(t.DataColumnWidth, {"auto","auto","auto","auto"})
-            % get.ColumnWidth falls back to the display table default ("auto" scalar)
-            testCase.verifyEqual(t.ColumnWidth, {"auto"})
+            % DataColumnWidth now returns per-column "1x" defaults (no explicit widths)
+            testCase.verifyEqual(t.DataColumnWidth, {"1x","1x","1x","1x"})
+            % get.ColumnWidth falls back to the display table default ("1x")
+            testCase.verifyEqual(t.ColumnWidth, {"1x", "1x", "1x", "1x"})
         end
 
         function tDataColumnWidthClearedByReset(testCase)
@@ -231,8 +231,8 @@ classdef tColumns < test.WithExampleTables
             t.Data = testCase.stringData();  % 2 columns
 
             % DataColumnWidth should now reflect defaults for the new column count
-            testCase.verifyEqual(t.DataColumnWidth, {"auto", "auto"})
-            testCase.verifyEqual(t.ColumnWidth, {"auto"})  % display table default
+            testCase.verifyEqual(t.DataColumnWidth, {"1x", "1x"})
+            testCase.verifyEqual(t.ColumnWidth, {"1x", "1x"})  % display table default
         end
 
         function tColumnWidthInputTypes(testCase)
@@ -244,13 +244,13 @@ classdef tColumns < test.WithExampleTables
             testCase.verifyEqual(t.ColumnWidth, {50, 100})
 
             t.ColumnWidth = ["auto", "auto"];
-            testCase.verifyEqual(t.ColumnWidth, {"auto", "auto"})
+            testCase.verifyEqual(t.ColumnWidth, {"1x", "1x"})
 
             t.ColumnWidth = 75;  % scalar → expands
             testCase.verifyEqual(t.ColumnWidth, {75, 75})
 
             t.ColumnWidth = "auto";  % scalar string → expands
-            testCase.verifyEqual(t.ColumnWidth, {"auto", "auto"})
+            testCase.verifyEqual(t.ColumnWidth, {"1x", "1x"})
         end
 
     end

@@ -1065,6 +1065,9 @@ classdef Table < gwidgets.internal.Reparentable
 
         function val = get.OpenGroups(this)
             val = this.OpenGroups_;
+
+            idx = ~ismember(val, this.HiddenGroups_);
+            val = val(idx);
         end
 
         function set.OpenGroups(this, val)
@@ -1082,7 +1085,7 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function val = get.ClosedGroups(this)
-            idx = ismember(this.Groups, this.OpenGroups);
+            idx = ismember(this.DisplayGroups, this.OpenGroups);
             val = this.Groups(~idx);
         end
 

@@ -35,6 +35,8 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
 
             % Group via right click on a cell.
             testCase.chooseContextMenu(tab, groupmenu, [3 1])
+            gwidgets.internal.Drawnow.runWithPause();
+            pause(2) % Fudge to make sure table has updated otherwise get a horrid error sometimes
             testCase.verifySize(tab.DisplayData, [3 9])
 
             % Ungroup by right click on a header.

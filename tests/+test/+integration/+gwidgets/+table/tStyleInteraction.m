@@ -648,7 +648,7 @@ classdef tStyleInteraction < test.WithExampleTables
             function trackEdit(evt)
                 editCount = editCount + 1;
                 lastEditDisplay = evt.DisplayIndices;
-                lastEvtClass = class(evt);
+                lastEvtClass = string(class(evt));
             end
 
             % Edit without filter
