@@ -1085,7 +1085,10 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function val = get.ClosedGroups(this)
-            idx = ismember(this.DisplayGroups, this.OpenGroups);
+            % Mirror of set.ClosedGroups: closed groups are the complement
+            % of OpenGroups within Groups, not within DisplayGroups (which
+            % may have a different length).
+            idx = ismember(this.Groups, this.OpenGroups);
             val = this.Groups(~idx);
         end
 
@@ -1811,7 +1814,7 @@ classdef Table < gwidgets.internal.Reparentable
             % Assign a unique tag to the uitable so the bridge JS can scope
             % its DOM query to this table specifically (avoids cross-talk
             % when multiple Table widgets live in the same figure).
-            this.DisplayTableTag_ = "graphicscomponentsTable_" + gwidgets.internal.uniqueID();
+            this.DisplayTableTag_ = "graphicscomponentsTable_" + mlut.uniqueID();
             this.DisplayTable.Tag  = this.DisplayTableTag_;
 
             htmlFile = fullfile(fileparts(mfilename("fullpath")), ...
@@ -2219,7 +2222,6 @@ classdef Table < gwidgets.internal.Reparentable
 
             if nvp.StartFrom == "Interaction" || updating
                 this.updateInteraction();
-                %updating = true;
             end
 
             this.forceRefresh();
@@ -2227,8 +2229,9 @@ classdef Table < gwidgets.internal.Reparentable
 
         function addContextMenu(this)
 
-            % Save the custom context menu items
-            for i = 1:numel(this.CustomContextMenuItems)
+            % Detach custom items before deleting the menu so they survive
+            % and can be reparented after the menu is rebuilt below.
+            if ~isempty(this.CustomContextMenuItems)
                 [this.CustomContextMenuItems.Parent] = deal([]);
                 [this.CustomContextMenuItems.Tag] = deal("graphicscomponentsTableContextMenu");
             end
@@ -2281,10 +2284,6 @@ classdef Table < gwidgets.internal.Reparentable
 
             if this.HasAutoResizeColumns
                 uimenu("Parent", this.ContextMenu, "Text", "Auto-resize columns", "MenuSelectedFcn", @(s,e) this.onAutoResizeColumnsRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-            end
-
-            if this.HasAutoResizeColumns
-                uimenu("Parent", this.ContextMenu, "Text", "Auto-resize columns", "MenuSelectedFcn", @(s,e) this.onAutoResizeColumnsRequest(s,e), "Tag", "GWidgetsTableContextMenu");
             end
 
             for i = 1:numel(this.CustomContextMenuItems)
