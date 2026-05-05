@@ -209,6 +209,24 @@ classdef tGrouping < test.WithExampleTables
             testCase.verifyEmpty(t.OpenGroups)
         end
 
+        function tClosedGroupsComplementWithinGroupsNotDisplayGroups(testCase)
+            % Regression: get.ClosedGroups must compute the complement of
+            % OpenGroups within Groups, not within DisplayGroups. With a
+            % filter that hides some groups the two have different
+            % lengths, so the buggy form would either error or return the
+            % wrong slice of Groups.
+            data = testCase.stringData();
+            t = gwidgets.Table(Data=data, ShowEmptyGroups=false);
+            t.GroupingVariable = "Var2";
+            t.OpenGroups = "a";
+            t.Filter = "Var2=a";
+
+            testCase.verifyEqual(t.Groups, ["a", "b", "c"])
+            testCase.verifyEqual(t.DisplayGroups, "a")
+            testCase.verifyEqual(t.OpenGroups, "a")
+            testCase.verifyEqual(sort(t.ClosedGroups), ["b", "c"])
+        end
+
     end
 
 end
