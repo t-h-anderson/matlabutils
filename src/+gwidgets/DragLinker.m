@@ -362,7 +362,7 @@ classdef DragLinker < handle
             if on
                 obj.OrigTargetBgColor = obj.Target.BackgroundColor;
                 obj.Target.BackgroundColor = [0.78 1.0 0.78];  % Soft green
-            elseif ~on
+            else
                 obj.Target.BackgroundColor = obj.OrigTargetBgColor;
             end
         end

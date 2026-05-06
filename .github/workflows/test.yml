@@ -1,0 +1,74 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to keep the queue short.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+# checks:write is required for dorny/test-reporter to publish the JUnit
+# summary as a check on the PR.
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  test:
+    name: MATLAB ${{ matrix.release }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        release: [R2026a]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Xvfb is required because the system/integration tests drive a real
+      # uifigure via matlab.uitest; Linux runners are headless by default.
+      - name: Install and start Xvfb
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y xvfb
+          Xvfb :99 -screen 0 1920x1080x24 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: ${{ matrix.release }}
+
+      - name: Run tests
+        uses: matlab-actions/run-tests@v2
+        with:
+          source-folder: src
+          select-by-folder: tests
+          test-results-junit: test-results/results.xml
+          code-coverage-cobertura: test-results/coverage.xml
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.release }}
+          path: test-results/
+          if-no-files-found: warn
+
+      - name: Publish test summary
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: MATLAB ${{ matrix.release }} results
+          path: test-results/results.xml
+          reporter: java-junit
+          fail-on-error: false
