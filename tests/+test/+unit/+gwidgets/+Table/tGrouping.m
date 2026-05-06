@@ -197,16 +197,18 @@ classdef tGrouping < test.WithExampleTables
 
         function tHiddenGroupsPopulatedByFilter(testCase)
             % When ShowEmptyGroups=false and a filter removes all rows from
-            % a group, that group appears in HiddenGroups.
+            % a group, that group appears in HiddenGroups. ClosedGroups is
+            % the set-theoretic complement of OpenGroups within Groups
+            % (matching set.ClosedGroups), so hidden groups still count as
+            % closed if they aren't open.
             data = testCase.stringData();
             t = gwidgets.Table(Data=data, ShowEmptyGroups=false);
             t.GroupingVariable = "Var2";
             t.Filter = "Var2=a";
 
-            % Groups b and c have no matching rows, so they should be hidden
             testCase.verifyEqual(sort(t.HiddenGroups), ["b", "c"])
-            testCase.verifyEmpty(t.ClosedGroups)
             testCase.verifyEmpty(t.OpenGroups)
+            testCase.verifyEqual(sort(t.ClosedGroups), ["a", "b", "c"])
         end
 
         function tClosedGroupsComplementWithinGroupsNotDisplayGroups(testCase)
