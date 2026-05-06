@@ -16,11 +16,10 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                 tbl = table()
             end
 
-            % Allow class to be created from another tabular
             if isa(tbl, "mlut.tabular.RTabular")
                 tbl = tbl.DataTable;
             end
-            
+
             if istabular(tbl)
                 obj.DataTable = tbl;
             end
@@ -42,20 +41,15 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
     methods (Access=protected)
         function result = braceReference(obj,indexOp)
-            % Standard brace access
-
             result = obj.parenReference(indexOp);
             result = result.DataTable{:,:};
-
         end
 
         function obj = braceAssign(obj,indexOp,val)
-            % Standard brace assign
             obj.DataTable.(indexOp) = val;
         end
 
         function n = braceListLength(obj,indexOp,indexContext)
-            % Standard brace list length
             n = listLength(obj.DataTable,indexOp,indexContext);
         end
     end
@@ -65,20 +59,18 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
             indexOp = indexOpIn(1);
 
-            % Check to see if specified column exists
+            % Build a logical mask of which requested columns exist; the
+            % "robust" behaviour is to fabricate missing-valued columns
+            % for any that don't.
             colIdx = indexOp.Indices{2};
             if ~isstring(colIdx) && ~ischar(colIdx)
-                % Allow indexing past end of table
                 idx = colIdx <= width(obj.DataTable);
             elseif colIdx == ":"
-                % All, so always true
                 idx = true;
             else
-                % Allow specification by name with possible miss
                 idx = ismember(colIdx, obj.DataTable.Properties.VariableNames);
             end
 
-            % Determine data from "known" columns
             knownCols = colIdx(idx);
             if ~isempty(knownCols)
                 result = obj.DataTable(:, knownCols);
@@ -86,41 +78,35 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                 result = obj.DataTable(:, []);
             end
 
-            % Create data for unknown columns that matches the table
             if any(~idx)
                 otherCols = colIdx(~idx);
                 unknown = obj.makeNewColsLike(obj.DataTable, nnz(~idx));
 
                 if isnumeric(otherCols)
-                    % Other cols is e.g. a double, so create a "Var" column
                     otherCols = "Var" + otherCols;
                 end
 
-                % Ensure new columns have unique names from the known results
                 otherCols = matlab.lang.makeUniqueStrings(otherCols, result.Properties.VariableNames);
                 unknown.Properties.VariableNames = otherCols;
 
-                % Add new data to existing results
                 result = [result, unknown];
             end
 
-            % Select rows - not torerant to selecting beyond the bottom of
-            % the tables
+            % Numeric row indices outside the table are filled with
+            % `missing` rather than erroring (the robust contract).
             if isnumeric(indexOp.Indices{1})
                 idx1 = indexOp.Indices{1};
                 idx = idx1 <= height(result) & idx1 > 0;
 
                 result = result(idx1(idx), :);
                 [result(~idx, :)] = deal({missing});
-                
+
             else
                 result = result(indexOp.Indices{1}, :);
             end
 
-            % Wrap the result in a new robust table
             result = obj.create(result);
 
-            % Apply any subsequent access
             if numel(indexOpIn) > 1
                 result = result.(indexOpIn(2:end));
             end
@@ -129,13 +115,13 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
         function obj = parenAssign(obj,indexOp,val)
 
-            % Add rows to table if the table isn't long enought
+            % Grow the underlying table when assigning past its end so
+            % `t(N+k,:) = ...` succeeds rather than erroring.
             h = indexOp.Indices{1} - height(obj.DataTable);
             if h > 0
                 obj = obj.addRows(h);
             end
 
-            % Set the value
             obj.DataTable(indexOp) = val;
 
         end
@@ -150,22 +136,19 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
         end
 
         function obj = parenDelete(obj,indexOp)
-            % Standard delete
             obj.DataTable.(indexOp) = [];
         end
 
         function result = dotReference(obj,indexOp)
 
-            % If column exists, return as normal, otherwise return
-            % "missing" column of correct length
+            % Unknown columns yield a NaN column matching the table's
+            % height instead of erroring.
             colName = indexOp(1).Name;
             idx = ismember(colName, obj.DataTable.Properties.VariableNames);
 
             if idx
                 result = obj.DataTable{:, indexOp(1).Name};
             else
-
-                % Also check dimension names
                 dimNames = obj.DataTable.Properties.DimensionNames;
                 idx = ismember(colName, dimNames);
 
@@ -184,9 +167,6 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
         function obj = dotAssign(obj,indexOp,rhs)
             if isempty(rhs)
-                % empty rhs, so delete column
-
-                % If column exists, remove it
                 colName = indexOp(1).Name;
                 idx = ismember(obj.DataTable.Properties.VariableNames, colName);
 
@@ -195,10 +175,10 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                 [obj.DataTable.(indexOp)] = rhs.DataTable.Variables;
             else
                 if numel(rhs) == 1
-                    % Allow table.Column = 1 to set entire column to value
+                    % Broadcast a scalar across the column so
+                    % `t.Column = v` mirrors built-in table semantics.
                     rhs = repelem(rhs, height(obj.DataTable), 1);
                 end
-                % Set the column as normal
                 obj.DataTable.(indexOp) = rhs;
             end
         end
@@ -214,49 +194,31 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
         end
 
         function out = sum(obj, varargin)
-            % Pass through method for sum
             out = obj.create(sum(obj.DataTable, varargin{:}));
         end
 
         function out = cat(dim,varargin)
-            % Allow concatenation of multiple RATs
+            % Mixed concatenation of RTabular and plain tables: unwrap
+            % each argument to the underlying table, then dispatch to the
+            % robust horz/vert helpers (which tolerate column mismatches).
 
             numCatArrays = nargin - 1;
             newArgs = cell(numCatArrays,1);
 
-            % Get the "object" from the first argument
             obj = varargin{1};
 
-            % Keep track of names in the tables we are concatenating so we
-            % can make sure they are unique at the end
-            knownNames = string.empty(1,0);
             for ix = 1:numCatArrays
                 if isa(varargin{ix},'mlut.tabular.RTabular')
-                    % Get the table out - means we can mix the
-                    % concatenation of tables and RATs
                     tbl = varargin{ix}.DataTable;
                 else
                     tbl = varargin{ix};
                 end
-
-                % if dim == 2
-                %     % Horizontal concatenation, so makes sure column names
-                %     % are unique
-                %     tbl.Properties.VariableNames = matlab.lang.makeUniqueStrings(tbl.Properties.VariableNames, knownNames);
-                % end
-
-                % Update list of column names
-                knownNames = [knownNames, string(tbl.Properties.VariableNames)]; %#ok<AGROW>
-
                 newArgs{ix} = tbl;
             end
 
             if dim == 2
-                % Pass through horizontal concatenation
                 tbl = obj.horzcat_(newArgs{:});
             else
-                % Do protected vertcat method - allows joining tables with
-                % missmatched columns
                 tbl = obj.vertcat_(newArgs{:});
             end
 
@@ -265,13 +227,10 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
         end
 
         function varargout = size(obj,varargin)
-            % Size is size of the internal table
             [varargout{1:nargout}] = size(obj.DataTable,varargin{:});
         end
 
         function obj = addRows(obj, n)
-            % Add rows to the table by vertcatting with an empty table of
-            % the correct length
             tbl = obj.tabularEmpty(n,0);
             new = obj.vertcat_(obj.DataTable, tbl);
             obj = obj.create(new);
@@ -282,8 +241,10 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
     methods (Access = protected)
 
         function outTbl = horzcat_(obj, varargin)
-            % Robust method to horizontally concatenating two tables which
-            % may have different numbers of rows.
+            % Tolerates row-count mismatches by performing an outer join on
+            % a synthetic key column. Drops fully-missing duplicate columns
+            % to avoid clobbering real data with `missing` from the other
+            % side of the join.
             if numel(varargin) > 2
                 tmpTbl = obj.horzcat_(varargin{end-1}, varargin{end});
                 outTbl = obj.horzcat_(varargin{1:end-2}, tmpTbl);
@@ -299,7 +260,6 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                 hA = height(tblA);
                 hB = height(tblB);
 
-                % Remove "missing" columns if exists in other table
                 aInB = ismember(tblA.Properties.VariableNames, tblB.Properties.VariableNames);
                 aMissing = all(ismissing(tblA), 1);
                 tblA(:, aInB & aMissing) = [];
@@ -321,9 +281,11 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
         end
 
         function outTbl = vertcat_(obj, varargin)
-            % Robust method to vertically concatenating two tables which
-            % may have missing columns.
-            % Won't deal with missmatched data types
+            % Tolerates column-name mismatches by padding each table with
+            % the missing columns from the other side, typed to match.
+            % Floating-point pads are NaN-filled; non-floating types use
+            % their own missing representation. Mismatched column types
+            % are not handled.
             if numel(varargin) > 2
                 tmpTbl = obj.vertcat_(varargin{end-1}, varargin{end});
                 outTbl = obj.vertcat_(varargin{1:end-2}, tmpTbl);
@@ -340,7 +302,6 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                 idxLeft = ~ismember(tblB.Properties.VariableNames,...
                     tblA.Properties.VariableNames);
 
-                % Create a subtable of the right datatypes for the RH table
                 typesA = mlut.tabular.RTabular.dataTypes(tblA);
                 subTblB = obj.makeNewColsLike(tblB, nnz(idxRight), string(tblA.Properties.VariableNames(idxRight)));
 
@@ -356,14 +317,16 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
                 tblB = [tblB, subTblB];
 
-                % Ditto, LH table
                 typesB = mlut.tabular.RTabular.dataTypes(tblB);
                 subTblA = obj.makeNewColsLike(tblA, nnz(idxLeft), string(tblB.Properties.VariableNames(idxLeft)));
 
                 cols = string(subTblA.Properties.VariableNames);
                 for j = 1:numel(cols)
+                    % convertvars may fail when the source/target types
+                    % can't be coerced; skip those rather than aborting
+                    % the whole concatenation.
                     try
-                    subTblA = convertvars(subTblA, cols(j), typesB(idxLeft(j)));
+                        subTblA = convertvars(subTblA, cols(j), typesB(idxLeft(j)));
                     catch
                     end
                 end
@@ -373,7 +336,6 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
                 tblA = [tblA, subTblA];
 
-                % And vertcat
                 outTbl = [tblA; tblB];
             end
 
@@ -384,7 +346,8 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
     methods (Static)
 
         function types = dataTypes(tbl)
-            % Allow extraction of data types independent of MATLAB version
+            % VariableTypes was added in R2023b (MATLAB 23.3); fall back
+            % to varfun(@class,...) on older releases.
             if verLessThan("MATLAB", "23.3")
                 types = varfun(@class,tbl,'OutputFormat','cell');
                 types = string(types);

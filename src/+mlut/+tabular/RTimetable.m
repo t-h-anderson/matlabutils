@@ -1,13 +1,6 @@
 classdef RTimetable < mlut.tabular.RTabular
     
     methods
-        function obj = CycleData(tbl)
-            arguments
-                tbl timetable = timetable('Size', [0,0], 'VariableTypes', [], 'RowTimes', seconds(nan(0,0)))
-            end
-            obj.DataTable = obj.vertcat_(tbl, obj.defaultEmptyTable());
-        end
-
         function val = table(obj)
             val = timetable2table(obj.DataTable);
         end
