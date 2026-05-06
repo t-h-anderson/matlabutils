@@ -12,6 +12,13 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
+# checks:write is required for dorny/test-reporter to publish the JUnit
+# summary as a check on the PR.
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 jobs:
   test:
     name: MATLAB ${{ matrix.release }} on ${{ matrix.os }}
@@ -40,10 +47,6 @@ jobs:
         uses: matlab-actions/setup-matlab@v2
         with:
           release: ${{ matrix.release }}
-          # Token is empty for public repos; the action accepts that. Once
-          # the secret is added it lets the action license MATLAB for
-          # private repos and unlocks add-on toolboxes if needed.
-          token: ${{ secrets.MATHWORKS_TOKEN }}
 
       - name: Run tests
         uses: matlab-actions/run-tests@v2
