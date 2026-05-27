@@ -803,9 +803,11 @@ classdef Table < gwidgets.internal.Reparentable
             %   addTooltip(t, "Click to open", "table")
             %   addTooltip(t, "Patient height (cm)", "column", 4)
             %   addTooltip(t, "Outlier", "cell", [3 2; 5 7])
+            %   addTooltip(t, @(v) "Value: " + v, "column", [2 3])
+            %     ^ function form: called with the hovered cell value
             arguments
                 this (1,1) gwidgets.Table
-                text (1,1) string
+                text % string scalar OR function_handle (cellValue) -> string
                 tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
                 targetIndicesOrFunction (:,:) = []
                 nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
@@ -2785,6 +2787,7 @@ classdef Table < gwidgets.internal.Reparentable
             priorities = ["cell", "row", "column", "table"];
             byRank = cell(1, numel(priorities));
             anyMatch = false;
+            cellValue = this.cellValueForHover(displayRow, displayColumn);
             for i = 1:numel(this.Tooltips)
                 tt = this.Tooltips(i);
                 try
@@ -2802,7 +2805,12 @@ classdef Table < gwidgets.internal.Reparentable
                 resolved.TargetIndices = idx;
                 if resolved.matches(displayRow, displayColumn)
                     rank = find(priorities == tt.Target, 1);
-                    byRank{rank} = [byRank{rank}; tt.Text];
+                    try
+                        rendered = tt.textFor(cellValue);
+                    catch err
+                        rendered = "[tooltip error: " + string(err.message) + "]";
+                    end
+                    byRank{rank} = [byRank{rank}; rendered];
                     anyMatch = true;
                 end
             end
@@ -2814,6 +2822,23 @@ classdef Table < gwidgets.internal.Reparentable
 
             lines = vertcat(byRank{:});
             text = strjoin(lines, newline);
+        end
+
+        function val = cellValueForHover(this, displayRow, displayColumn)
+            % Return the value at the hovered display cell, or missing
+            % when (row, col) doesn't reference a body cell.
+            val = missing;
+            if displayRow < 1 || displayColumn < 1
+                return
+            end
+            data = this.DisplayData;
+            if displayRow > size(data, 1) || displayColumn > width(data)
+                return
+            end
+            val = data{displayRow, displayColumn};
+            if iscell(val) && isscalar(val)
+                val = val{1};
+            end
         end
 
         function onSelection_(this, displayIdx, selectionType)

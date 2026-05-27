@@ -118,6 +118,37 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEqual(t.simulateBridgeHover(4, 1), "table-wide")
         end
 
+        function tFunctionTooltipReceivesCellValue(testCase)
+            data = testCase.multivariableData();
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(v) "Value: " + string(v), "column", 1);
+
+            % Row 3, column 1 (Numerical) holds the value 3.
+            testCase.verifyEqual(t.simulateBridgeHover(3, 1), "Value: 3")
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), "Value: 1")
+        end
+
+        function tFunctionTooltipJoinsWithStaticTooltip(testCase)
+            data = testCase.multivariableData();
+            t = gwidgets.Table(Data=data);
+            t.addTooltip("a row", "row", 2);
+            t.addTooltip(@(v) "val=" + string(v), "column", 1);
+
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), ...
+                strjoin(["a row", "val=2"], newline))
+        end
+
+        function tFunctionTooltipErrorIsContained(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.addTooltip(@(v) error("boom"), "cell", [2 1]);
+
+            % Hovering the broken tooltip's cell still returns text rather
+            % than throwing out of the hover callback.
+            result = t.simulateBridgeHover(2, 1);
+            testCase.verifyThat(result, ...
+                matlab.unittest.constraints.ContainsSubstring("tooltip error"));
+        end
+
         function tHoverJoinsCellAndRow(testCase)
             % The motivating example: cell + row both match.
             t = gwidgets.Table(Data=testCase.multivariableData());
