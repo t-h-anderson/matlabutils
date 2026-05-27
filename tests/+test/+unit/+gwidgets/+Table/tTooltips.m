@@ -45,6 +45,67 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEqual(sty.BackgroundColor, "#ccc")
         end
 
+        function tBlocksGroupByStyle(testCase)
+            % Three tooltips, two distinct styles. The cell and column
+            % tooltips share "red" so they group together (cell line
+            % first, column line after); the row tooltip is "blue" alone;
+            % the table tooltip has no per-tooltip style so it falls into
+            % the (base) default-style group on its own.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            red  = gwidgets.internal.table.TooltipStyle(BackgroundColor="red");
+            blue = gwidgets.internal.table.TooltipStyle(BackgroundColor="blue");
+
+            t.addTooltip("cell-text", "cell", [2 3], "Style", red);
+            t.addTooltip("row-text",  "row",  2,     "Style", blue);
+            t.addTooltip("col-text",  "column", 3,   "Style", red);
+            t.addTooltip("tbl-text",  "table");
+
+            blocks = t.resolveTooltipBlocks(2, 3);
+            testCase.assertNumElements(blocks, 3)
+            testCase.verifyEqual(string(blocks{1}.text), ...
+                "cell-text" + newline + "col-text")
+            testCase.verifyEqual(string(blocks{2}.text), "row-text")
+            testCase.verifyEqual(string(blocks{3}.text), "tbl-text")
+            % Group 1 + 2 carry an explicit color; group 3 uses the base
+            % (no explicit BackgroundColor override beyond the default).
+            testCase.verifyThat(blocks{1}.css, ...
+                matlab.unittest.constraints.ContainsSubstring("background-color:red"))
+            testCase.verifyThat(blocks{2}.css, ...
+                matlab.unittest.constraints.ContainsSubstring("background-color:blue"))
+        end
+
+        function tBlocksGroupOrderIsMostSpecificFirst(testCase)
+            % Group order = first-appearance, which is most-specific-first
+            % (cell > row > column > table). If the row tooltip uses red
+            % and a cell tooltip uses red, the red group still leads
+            % because the cell match appears first in the iteration.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            red = gwidgets.internal.table.TooltipStyle(BackgroundColor="red");
+
+            t.addTooltip("col",  "column", 1, "Style", red);   % rank 3
+            t.addTooltip("cell", "cell", [2 1], "Style", red); % rank 1
+
+            blocks = t.resolveTooltipBlocks(2, 1);
+            testCase.assertNumElements(blocks, 1)
+            % Cell line first, column line after.
+            testCase.verifyEqual(string(blocks{1}.text), ...
+                "cell" + newline + "col")
+        end
+
+        function tBlocksEmptyWhenNothingToShow(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            blocks = t.resolveTooltipBlocks(2, 1);
+            testCase.verifyEmpty(blocks)
+        end
+
+        function tBlocksFallBackToTableTooltipWithBaseStyle(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.Tooltip = "table-wide";
+            blocks = t.resolveTooltipBlocks(2, 1);
+            testCase.assertNumElements(blocks, 1)
+            testCase.verifyEqual(string(blocks{1}.text), "table-wide")
+        end
+
         function tStyleFunctionReceivesContext(testCase)
             % StyleFunction takes the same TooltipContext as TextFunction.
             makeStyle = @(ctx) gwidgets.internal.table.TooltipStyle( ...

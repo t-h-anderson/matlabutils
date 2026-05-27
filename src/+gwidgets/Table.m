@@ -2789,11 +2789,9 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function applyTooltipPayload(this, displayRow, displayColumn)
-            % Resolve the hovered cell to a list of styled blocks and
-            % send them to the bridge. v1 always emits a single block
-            % (joined text, single resolved style); v2 will emit one
-            % block per style group — the JS protocol already takes a
-            % list so that change is MATLAB-side only.
+            % Resolve the hovered cell to a list of styled blocks and send
+            % them to the bridge. One block per unique resolved style;
+            % within a block, lines are joined most-specific-first.
             blocks = this.resolveTooltipBlocks(displayRow, displayColumn);
             if isempty(this.TableBridge_) || ~isvalid(this.TableBridge_)
                 return
@@ -2803,29 +2801,83 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function blocks = resolveTooltipBlocks(this, displayRow, displayColumn)
-            % v1: one block. Returns a cell array of struct("text", char,
-            % "css", char) — empty cell if nothing to show.
-            [text, style] = this.resolveTooltipTextAndStyle(displayRow, displayColumn);
-            if text == ""
-                blocks = {};
+            % Convert the internal {Text, Style} groups to the JS payload
+            % shape: cell array of struct("text", char, "css", char).
+            groups = this.resolveTooltipGroups(displayRow, displayColumn);
+            blocks = cell(1, numel(groups));
+            for k = 1:numel(groups)
+                blocks{k} = struct( ...
+                    "text", char(groups(k).Text), ...
+                    "css",  char(groups(k).Style.toCss()));
+            end
+        end
+
+        function groups = resolveTooltipGroups(this, displayRow, displayColumn)
+            % Resolve a hovered cell to a struct array of (Text, Style)
+            % groups. Each group bundles all matching tooltips that
+            % resolved to the same style; their text lines are joined
+            % most-specific-first (cell -> row -> column -> table;
+            % registration order preserved within a target). Group order
+            % is the order of first-appearance, which means the group
+            % containing the most-specific match comes first.
+            matches = this.collectTooltipMatches(displayRow, displayColumn);
+
+            groups = struct("Text", {}, "Style", {});
+
+            if isempty(matches)
+                text = this.TableTooltipText_;
+                if text == ""
+                    return
+                end
+                base = gwidgets.internal.table.TooltipStyle.default();
+                groups(1).Text = text;
+                groups(1).Style = base.merge(this.DefaultTooltipStyle_);
                 return
             end
-            blocks = {struct("text", char(text), "css", char(style.toCss()))};
+
+            for k = 1:numel(matches)
+                m = matches(k);
+                gIdx = [];
+                for g = 1:numel(groups)
+                    if isequaln(groups(g).Style, m.Style)
+                        gIdx = g;
+                        break
+                    end
+                end
+                if isempty(gIdx)
+                    groups(end+1).Text = m.Text; %#ok<AGROW>
+                    groups(end).Style = m.Style;
+                else
+                    groups(gIdx).Text = groups(gIdx).Text + newline + m.Text;
+                end
+            end
         end
 
         function [text, style] = resolveTooltipTextAndStyle(this, displayRow, displayColumn)
-            % Resolve a hovered display cell to tooltip text + style.
-            % Text: every matching tooltip contributes one line, ordered
-            % most-specific to least (cell -> row -> column -> table);
-            % registration order preserved within a target.
-            % Style: the most-specific match's resolved style, layered
-            % onto DefaultTooltipStyle, layered onto TooltipStyle.default().
-            priorities = ["cell", "row", "column", "table"];
-            byRank = cell(1, numel(priorities));
-            anyMatch = false;
+            % Back-compat helper for tests: text = all groups joined,
+            % style = the first (most-specific) group's style.
+            groups = this.resolveTooltipGroups(displayRow, displayColumn);
+            if isempty(groups)
+                text = "";
+                base = gwidgets.internal.table.TooltipStyle.default();
+                style = base.merge(this.DefaultTooltipStyle_);
+                return
+            end
+            text = strjoin([groups.Text], newline);
+            style = groups(1).Style;
+        end
 
-            mostSpecificRank = numel(priorities) + 1;
-            mostSpecificStyle = gwidgets.internal.table.TooltipStyle.empty;
+        function matches = collectTooltipMatches(this, displayRow, displayColumn)
+            % Returns a struct array (fields Text, Style, Rank) of every
+            % tooltip that matches the hovered cell, ordered by Rank
+            % ascending with registration order preserved within rank.
+            % Rank: 1=cell, 2=row, 3=column, 4=table. Style is the fully
+            % resolved TooltipStyle (per-tooltip style layered on top of
+            % DefaultTooltipStyle layered on TooltipStyle.default()).
+            priorities = ["cell", "row", "column", "table"];
+            baseStyle = gwidgets.internal.table.TooltipStyle.default();
+            baseStyle = baseStyle.merge(this.DefaultTooltipStyle_);
+            byRank = cell(1, numel(priorities));
 
             for i = 1:numel(this.Tooltips)
                 tt = this.Tooltips(i);
@@ -2845,35 +2897,25 @@ classdef Table < gwidgets.internal.Reparentable
 
                 rank = find(priorities == tt.Target, 1);
                 ctx = this.buildHoverContext(tt.Target, tt.ContextShape, displayRow, displayColumn);
-
                 try
                     rendered = tt.textFor(ctx);
                 catch err
                     rendered = "[tooltip error: " + string(err.message) + "]";
                 end
-                byRank{rank} = [byRank{rank}; rendered];
-                anyMatch = true;
-
-                if rank < mostSpecificRank
-                    candidateStyle = tt.styleFor(ctx);
-                    if ~isempty(candidateStyle)
-                        mostSpecificStyle = candidateStyle;
-                        mostSpecificRank = rank;
-                    end
+                ttStyle = tt.styleFor(ctx);
+                if isempty(ttStyle)
+                    resolvedStyle = baseStyle;
+                else
+                    resolvedStyle = baseStyle.merge(ttStyle);
                 end
+
+                entry = struct("Text", rendered, "Style", resolvedStyle, "Rank", rank);
+                byRank{rank} = [byRank{rank}; entry];
             end
 
-            if ~anyMatch
-                text = this.TableTooltipText_;
-            else
-                lines = vertcat(byRank{:});
-                text = strjoin(lines, newline);
-            end
-
-            base = gwidgets.internal.table.TooltipStyle.default();
-            style = base.merge(this.DefaultTooltipStyle_);
-            if ~isempty(mostSpecificStyle)
-                style = style.merge(mostSpecificStyle);
+            matches = vertcat(byRank{:});
+            if isempty(matches)
+                matches = struct("Text", {}, "Style", {}, "Rank", {});
             end
         end
 
