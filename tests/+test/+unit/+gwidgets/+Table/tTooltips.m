@@ -102,17 +102,30 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyError(fcn, "GraphicsWidgets:Table:TooltipTarget")
         end
 
-        function tHoverResolvesCellOverRow(testCase)
+        function tHoverJoinsMatchesMostSpecificFirst(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.addTooltip("table-wide");
             t.addTooltip("row 2", "row", 2);
             t.addTooltip("col 3", "column", 3);
             t.addTooltip("cell (2,3)", "cell", [2 3]);
 
-            testCase.verifyEqual(t.simulateBridgeHover(2, 3), "cell (2,3)")
-            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "row 2")
-            testCase.verifyEqual(t.simulateBridgeHover(4, 3), "col 3")
+            testCase.verifyEqual(t.simulateBridgeHover(2, 3), ...
+                strjoin(["cell (2,3)", "row 2", "col 3", "table-wide"], newline))
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), ...
+                strjoin(["row 2", "table-wide"], newline))
+            testCase.verifyEqual(t.simulateBridgeHover(4, 3), ...
+                strjoin(["col 3", "table-wide"], newline))
             testCase.verifyEqual(t.simulateBridgeHover(4, 1), "table-wide")
+        end
+
+        function tHoverJoinsCellAndRow(testCase)
+            % The motivating example: cell + row both match.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.addTooltip("hello", "cell", [2 3]);
+            t.addTooltip("test", "row", 2);
+            testCase.verifyEqual(t.simulateBridgeHover(2, 3), ...
+                strjoin(["hello", "test"], newline))
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "test")
         end
 
         function tHoverFallsBackToTableTooltip(testCase)

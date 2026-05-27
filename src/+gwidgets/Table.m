@@ -2777,16 +2777,14 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function text = resolveTooltipText(this, displayRow, displayColumn)
-            % Resolve a hovered display cell to the most specific tooltip
-            % text. The bridge sends row=0 for the header and col=0 when the
-            % cursor is outside any cell — those degenerate coordinates
-            % won't match row/column/cell targets but a "table"-target
-            % tooltip still applies.
-            % Precedence (most specific wins, later registrations win ties):
-            % cell > row > column > table.
-            text = this.TableTooltipText_;
-            priorities = ["table", "column", "row", "cell"];
-            bestRank = 0;
+            % Resolve a hovered display cell to tooltip text. Every matching
+            % tooltip contributes one line; lines are ordered most-specific
+            % to least (cell -> row -> column -> table). Among entries with
+            % the same target, registration order is preserved. If nothing
+            % matches, fall back to the table-wide Tooltip property.
+            priorities = ["cell", "row", "column", "table"];
+            byRank = cell(1, numel(priorities));
+            anyMatch = false;
             for i = 1:numel(this.Tooltips)
                 tt = this.Tooltips(i);
                 try
@@ -2804,12 +2802,18 @@ classdef Table < gwidgets.internal.Reparentable
                 resolved.TargetIndices = idx;
                 if resolved.matches(displayRow, displayColumn)
                     rank = find(priorities == tt.Target, 1);
-                    if rank >= bestRank
-                        bestRank = rank;
-                        text = tt.Text;
-                    end
+                    byRank{rank} = [byRank{rank}; tt.Text];
+                    anyMatch = true;
                 end
             end
+
+            if ~anyMatch
+                text = this.TableTooltipText_;
+                return
+            end
+
+            lines = vertcat(byRank{:});
+            text = strjoin(lines, newline);
         end
 
         function onSelection_(this, displayIdx, selectionType)
