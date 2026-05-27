@@ -805,18 +805,17 @@ classdef Table < gwidgets.internal.Reparentable
             %   addTooltip(t, "Click to open", "table")
             %   addTooltip(t, "Patient height (cm)", "column", 4)
             %   addTooltip(t, "Outlier", "cell", [3 2; 5 7])
-            %   addTooltip(t, @(v) "Value: " + v, "column", [2 3])
-            %     ^ function form (1 arg): hovered cell value
-            %   addTooltip(t, @(~, col) "Max: " + max(col), "column", 4)
-            %     ^ function form (2 args): cell value + target-shaped
-            %       context. The slice comes from the underlying Data
-            %       (hidden columns and filtered-out rows reachable).
+            %   addTooltip(t, @(ctx) "Value: " + ctx.Value, "column", [2 3])
+            %     ^ function form: receives a gwidgets.internal.table.TooltipContext
+            %       with fields Value, Row, Column, Table, DisplayRow,
+            %       DisplayColumn, DataRow, DataColumn, Target. Row and
+            %       Column slices come from the underlying Data table
+            %       (hidden columns / filtered-out rows reachable).
             %
-            %   Pass ContextShape to override the per-target default:
-            %     "Values" -> vector (column/row), array/cell (table),
-            %                 scalar (cell)
-            %     "Table"  -> Mx1 table (column), 1xN table (row),
-            %                 full Data (table), 1x1 table (cell)
+            %   Pass ContextShape to control the shape of ctx.Row and
+            %   ctx.Column:
+            %     "Values" -> vectors
+            %     "Table"  -> 1xN / Mx1 tables
             %   Per-target defaults: column=Values, row=Table,
             %   table=Table, cell=Values.
             arguments
@@ -2822,7 +2821,6 @@ classdef Table < gwidgets.internal.Reparentable
             priorities = ["cell", "row", "column", "table"];
             byRank = cell(1, numel(priorities));
             anyMatch = false;
-            cellValue = this.cellValueForHover(displayRow, displayColumn);
 
             mostSpecificRank = numel(priorities) + 1;
             mostSpecificStyle = gwidgets.internal.table.TooltipStyle.empty;
@@ -2844,19 +2842,18 @@ classdef Table < gwidgets.internal.Reparentable
                 end
 
                 rank = find(priorities == tt.Target, 1);
+                ctx = this.buildHoverContext(tt.Target, tt.ContextShape, displayRow, displayColumn);
 
                 try
-                    contextValue = this.contextForHover(tt.Target, tt.ContextShape, displayRow, displayColumn);
-                    rendered = tt.textFor(cellValue, contextValue);
+                    rendered = tt.textFor(ctx);
                 catch err
                     rendered = "[tooltip error: " + string(err.message) + "]";
-                    contextValue = missing;
                 end
                 byRank{rank} = [byRank{rank}; rendered];
                 anyMatch = true;
 
                 if rank < mostSpecificRank
-                    candidateStyle = tt.styleFor(cellValue, contextValue);
+                    candidateStyle = tt.styleFor(ctx);
                     if ~isempty(candidateStyle)
                         mostSpecificStyle = candidateStyle;
                         mostSpecificRank = rank;
@@ -2900,68 +2897,42 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function ctx = contextForHover(this, target, shape, displayRow, displayColumn)
-            % Build the second argument passed to a tooltip's TextFunction.
-            % Slices come from the underlying Data table (not DisplayData),
-            % so hidden columns and filtered-out rows are reachable. The
-            % shape parameter controls how the slice is shaped:
-            %   target=column, shape=Values -> M-vector
-            %   target=column, shape=Table  -> Mx1 table
-            %   target=row,    shape=Values -> 1xN vector (errors if mixed)
-            %   target=row,    shape=Table  -> 1xN table
-            %   target=table,  shape=Values -> numeric array (homogeneous)
-            %                                  or cell array (mixed)
-            %   target=table,  shape=Table  -> full Data table
-            %   target=cell,   shape=Values -> cell value (scalar)
-            %   target=cell,   shape=Table  -> 1x1 table at (row, col)
+        function ctx = buildHoverContext(this, target, shape, displayRow, displayColumn)
+            % Compose the single TooltipContext value passed to a
+            % tooltip's TextFunction / StyleFunction. All fields are
+            % populated regardless of target; ContextShape controls the
+            % shape of Row and Column.
             data = this.Data;
-            switch target
-                case "column"
-                    dataCol = this.safeDisplayToDataIndex(displayColumn, "column");
-                    if isnan(dataCol) || dataCol < 1 || dataCol > width(data)
-                        ctx = missing;
-                        return
+            ctx = gwidgets.internal.table.TooltipContext;
+            ctx.Target = target;
+            ctx.Table  = data;
+            ctx.DisplayRow    = displayRow;
+            ctx.DisplayColumn = displayColumn;
+            ctx.Value         = this.cellValueForHover(displayRow, displayColumn);
+
+            dataRow = this.safeDisplayToDataIndex(displayRow, "row");
+            dataCol = this.safeDisplayToDataIndex(displayColumn, "column");
+            ctx.DataRow    = dataRow;
+            ctx.DataColumn = dataCol;
+
+            if ~isnan(dataRow) && dataRow >= 1 && dataRow <= height(data)
+                if shape == "Values"
+                    try
+                        ctx.Row = data{dataRow, :};
+                    catch
+                        ctx.Row = missing; % mixed-type row can't concatenate
                     end
-                    if shape == "Values"
-                        ctx = data{:, dataCol};
-                    else
-                        ctx = data(:, dataCol);
-                    end
-                case "row"
-                    dataRow = this.safeDisplayToDataIndex(displayRow, "row");
-                    if isnan(dataRow) || dataRow < 1 || dataRow > height(data)
-                        ctx = missing;
-                        return
-                    end
-                    if shape == "Values"
-                        ctx = data{dataRow, :};
-                    else
-                        ctx = data(dataRow, :);
-                    end
-                case "table"
-                    if shape == "Values"
-                        try
-                            ctx = table2array(data);
-                        catch
-                            ctx = table2cell(data);
-                        end
-                    else
-                        ctx = data;
-                    end
-                otherwise % "cell"
-                    if shape == "Values"
-                        ctx = this.cellValueForHover(displayRow, displayColumn);
-                    else
-                        dataRow = this.safeDisplayToDataIndex(displayRow, "row");
-                        dataCol = this.safeDisplayToDataIndex(displayColumn, "column");
-                        if ~isnan(dataRow) && ~isnan(dataCol) ...
-                                && dataRow >= 1 && dataRow <= height(data) ...
-                                && dataCol >= 1 && dataCol <= width(data)
-                            ctx = data(dataRow, dataCol);
-                        else
-                            ctx = missing;
-                        end
-                    end
+                else
+                    ctx.Row = data(dataRow, :);
+                end
+            end
+
+            if ~isnan(dataCol) && dataCol >= 1 && dataCol <= width(data)
+                if shape == "Values"
+                    ctx.Column = data{:, dataCol};
+                else
+                    ctx.Column = data(:, dataCol);
+                end
             end
         end
 

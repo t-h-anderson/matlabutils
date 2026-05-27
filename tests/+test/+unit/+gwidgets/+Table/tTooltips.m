@@ -22,7 +22,7 @@ classdef tTooltips < test.WithExampleTables
 
         function tAddTooltipWithStyleFunction(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
-            fn = @(v) gwidgets.internal.table.TooltipStyle(BackgroundColor="red");
+            fn = @(ctx) gwidgets.internal.table.TooltipStyle(BackgroundColor="red");
             t.addTooltip("hi", "column", 1, "Style", fn);
 
             testCase.assertNumElements(t.Tooltips, 1)
@@ -45,10 +45,10 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEqual(sty.BackgroundColor, "#ccc")
         end
 
-        function tStyleFunctionReceivesCellValue(testCase)
-            % The same arity rules as TextFunction.
-            makeStyle = @(v) gwidgets.internal.table.TooltipStyle( ...
-                BackgroundColor=string(sprintf("#%02x%02x%02x", v, v, v)));
+        function tStyleFunctionReceivesContext(testCase)
+            % StyleFunction takes the same TooltipContext as TextFunction.
+            makeStyle = @(ctx) gwidgets.internal.table.TooltipStyle( ...
+                BackgroundColor=string(sprintf("#%02x%02x%02x", ctx.Value, ctx.Value, ctx.Value)));
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.addTooltip("col", "column", 1, "Style", makeStyle);
 
@@ -71,7 +71,7 @@ classdef tTooltips < test.WithExampleTables
             % Broken style function shouldn't crash hover; tooltip still
             % renders, just with the base style.
             t = gwidgets.Table(Data=testCase.multivariableData());
-            t.addTooltip("col", "column", 1, "Style", @(v) error("boom"));
+            t.addTooltip("col", "column", 1, "Style", @(ctx) error("boom"));
 
             [text, sty] = t.simulateBridgeHover(1, 1);
             testCase.verifyEqual(text, "col")
@@ -215,7 +215,7 @@ classdef tTooltips < test.WithExampleTables
         function tFunctionTooltipReceivesCellValue(testCase)
             data = testCase.multivariableData();
             t = gwidgets.Table(Data=data);
-            t.addTooltip(@(v) "Value: " + string(v), "column", 1);
+            t.addTooltip(@(ctx) "Value: " + string(ctx.Value), "column", 1);
 
             % Row 3, column 1 (Numerical) holds the value 3.
             testCase.verifyEqual(t.simulateBridgeHover(3, 1), "Value: 3")
@@ -226,37 +226,37 @@ classdef tTooltips < test.WithExampleTables
             data = testCase.multivariableData();
             t = gwidgets.Table(Data=data);
             t.addTooltip("a row", "row", 2);
-            t.addTooltip(@(v) "val=" + string(v), "column", 1);
+            t.addTooltip(@(ctx) "val=" + string(ctx.Value), "column", 1);
 
             testCase.verifyEqual(t.simulateBridgeHover(2, 1), ...
                 strjoin(["a row", "val=2"], newline))
         end
 
         function tFunctionTooltipReceivesColumnSlice(testCase)
-            % Two-arg function on a column target gets the whole column.
+            % column target -> ctx.Column populated as a vector.
             data = testCase.multivariableData();  % Numerical is [1..5]
             t = gwidgets.Table(Data=data);
-            t.addTooltip(@(~, col) "max=" + max(col), "column", 1);
+            t.addTooltip(@(ctx) "max=" + max(ctx.Column), "column", 1);
 
             testCase.verifyEqual(t.simulateBridgeHover(3, 1), "max=5")
         end
 
         function tFunctionTooltipReceivesRowSliceDefault(testCase)
-            % Default row context is "Table" (1xN), so name access works
-            % on any table.
+            % row target default ContextShape="Table" — ctx.Row is a 1xN
+            % table, so name access works on any table.
             data = testCase.multivariableData();
             t = gwidgets.Table(Data=data);
-            t.addTooltip(@(~, row) "n=" + row.Numerical, "row", 2);
+            t.addTooltip(@(ctx) "n=" + ctx.Row.Numerical, "row", 2);
 
             testCase.verifyEqual(t.simulateBridgeHover(2, 3), "n=2")
         end
 
         function tFunctionTooltipRowSliceValuesShape(testCase)
-            % ContextShape="Values" extracts the row as a vector — works
+            % ContextShape="Values" extracts ctx.Row as a vector — works
             % for homogeneous tables.
             m = magic(5);
             t = gwidgets.Table(Data=array2table(m));
-            t.addTooltip(@(~, row) "max=" + max(row), "row", 2, ...
+            t.addTooltip(@(ctx) "max=" + max(ctx.Row), "row", 2, ...
                 "ContextShape", "Values");
 
             testCase.verifyEqual(t.simulateBridgeHover(2, 1), ...
@@ -266,61 +266,50 @@ classdef tTooltips < test.WithExampleTables
         function tFunctionTooltipReceivesWholeTable(testCase)
             data = testCase.multivariableData();
             t = gwidgets.Table(Data=data);
-            t.addTooltip(@(~, tbl) "rows=" + height(tbl), "table");
+            t.addTooltip(@(ctx) "rows=" + height(ctx.Table), "table");
 
             testCase.verifyEqual(t.simulateBridgeHover(1, 1), "rows=5")
         end
 
-        function tFunctionTooltipTableValuesShape(testCase)
-            % ContextShape="Values" on a homogeneous table returns the
-            % underlying numeric array.
-            m = magic(5);
-            t = gwidgets.Table(Data=array2table(m));
-            t.addTooltip(@(~, arr) "max=" + max(arr, [], "all"), "table", ...
-                "ContextShape", "Values");
-
-            testCase.verifyEqual(t.simulateBridgeHover(1, 1), "max=25")
-        end
-
-        function tFunctionTooltipCellTableShape(testCase)
-            % ContextShape="Table" on a cell target gives a 1x1 table at
-            % the hovered cell — useful for extracting the column name.
+        function tFunctionTooltipCellTargetExposesPosition(testCase)
+            % Cell target gets the DisplayRow/DisplayColumn/DataRow/...
+            % via the context, useful for printing the cell location.
             data = testCase.multivariableData();
             t = gwidgets.Table(Data=data);
-            t.addTooltip(@(~, cellTbl) "col=" + string(cellTbl.Properties.VariableNames{1}), ...
-                "cell", [2 1], "ContextShape", "Table");
+            t.addTooltip(@(ctx) sprintf("(%d,%d)", ctx.DisplayRow, ctx.DisplayColumn), ...
+                "cell", [2 1]);
 
-            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "col=Numerical")
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "(2,1)")
         end
 
         function tFunctionTooltipSeesHiddenColumns(testCase)
-            % Hiding a column doesn't remove it from the data; tooltip
-            % functions get the full underlying Data so aggregates can
-            % reach hidden columns and filtered-out rows.
+            % Hiding a column doesn't remove it from the data; the
+            % context's Table is the full underlying Data, hidden
+            % columns reachable by name.
             m = magic(5);
             t = gwidgets.Table(Data=array2table(m));
             t.HiddenColumnNames = "Var2";
-            t.addTooltip(@(~, tbl) strjoin(string(tbl.Var2), ","), "table");
+            t.addTooltip(@(ctx) strjoin(string(ctx.Table.Var2), ","), "table");
 
             expected = strjoin(string(m(:, 2)), ",");
             testCase.verifyEqual(t.simulateBridgeHover(1, 1), expected)
         end
 
         function tFunctionTooltipRowIncludesHiddenColumns(testCase)
-            % Row slice is taken from the underlying Data, so hidden
-            % columns are still part of the slice. Use a mixed-type table
-            % to force the 1xN-table fallback so we can address by name.
+            % ctx.Row is a slice of the underlying Data so hidden columns
+            % are still reachable by name. Use a mixed-type table so the
+            % default Table shape applies and named access works.
             data = testCase.multivariableData(); % Numerical, Categorical, Logical, String
             t = gwidgets.Table(Data=data);
             t.HiddenColumnNames = "String";
-            t.addTooltip(@(~, row) "s=" + row.String, "row", 2);
+            t.addTooltip(@(ctx) "s=" + ctx.Row.String, "row", 2);
 
             testCase.verifyEqual(t.simulateBridgeHover(2, 1), "s=x")
         end
 
         function tFunctionTooltipErrorIsContained(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
-            t.addTooltip(@(v) error("boom"), "cell", [2 1]);
+            t.addTooltip(@(ctx) error("boom"), "cell", [2 1]);
 
             % Hovering the broken tooltip's cell still returns text rather
             % than throwing out of the hover callback.
@@ -370,7 +359,7 @@ classdef tTooltips < test.WithExampleTables
 
         function tAddFunctionTooltipStoresHandle(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
-            fn = @(v) "Cell: " + string(v);
+            fn = @(ctx) "Cell: " + string(ctx.Value);
             t.addTooltip(fn, "column", 1);
             testCase.assertNumElements(t.Tooltips, 1)
             testCase.verifyEqual(t.Tooltips(1).Text, "")
@@ -378,26 +367,24 @@ classdef tTooltips < test.WithExampleTables
         end
 
         function tFunctionTooltipColumnSliceIsHoveredColumn(testCase)
-            % When a column tooltip targets multiple columns, the slice
-            % passed to the function is the column the user is actually
-            % hovering — not all configured columns concatenated.
+            % When a column tooltip targets multiple columns, ctx.Column
+            % is the column the user is actually hovering — not all
+            % configured columns concatenated.
             data = testCase.multivariableData(); % Numerical=1..5, Logical=[1 0 1 0 1]
             t = gwidgets.Table(Data=data);
-            t.addTooltip(@(~, col) "sum=" + sum(col), "column", [1 3]);
+            t.addTooltip(@(ctx) "sum=" + sum(ctx.Column), "column", [1 3]);
 
             testCase.verifyEqual(t.simulateBridgeHover(1, 1), "sum=15") % Numerical
             testCase.verifyEqual(t.simulateBridgeHover(1, 3), "sum=3")  % Logical
         end
 
-        function tFunctionTooltipCellTargetGetsValueTwice(testCase)
-            % For "cell" target, both args of a two-arg function receive
-            % the hovered cell value.
+        function tFunctionTooltipContextReportsTarget(testCase)
+            % ctx.Target is the firing tooltip's target.
             data = testCase.multivariableData();
             t = gwidgets.Table(Data=data);
-            t.addTooltip(@(v, ctx) "v=" + string(v) + " ctx=" + string(ctx), ...
-                "cell", [2 1]);
+            t.addTooltip(@(ctx) "tgt=" + ctx.Target, "row", 2);
 
-            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "v=2 ctx=2")
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "tgt=row")
         end
 
     end

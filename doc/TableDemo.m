@@ -74,21 +74,20 @@ tb.Tooltip = "Hover any cell for details";
 tb.addTooltip("Categorical group label", "column", 2);
 tb.addTooltip("Highlighted row",         "row",    3);
 tb.addTooltip("Outlier",                 "cell",   [5 4]);
-%[text] Function form (1 arg): the hovered cell value.
-tb.addTooltip(@(v) "Cell value: " + string(v), "column", 4);
-%[text] Function form (2 args): cell value plus a target-shaped context. Slices come from the underlying `Data` (hidden columns and filtered-out rows are reachable). Per-target defaults: `column`=Values vector, `row`=1×N Table, `table`=full Data, `cell`=cell value. Override with `ContextShape="Values"` or `ContextShape="Table"`.
-tb.addTooltip(@(~, col) "Column max: "  + max(col),         "column", 4);
-tb.addTooltip(@(~, row) "Row label: "   + string(row.Note), "row",    3);
-tb.addTooltip(@(~, tbl) "Total rows: "  + height(tbl),      "table");
+%[text] Function form: receives a `TooltipContext` with fields `Value`, `Row`, `Column`, `Table`, `DisplayRow`/`DisplayColumn`, `DataRow`/`DataColumn`, and `Target`. `Row` / `Column` slices come from the underlying `Data` table (hidden columns and filtered-out rows reachable). Per-target `ContextShape` defaults: `column`=Values vector, `row`=1×N Table, `table`=full Data, `cell`=cell value. Override with `ContextShape="Values"` or `ContextShape="Table"`.
+tb.addTooltip(@(ctx) "Cell value: " + string(ctx.Value),       "column", 4);
+tb.addTooltip(@(ctx) "Column max: " + max(ctx.Column),         "column", 4);
+tb.addTooltip(@(ctx) "Row label: "  + string(ctx.Row.Note),    "row",    3);
+tb.addTooltip(@(ctx) "Total rows: " + height(ctx.Table),       "table");
 %[text] Use `ContextShape="Values"` to get the row as a vector for numeric aggregates:
-tb.addTooltip(@(~, row) "Row sum: " + sum(row), "row", 3, "ContextShape", "Values");
+tb.addTooltip(@(ctx) "Row sum: " + sum(ctx.Row), "row", 3, "ContextShape", "Values");
 %[text] ### Styled tooltips
 %[text] Pass a `TooltipStyle` or a function returning one. Per-tooltip styles override the widget-wide `DefaultTooltipStyle`.
 tb.DefaultTooltipStyle = gwidgets.internal.table.TooltipStyle(BackgroundColor="#222", FontColor="white", Padding=6);
-heat = @(v) gwidgets.internal.table.TooltipStyle( ...
-    BackgroundColor=string(sprintf("rgb(%d,80,80)", min(255, round(v*4)))), ...
+heat = @(ctx) gwidgets.internal.table.TooltipStyle( ...
+    BackgroundColor=string(sprintf("rgb(%d,80,80)", min(255, round(ctx.Value*4)))), ...
     FontColor="white", Padding=6);
-tb.addTooltip(@(v) "Value: " + string(v), "column", 4, "Style", heat);
+tb.addTooltip(@(ctx) "Value: " + string(ctx.Value), "column", 4, "Style", heat);
 
 
 

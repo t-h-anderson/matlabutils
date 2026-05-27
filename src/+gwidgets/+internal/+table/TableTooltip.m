@@ -84,23 +84,16 @@ classdef TableTooltip
             idx = this.TargetFunction(tbl);
         end
 
-        function txt = textFor(this, cellValue, contextValue)
-            % textFor returns the rendered tooltip string. If a TextFunction
-            % is set, it's called with the hovered cell's value (and,
-            % optionally, a target-shaped context value: column slice,
-            % row slice, or whole table — see contextForHover in Table).
-            % Otherwise the static Text is returned.
+        function txt = textFor(this, ctx)
+            % textFor returns the rendered tooltip string. The TextFunction
+            % is called with a TooltipContext describing the hovered cell;
+            % if no function is set, the static Text is returned.
             arguments
                 this
-                cellValue = missing
-                contextValue = missing
+                ctx (1,1) gwidgets.internal.table.TooltipContext
             end
             if ~isempty(this.TextFunction)
-                if this.functionTakesContext()
-                    txt = string(this.TextFunction(cellValue, contextValue));
-                else
-                    txt = string(this.TextFunction(cellValue));
-                end
+                txt = string(this.TextFunction(ctx));
                 if ~isscalar(txt)
                     txt = strjoin(txt, newline);
                 end
@@ -109,23 +102,18 @@ classdef TableTooltip
             end
         end
 
-        function sty = styleFor(this, cellValue, contextValue)
+        function sty = styleFor(this, ctx)
             % styleFor resolves to a TooltipStyle (possibly empty if the
-            % tooltip didn't set a Style). A StyleFunction is invoked
-            % with the same arity rules as TextFunction.
+            % tooltip didn't set a Style). A StyleFunction is called with
+            % the same TooltipContext as the TextFunction.
             arguments
                 this
-                cellValue = missing
-                contextValue = missing
+                ctx (1,1) gwidgets.internal.table.TooltipContext
             end
             sty = gwidgets.internal.table.TooltipStyle.empty;
             if ~isempty(this.StyleFunction)
                 try
-                    if this.functionTakes(this.StyleFunction, 2)
-                        result = this.StyleFunction(cellValue, contextValue);
-                    else
-                        result = this.StyleFunction(cellValue);
-                    end
+                    result = this.StyleFunction(ctx);
                     if isa(result, "gwidgets.internal.table.TooltipStyle") && isscalar(result)
                         sty = result;
                     end
@@ -135,21 +123,6 @@ classdef TableTooltip
             elseif ~isempty(this.Style)
                 sty = this.Style;
             end
-        end
-
-        function tf = functionTakes(~, fn, n)
-            % True if fn accepts at least n args (varargin counts).
-            try
-                k = nargin(fn);
-            catch
-                tf = false;
-                return
-            end
-            tf = k >= n || k < 0;
-        end
-
-        function tf = functionTakesContext(this)
-            tf = this.functionTakes(this.TextFunction, 2);
         end
 
         function tf = matches(this, displayRow, displayColumn)
