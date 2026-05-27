@@ -142,50 +142,64 @@
     return parentDoc;
   }
 
-  function ancestorMatching(node, selector) {
-    while (node && node.nodeType === 1) {
-      if (node.matches && node.matches(selector)) return node;
-      node = node.parentNode;
-    }
-    return null;
-  }
-
-  function indexInParent(node, selector) {
-    // 1-based index among siblings that match the selector.
+  function indexInParent(node) {
+    // 1-based index of node among its element siblings.
     if (!node || !node.parentNode) return -1;
     var siblings = node.parentNode.children;
-    var n = 0;
     for (var i = 0; i < siblings.length; i++) {
-      if (!selector || siblings[i].matches(selector)) {
-        n++;
-        if (siblings[i] === node) return n;
-      }
+      if (siblings[i] === node) return i + 1;
     }
     return -1;
   }
 
-  function cellPosition(cell) {
-    // Prefer ARIA attributes (1-based per spec) when present.
-    var ariaRow = parseInt(cell.getAttribute("aria-rowindex"), 10);
-    var ariaCol = parseInt(cell.getAttribute("aria-colindex"), 10);
-    var row = !isNaN(ariaRow) ? ariaRow : -1;
-    var col = !isNaN(ariaCol) ? ariaCol : -1;
-
-    // Fallback to DOM-position math when ARIA isn't present.
-    if (col < 0) {
-      col = indexInParent(cell, null);
+  function gridCoordsFromTarget(target, root) {
+    // Walk up from the event target collecting any aria-rowindex /
+    // aria-colindex attributes. This is the generic ARIA grid approach
+    // and works regardless of which exact class names MATLAB happens
+    // to use for cells/rows in a given release.
+    var row = -1, col = -1;
+    var cellEl = null;
+    var node = target;
+    while (node && node.nodeType === 1 && node !== root) {
+      if (col < 0) {
+        var c = parseInt(node.getAttribute && node.getAttribute("aria-colindex"), 10);
+        if (!isNaN(c)) { col = c; if (!cellEl) cellEl = node; }
+      }
+      if (row < 0) {
+        var r = parseInt(node.getAttribute && node.getAttribute("aria-rowindex"), 10);
+        if (!isNaN(r)) row = r;
+      }
+      if (row >= 0 && col >= 0) break;
+      node = node.parentNode;
     }
-    if (row < 0) {
-      var rowEl = ancestorMatching(cell, ROW_SELECTOR);
-      if (rowEl) {
-        var ariaRowEl = parseInt(rowEl.getAttribute("aria-rowindex"), 10);
-        row = !isNaN(ariaRowEl) ? ariaRowEl : indexInParent(rowEl, ROW_SELECTOR);
+
+    // Fallback: if the cell has no ARIA indices, try the legacy class
+    // selectors and infer indices from DOM order.
+    if (col < 0 || row < 0) {
+      var legacyCell = null;
+      node = target;
+      while (node && node.nodeType === 1 && node !== root) {
+        if (node.matches && node.matches(CELL_SELECTOR + "," + HEADER_SELECTOR)) {
+          legacyCell = node;
+          break;
+        }
+        node = node.parentNode;
+      }
+      if (legacyCell) {
+        if (col < 0) col = indexInParent(legacyCell);
+        if (row < 0) {
+          var rowEl = legacyCell.parentNode;
+          while (rowEl && rowEl !== root) {
+            if (rowEl.matches && rowEl.matches(ROW_SELECTOR)) break;
+            rowEl = rowEl.parentNode;
+          }
+          if (rowEl && rowEl !== root) row = indexInParent(rowEl);
+        }
       }
     }
 
-    // MATLAB display rows are 1-based. ARIA rowindex commonly counts the
-    // header as row 1 and bodies as 2..N+1; normalise so row 0 == header,
-    // row 1..N == display rows.
+    // ARIA rowindex counts the header as row 1 (body rows 2..N+1).
+    // Normalise so row 0 == header, row 1..N == display rows.
     if (row > 0) row = row - 1;
     return { row: row, col: col };
   }
@@ -206,20 +220,8 @@
       sendHover(0, 0);
       return;
     }
-    var cell = ancestorMatching(evt.target, CELL_SELECTOR);
-    if (cell) {
-      var pos = cellPosition(cell);
-      sendHover(pos.row, pos.col);
-      return;
-    }
-    var header = ancestorMatching(evt.target, HEADER_SELECTOR);
-    if (header) {
-      var hcol = parseInt(header.getAttribute("aria-colindex"), 10);
-      if (isNaN(hcol)) hcol = indexInParent(header, null);
-      sendHover(0, hcol);
-      return;
-    }
-    sendHover(0, 0);
+    var pos = gridCoordsFromTarget(evt.target, root);
+    sendHover(pos.row >= 0 ? pos.row : 0, pos.col >= 0 ? pos.col : 0);
   }
 
   function attachHover() {
