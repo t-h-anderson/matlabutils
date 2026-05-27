@@ -59,24 +59,13 @@ classdef TooltipStyle
             if ~isnan(override.BorderRadius);        merged.BorderRadius    = override.BorderRadius;    end
         end
 
-        function css = toCss(this)
-            % toCss emits an inline-style string suitable for the bridge
-            % popup div's style.cssText. Unset properties are omitted.
+        function css = containerCss(this)
+            % CSS subset that draws the block container (background,
+            % padding, border, border-radius). Tooltips that agree on
+            % these properties share a block.
             parts = strings(0, 1);
             if ~ismissing(this.BackgroundColor)
                 parts(end+1, 1) = "background-color:" + gwidgets.table.TooltipStyle.cssColor(this.BackgroundColor);
-            end
-            if ~ismissing(this.FontColor)
-                parts(end+1, 1) = "color:" + gwidgets.table.TooltipStyle.cssColor(this.FontColor);
-            end
-            if this.FontWeight ~= "normal"
-                parts(end+1, 1) = "font-weight:" + this.FontWeight;
-            end
-            if ~isnan(this.FontSize)
-                parts(end+1, 1) = "font-size:" + this.FontSize + "px";
-            end
-            if this.FontFamily ~= ""
-                parts(end+1, 1) = "font-family:" + this.FontFamily;
             end
             if ~isnan(this.Padding)
                 parts(end+1, 1) = "padding:" + this.Padding + "px";
@@ -91,6 +80,48 @@ classdef TooltipStyle
             if css ~= ""
                 css = css + ";";
             end
+        end
+
+        function css = lineCss(this)
+            % CSS subset that draws a single line within a block (font
+            % color, weight, size, family). Lines within the same block
+            % can each carry their own line style.
+            parts = strings(0, 1);
+            if ~ismissing(this.FontColor)
+                parts(end+1, 1) = "color:" + gwidgets.table.TooltipStyle.cssColor(this.FontColor);
+            end
+            if this.FontWeight ~= "normal"
+                parts(end+1, 1) = "font-weight:" + this.FontWeight;
+            end
+            if ~isnan(this.FontSize)
+                parts(end+1, 1) = "font-size:" + this.FontSize + "px";
+            end
+            if this.FontFamily ~= ""
+                parts(end+1, 1) = "font-family:" + this.FontFamily;
+            end
+            css = strjoin(parts, ";");
+            if css ~= ""
+                css = css + ";";
+            end
+        end
+
+        function key = containerKey(this)
+            % Struct of container-only properties for grouping comparison.
+            % isequaln on two containerKeys treats NaN/missing sentinels
+            % as equal so tooltips with no explicit overrides group
+            % together.
+            key = struct( ...
+                "BackgroundColor", this.BackgroundColor, ...
+                "Padding",         this.Padding, ...
+                "BorderColor",     this.BorderColor, ...
+                "BorderRadius",    this.BorderRadius);
+        end
+
+        function css = toCss(this)
+            % Concatenation of containerCss + lineCss — convenient when
+            % rendering a single-line block (e.g. the table-wide
+            % fallback tooltip).
+            css = this.containerCss() + this.lineCss();
         end
     end
 

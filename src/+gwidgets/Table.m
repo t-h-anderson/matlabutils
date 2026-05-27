@@ -2801,28 +2801,42 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function blocks = resolveTooltipBlocks(this, displayRow, displayColumn)
-            % Convert the internal {Text, Style} groups to the JS payload
-            % shape: cell array of struct("text", char, "css", char).
+            % Convert the internal groups to the JS payload shape:
+            %   cell array of
+            %     struct("containerCss", char,
+            %            "lines",        {cell of struct("text", char, "css", char)})
             groups = this.resolveTooltipGroups(displayRow, displayColumn);
             blocks = cell(1, numel(groups));
             for k = 1:numel(groups)
+                g = groups(k);
+                lineCells = cell(1, numel(g.Lines));
+                for j = 1:numel(g.Lines)
+                    lineCells{j} = struct( ...
+                        "text", char(g.Lines(j).Text), ...
+                        "css",  char(g.Lines(j).LineStyle.lineCss()));
+                end
                 blocks{k} = struct( ...
-                    "text", char(groups(k).Text), ...
-                    "css",  char(groups(k).Style.toCss()));
+                    "containerCss", char(g.ContainerStyle.containerCss()), ...
+                    "lines",        {lineCells});
             end
         end
 
         function groups = resolveTooltipGroups(this, displayRow, displayColumn)
-            % Resolve a hovered cell to a struct array of (Text, Style)
-            % groups. Each group bundles all matching tooltips that
-            % resolved to the same style; their text lines are joined
-            % most-specific-first (cell -> row -> column -> table;
+            % Resolve a hovered cell to a struct array of grouped matches.
+            % Each group is:
+            %   struct("ContainerStyle", TooltipStyle,
+            %          "Lines",          struct array of (Text, LineStyle))
+            % Two matches share a group when their resolved styles agree
+            % on every container property (background, padding, border,
+            % border-radius) — even if their line properties (font color,
+            % weight, size, family) differ. Within a group, lines are
+            % ordered most-specific-first (cell -> row -> column -> table;
             % registration order preserved within a target). Group order
             % is the order of first-appearance, which means the group
             % containing the most-specific match comes first.
             matches = this.collectTooltipMatches(displayRow, displayColumn);
 
-            groups = struct("Text", {}, "Style", {});
+            groups = struct("ContainerStyle", {}, "Lines", {});
 
             if isempty(matches)
                 text = this.TableTooltipText_;
@@ -2830,32 +2844,36 @@ classdef Table < gwidgets.internal.Reparentable
                     return
                 end
                 base = gwidgets.table.TooltipStyle.default();
-                groups(1).Text = text;
-                groups(1).Style = base.merge(this.DefaultTooltipStyle_);
+                base = base.merge(this.DefaultTooltipStyle_);
+                groups(1).ContainerStyle = base;
+                groups(1).Lines = struct("Text", text, "LineStyle", base);
                 return
             end
 
             for k = 1:numel(matches)
                 m = matches(k);
+                key = m.Style.containerKey();
                 gIdx = [];
                 for g = 1:numel(groups)
-                    if isequaln(groups(g).Style, m.Style)
+                    if isequaln(groups(g).ContainerStyle.containerKey(), key)
                         gIdx = g;
                         break
                     end
                 end
                 if isempty(gIdx)
-                    groups(end+1).Text = m.Text; %#ok<AGROW>
-                    groups(end).Style = m.Style;
+                    groups(end+1).ContainerStyle = m.Style; %#ok<AGROW>
+                    groups(end).Lines = struct("Text", m.Text, "LineStyle", m.Style);
                 else
-                    groups(gIdx).Text = groups(gIdx).Text + newline + m.Text;
+                    groups(gIdx).Lines(end+1).Text = m.Text;
+                    groups(gIdx).Lines(end).LineStyle = m.Style;
                 end
             end
         end
 
         function [text, style] = resolveTooltipTextAndStyle(this, displayRow, displayColumn)
-            % Back-compat helper for tests: text = all groups joined,
-            % style = the first (most-specific) group's style.
+            % Back-compat helper for tests: text = every line in every
+            % group, joined by newline; style = the first matching
+            % tooltip's full style (= the first line of the first group).
             groups = this.resolveTooltipGroups(displayRow, displayColumn);
             if isempty(groups)
                 text = "";
@@ -2863,8 +2881,14 @@ classdef Table < gwidgets.internal.Reparentable
                 style = base.merge(this.DefaultTooltipStyle_);
                 return
             end
-            text = strjoin([groups.Text], newline);
-            style = groups(1).Style;
+            allLines = strings(0, 1);
+            for k = 1:numel(groups)
+                for j = 1:numel(groups(k).Lines)
+                    allLines(end+1, 1) = groups(k).Lines(j).Text; %#ok<AGROW>
+                end
+            end
+            text = strjoin(allLines, newline);
+            style = groups(1).Lines(1).LineStyle;
         end
 
         function matches = collectTooltipMatches(this, displayRow, displayColumn)

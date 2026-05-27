@@ -362,7 +362,7 @@ MATLAB → bridge:
 |---------------|-----------------------------------------------|---------|
 | `HoverEnable` | —                                             | Start reporting `CellHover` events. Sent when the first tooltip is registered (or on `BridgeReady` if any tooltips already exist). |
 | `HoverDisable`| —                                             | Stop reporting and hide the popup. Sent when the last tooltip is removed. |
-| `SetTooltip`  | `{ blocks: [{ text, css }, ...] }`            | Render or hide the popup. An empty `blocks` list hides it. |
+| `SetTooltip`  | `{ blocks: [{ containerCss, lines: [{ text, css }, ...] }, ...] }` | Render or hide the popup. An empty `blocks` list hides it. Each block has its own container CSS (background, padding, border) and a list of styled lines (font color, weight, size, family). |
 
 Bridge → MATLAB:
 
@@ -391,27 +391,39 @@ The popup is a single `<div id="gwidgets-tooltip">` lazily appended to
 
 - `position: fixed` so it floats above the table regardless of scroll;
 - `pointer-events: none` so it doesn't interfere with table interactions;
-- `z-index: 9999` to sit above MATLAB dropdowns/menus;
-- `white-space: pre` so newlines in joined block text render as newlines.
+- `z-index: 9999` to sit above MATLAB dropdowns/menus.
 
-Each `SetTooltip` event clears the container and rebuilds it with one
-inner `<div>` per block: `textContent` carries the text (never `innerHTML`,
-to avoid HTML injection from cell values), and `style.cssText` carries the
-CSS string emitted by `gwidgets.internal.table.TooltipStyle.toCss()`.
-Blocks after the first get a `margin-top: 2px` divider.
+Each `SetTooltip` event clears the container and rebuilds it in a
+nested loop:
 
-The popup is positioned next to the cursor on each event and on every
-mouseover within the same cell (`positionTooltipNearCursor`).  Edge
-detection flips the popup to the other side of the cursor when it would
-otherwise extend past the right or bottom of the viewport.
+- one outer `<div>` per **block**, with `containerCss` applied (background,
+  padding, border, border-radius);
+- one inner `<div>` per **line** inside that block, with `textContent`
+  carrying the text (never `innerHTML`, to avoid HTML injection from
+  cell values) and `style.cssText` carrying the line's CSS (font color,
+  weight, size, family).
 
-### 10.4 v1 vs v2
+Blocks after the first get a `margin-top: 2px` divider so distinct
+backgrounds visibly separate.  The popup is positioned next to the
+cursor on each event and on every mouseover within the same cell
+(`positionTooltipNearCursor`).  Edge detection flips the popup to the
+other side of the cursor when it would otherwise extend past the right
+or bottom of the viewport.
 
-The protocol carries a **list** of blocks from day one even though v1 only
-ever emits a single block (`resolveTooltipBlocks` returns `{ {text, css} }`).
-v2 (one block per unique style group when multiple tooltips match the same
-cell) is a MATLAB-side-only change to `resolveTooltipBlocks` — the JS
-already renders an arbitrary list.
+### 10.4 Grouping rule
+
+`resolveTooltipGroups` (MATLAB side) decides which matches share a
+block.  Two matches share a block when their resolved styles agree on
+every **container** property (`BackgroundColor`, `Padding`,
+`BorderColor`, `BorderRadius`) — comparison is `isequaln` on the struct
+returned by `TooltipStyle.containerKey()` so NaN/missing sentinels treat
+unset==unset.  Line properties (`FontColor`, `FontWeight`, `FontSize`,
+`FontFamily`) do **not** affect grouping — each line keeps its own line
+style.
+
+Within a block, lines are ordered most-specific-first (cell → row →
+column → table; registration order preserved within a target).  Block
+order is the order of first-appearance, which is also most-specific-first.
 
 ### 10.5 Lifecycle
 

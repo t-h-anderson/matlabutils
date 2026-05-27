@@ -15,7 +15,10 @@
   //   Diag        true|false              — enable/disable diagnostic messages to MATLAB
   //   HoverEnable                         — start reporting CellHover events
   //   HoverDisable                        — stop reporting CellHover events
-  //   SetTooltip  {blocks:[{text,css}...]}— render or hide the popup; empty list hides
+  //   SetTooltip  {blocks:[{containerCss, lines:[{text,css}...]}, ...]}
+  //                           — render or hide the popup; empty list hides.
+  //                             Each block is a styled container <div>;
+  //                             each line inside has its own per-line CSS.
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
@@ -264,18 +267,27 @@
       "position:fixed",
       "z-index:9999",
       "pointer-events:none",
-      "white-space:pre",
       "font-family:sans-serif"
     ].join(";") + ";";
     // Clear existing children.
     while (el.firstChild) el.removeChild(el.firstChild);
+    // Each block is an outer container <div> (background, padding,
+    // border) wrapping one inner <div> per line (font color, weight,
+    // size, family).
     for (var i = 0; i < blocks.length; i++) {
       var b = blocks[i];
-      var div = el.ownerDocument.createElement("div");
-      div.textContent = b.text || "";
-      if (b.css) div.style.cssText = b.css;
-      if (i > 0) div.style.marginTop = "2px";
-      el.appendChild(div);
+      var blockDiv = el.ownerDocument.createElement("div");
+      if (b.containerCss) blockDiv.style.cssText = b.containerCss;
+      if (i > 0) blockDiv.style.marginTop = "2px";
+      var lines = b.lines || [];
+      for (var j = 0; j < lines.length; j++) {
+        var ln = lines[j];
+        var lineDiv = el.ownerDocument.createElement("div");
+        lineDiv.textContent = ln.text || "";
+        if (ln.css) lineDiv.style.cssText = ln.css;
+        blockDiv.appendChild(lineDiv);
+      }
+      el.appendChild(blockDiv);
     }
     el.style.display = "block";
     positionTooltipNearCursor();

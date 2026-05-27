@@ -45,12 +45,10 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEqual(sty.BackgroundColor, "#ccc")
         end
 
-        function tBlocksGroupByStyle(testCase)
-            % Three tooltips, two distinct styles. The cell and column
-            % tooltips share "red" so they group together (cell line
-            % first, column line after); the row tooltip is "blue" alone;
-            % the table tooltip has no per-tooltip style so it falls into
-            % the (base) default-style group on its own.
+        function tBlocksGroupByContainer(testCase)
+            % Three tooltips with two distinct backgrounds. cell + column
+            % share red -> one block with two lines. row gets blue ->
+            % own block. table has no per-tooltip style -> base block.
             t = gwidgets.Table(Data=testCase.multivariableData());
             red  = gwidgets.table.TooltipStyle(BackgroundColor="red");
             blue = gwidgets.table.TooltipStyle(BackgroundColor="blue");
@@ -62,23 +60,57 @@ classdef tTooltips < test.WithExampleTables
 
             blocks = t.resolveTooltipBlocks(2, 3);
             testCase.assertNumElements(blocks, 3)
-            testCase.verifyEqual(string(blocks{1}.text), ...
-                "cell-text" + newline + "col-text")
-            testCase.verifyEqual(string(blocks{2}.text), "row-text")
-            testCase.verifyEqual(string(blocks{3}.text), "tbl-text")
-            % Group 1 + 2 carry an explicit color; group 3 uses the base
-            % (no explicit BackgroundColor override beyond the default).
-            testCase.verifyThat(blocks{1}.css, ...
+
+            % Block 1: red container, two lines (cell + col).
+            testCase.assertNumElements(blocks{1}.lines, 2)
+            testCase.verifyEqual(string(blocks{1}.lines{1}.text), "cell-text")
+            testCase.verifyEqual(string(blocks{1}.lines{2}.text), "col-text")
+            testCase.verifyThat(blocks{1}.containerCss, ...
                 matlab.unittest.constraints.ContainsSubstring("background-color:red"))
-            testCase.verifyThat(blocks{2}.css, ...
+
+            % Block 2: blue container, one line.
+            testCase.assertNumElements(blocks{2}.lines, 1)
+            testCase.verifyEqual(string(blocks{2}.lines{1}.text), "row-text")
+            testCase.verifyThat(blocks{2}.containerCss, ...
                 matlab.unittest.constraints.ContainsSubstring("background-color:blue"))
+
+            % Block 3: base container, one line.
+            testCase.assertNumElements(blocks{3}.lines, 1)
+            testCase.verifyEqual(string(blocks{3}.lines{1}.text), "tbl-text")
+        end
+
+        function tBlocksJoinSameBackgroundDifferentFonts(testCase)
+            % The motivating case: two tooltips with the same background
+            % but different font colors live in ONE block (shared green
+            % container), with each line carrying its own font color.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            greenBlack = gwidgets.table.TooltipStyle( ...
+                BackgroundColor="green", FontColor="black");
+            greenWhite = gwidgets.table.TooltipStyle( ...
+                BackgroundColor="green", FontColor="white");
+
+            t.addTooltip("alpha", "cell", [1 1], "Style", greenBlack);
+            t.addTooltip("beta",  "cell", [1 1], "Style", greenWhite);
+
+            blocks = t.resolveTooltipBlocks(1, 1);
+            testCase.assertNumElements(blocks, 1)
+            testCase.assertNumElements(blocks{1}.lines, 2)
+            testCase.verifyThat(blocks{1}.containerCss, ...
+                matlab.unittest.constraints.ContainsSubstring("background-color:green"))
+            % Per-line font color carried on each inner line, not on the
+            % container.
+            testCase.verifyThat(blocks{1}.lines{1}.css, ...
+                matlab.unittest.constraints.ContainsSubstring("color:black"))
+            testCase.verifyThat(blocks{1}.lines{2}.css, ...
+                matlab.unittest.constraints.ContainsSubstring("color:white"))
+            testCase.verifyThat(blocks{1}.containerCss, ...
+                ~matlab.unittest.constraints.ContainsSubstring("color:black"))
         end
 
         function tBlocksGroupOrderIsMostSpecificFirst(testCase)
-            % Group order = first-appearance, which is most-specific-first
-            % (cell > row > column > table). If the row tooltip uses red
-            % and a cell tooltip uses red, the red group still leads
-            % because the cell match appears first in the iteration.
+            % Group order = first-appearance, which is most-specific-first.
+            % cell rank wins over column rank: the red group still leads
+            % even though the column tooltip was registered first.
             t = gwidgets.Table(Data=testCase.multivariableData());
             red = gwidgets.table.TooltipStyle(BackgroundColor="red");
 
@@ -87,9 +119,9 @@ classdef tTooltips < test.WithExampleTables
 
             blocks = t.resolveTooltipBlocks(2, 1);
             testCase.assertNumElements(blocks, 1)
-            % Cell line first, column line after.
-            testCase.verifyEqual(string(blocks{1}.text), ...
-                "cell" + newline + "col")
+            testCase.assertNumElements(blocks{1}.lines, 2)
+            testCase.verifyEqual(string(blocks{1}.lines{1}.text), "cell")
+            testCase.verifyEqual(string(blocks{1}.lines{2}.text), "col")
         end
 
         function tBlocksEmptyWhenNothingToShow(testCase)
@@ -103,7 +135,8 @@ classdef tTooltips < test.WithExampleTables
             t.Tooltip = "table-wide";
             blocks = t.resolveTooltipBlocks(2, 1);
             testCase.assertNumElements(blocks, 1)
-            testCase.verifyEqual(string(blocks{1}.text), "table-wide")
+            testCase.assertNumElements(blocks{1}.lines, 1)
+            testCase.verifyEqual(string(blocks{1}.lines{1}.text), "table-wide")
         end
 
         function tStyleFunctionReceivesContext(testCase)
