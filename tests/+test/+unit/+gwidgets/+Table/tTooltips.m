@@ -147,27 +147,26 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEqual(t.simulateBridgeHover(3, 1), "max=5")
         end
 
-        function tFunctionTooltipReceivesRowSlice(testCase)
-            % Two-arg function on a row target gets a values vector when
-            % the table's columns can concatenate.
-            m = magic(5);
-            t = gwidgets.Table(Data=array2table(m));
-            t.addTooltip(@(~, row) "max=" + max(row), "row", 2);
+        function tFunctionTooltipReceivesRowSliceDefault(testCase)
+            % Default row context is "Table" (1xN), so name access works
+            % on any table.
+            data = testCase.multivariableData();
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(~, row) "n=" + row.Numerical, "row", 2);
 
-            % Row 2 of magic(5) is [23 5 7 14 16]; max == 23.
-            testCase.verifyEqual(t.simulateBridgeHover(2, 1), ...
-                "max=" + string(max(m(2, :))))
+            testCase.verifyEqual(t.simulateBridgeHover(2, 3), "n=2")
         end
 
-        function tFunctionTooltipRowSliceMixedTypesFallsBackToTable(testCase)
-            % For mixed-type tables, the values can't concatenate into a
-            % single vector — row context falls back to a 1xN table so
-            % the user can still reach variables by name.
-            data = testCase.multivariableData(); % Numerical, Categorical, Logical, String
-            t = gwidgets.Table(Data=data);
-            t.addTooltip(@(~, row) "n=" + row.Numerical + " s=" + row.String, "row", 2);
+        function tFunctionTooltipRowSliceValuesShape(testCase)
+            % ContextShape="Values" extracts the row as a vector — works
+            % for homogeneous tables.
+            m = magic(5);
+            t = gwidgets.Table(Data=array2table(m));
+            t.addTooltip(@(~, row) "max=" + max(row), "row", 2, ...
+                "ContextShape", "Values");
 
-            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "n=2 s=x")
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), ...
+                "max=" + string(max(m(2, :))))
         end
 
         function tFunctionTooltipReceivesWholeTable(testCase)
@@ -176,6 +175,28 @@ classdef tTooltips < test.WithExampleTables
             t.addTooltip(@(~, tbl) "rows=" + height(tbl), "table");
 
             testCase.verifyEqual(t.simulateBridgeHover(1, 1), "rows=5")
+        end
+
+        function tFunctionTooltipTableValuesShape(testCase)
+            % ContextShape="Values" on a homogeneous table returns the
+            % underlying numeric array.
+            m = magic(5);
+            t = gwidgets.Table(Data=array2table(m));
+            t.addTooltip(@(~, arr) "max=" + max(arr, [], "all"), "table", ...
+                "ContextShape", "Values");
+
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), "max=25")
+        end
+
+        function tFunctionTooltipCellTableShape(testCase)
+            % ContextShape="Table" on a cell target gives a 1x1 table at
+            % the hovered cell — useful for extracting the column name.
+            data = testCase.multivariableData();
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(~, cellTbl) "col=" + string(cellTbl.Properties.VariableNames{1}), ...
+                "cell", [2 1], "ContextShape", "Table");
+
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "col=Numerical")
         end
 
         function tFunctionTooltipSeesHiddenColumns(testCase)

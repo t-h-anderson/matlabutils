@@ -12,6 +12,7 @@ classdef TableTooltip
         TextFunction (1,:) function_handle {mustBeScalarOrEmpty}
         SelectionMode (1,1) gwidgets.internal.table.SelectionMode
         Target (1,1) string {mustBeMember(Target, ["table", "row", "column", "cell"])} = "table"
+        ContextShape (1,1) string {mustBeMember(ContextShape, ["Values", "Table"])} = "Values"
     end
 
     properties
@@ -27,6 +28,7 @@ classdef TableTooltip
                 nvp.TargetIndices (:,:) double
                 nvp.TargetFunction (1,:) function_handle
                 nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
+                nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = gwidgets.internal.table.TableTooltip.defaultContextShape(target)
             end
 
             if isa(text, "function_handle")
@@ -53,6 +55,11 @@ classdef TableTooltip
             end
 
             this.SelectionMode = nvp.SelectionMode;
+            this.ContextShape = nvp.ContextShape;
+        end
+
+        function shape = defaultContextShapeFor(this)
+            shape = gwidgets.internal.table.TableTooltip.defaultContextShape(this.Target);
         end
 
         function idx = indices(this, tbl)
@@ -126,6 +133,20 @@ classdef TableTooltip
                     else
                         tf = any(idx(:,1) == displayRow & idx(:,2) == displayColumn);
                     end
+            end
+        end
+    end
+
+    methods (Static)
+        function shape = defaultContextShape(target)
+            % Per-target defaults: column values vector and a cell scalar
+            % are the natural ergonomic forms; row and whole-table default
+            % to "Table" so mixed-type data is always reachable.
+            switch target
+                case {"column", "cell"}
+                    shape = "Values";
+                otherwise % "row", "table"
+                    shape = "Table";
             end
         end
     end

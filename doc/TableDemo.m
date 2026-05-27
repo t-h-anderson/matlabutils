@@ -76,10 +76,12 @@ tb.addTooltip("Highlighted row",         "row",    3);
 tb.addTooltip("Outlier",                 "cell",   [5 4]);
 %[text] Function form (1 arg): the hovered cell value.
 tb.addTooltip(@(v) "Cell value: " + string(v), "column", 4);
-%[text] Function form (2 args): cell value plus a target-shaped context — vector for `column`, 1×N table for `row`, full `DisplayData` for `table`.
-tb.addTooltip(@(~, col) "Column max: "  + max(col),    "column", 4);
-tb.addTooltip(@(~, row) "Row label: "   + string(row.Note), "row", 3);
-tb.addTooltip(@(~, tbl) "Total rows: "  + height(tbl), "table");
+%[text] Function form (2 args): cell value plus a target-shaped context. Slices come from the underlying `Data` (hidden columns and filtered-out rows are reachable). Per-target defaults: `column`=Values vector, `row`=1×N Table, `table`=full Data, `cell`=cell value. Override with `ContextShape="Values"` or `ContextShape="Table"`.
+tb.addTooltip(@(~, col) "Column max: "  + max(col),         "column", 4);
+tb.addTooltip(@(~, row) "Row label: "   + string(row.Note), "row",    3);
+tb.addTooltip(@(~, tbl) "Total rows: "  + height(tbl),      "table");
+%[text] Use `ContextShape="Values"` to get the row as a vector for numeric aggregates:
+tb.addTooltip(@(~, row) "Row sum: " + sum(row), "row", 3, "ContextShape", "Values");
 
 
 
