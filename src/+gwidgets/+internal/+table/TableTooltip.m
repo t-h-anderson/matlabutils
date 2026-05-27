@@ -63,18 +63,41 @@ classdef TableTooltip
             idx = this.TargetFunction(tbl);
         end
 
-        function txt = textFor(this, cellValue)
+        function txt = textFor(this, cellValue, contextValue)
             % textFor returns the rendered tooltip string. If a TextFunction
-            % is set, it's called with the hovered cell's value; otherwise
-            % the static Text is returned.
+            % is set, it's called with the hovered cell's value (and,
+            % optionally, a target-shaped context value: column slice,
+            % row slice, or whole table — see contextForHover in Table).
+            % Otherwise the static Text is returned.
+            arguments
+                this
+                cellValue = missing
+                contextValue = missing
+            end
             if ~isempty(this.TextFunction)
-                txt = string(this.TextFunction(cellValue));
+                if this.functionTakesContext()
+                    txt = string(this.TextFunction(cellValue, contextValue));
+                else
+                    txt = string(this.TextFunction(cellValue));
+                end
                 if ~isscalar(txt)
                     txt = strjoin(txt, newline);
                 end
             else
                 txt = this.Text;
             end
+        end
+
+        function tf = functionTakesContext(this)
+            % True if the TextFunction wants the second context argument.
+            % Negative nargin indicates varargin, which we treat as "yes".
+            try
+                n = nargin(this.TextFunction);
+            catch
+                tf = false;
+                return
+            end
+            tf = n >= 2 || n < 0;
         end
 
         function tf = matches(this, displayRow, displayColumn)

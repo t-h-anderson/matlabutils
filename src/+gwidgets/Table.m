@@ -804,7 +804,11 @@ classdef Table < gwidgets.internal.Reparentable
             %   addTooltip(t, "Patient height (cm)", "column", 4)
             %   addTooltip(t, "Outlier", "cell", [3 2; 5 7])
             %   addTooltip(t, @(v) "Value: " + v, "column", [2 3])
-            %     ^ function form: called with the hovered cell value
+            %     ^ function form (1 arg): hovered cell value
+            %   addTooltip(t, @(~, col) "Max: " + max(col), "column", 4)
+            %     ^ function form (2 args): cell value + target-shaped
+            %       context (column -> vector, row -> 1xN table,
+            %       table -> full DisplayData, cell -> cell value)
             arguments
                 this (1,1) gwidgets.Table
                 text % string scalar OR function_handle (cellValue) -> string
@@ -2806,7 +2810,8 @@ classdef Table < gwidgets.internal.Reparentable
                 if resolved.matches(displayRow, displayColumn)
                     rank = find(priorities == tt.Target, 1);
                     try
-                        rendered = tt.textFor(cellValue);
+                        contextValue = this.contextForHover(tt.Target, displayRow, displayColumn);
+                        rendered = tt.textFor(cellValue, contextValue);
                     catch err
                         rendered = "[tooltip error: " + string(err.message) + "]";
                     end
@@ -2838,6 +2843,34 @@ classdef Table < gwidgets.internal.Reparentable
             val = data{displayRow, displayColumn};
             if iscell(val) && isscalar(val)
                 val = val{1};
+            end
+        end
+
+        function ctx = contextForHover(this, target, displayRow, displayColumn)
+            % Build the second argument passed to a tooltip's TextFunction.
+            % Shape depends on the tooltip's target:
+            %   "column" -> the hovered column as a vector
+            %   "row"    -> the hovered row as a 1xN table
+            %   "table"  -> the full DisplayData table
+            %   "cell"   -> the hovered cell value (same as the first arg)
+            data = this.DisplayData;
+            switch target
+                case "column"
+                    if displayColumn >= 1 && displayColumn <= width(data)
+                        ctx = data{:, displayColumn};
+                    else
+                        ctx = missing;
+                    end
+                case "row"
+                    if displayRow >= 1 && displayRow <= size(data, 1)
+                        ctx = data(displayRow, :);
+                    else
+                        ctx = missing;
+                    end
+                case "table"
+                    ctx = data;
+                otherwise
+                    ctx = this.cellValueForHover(displayRow, displayColumn);
             end
         end
 

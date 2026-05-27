@@ -138,6 +138,32 @@ classdef tTooltips < test.WithExampleTables
                 strjoin(["a row", "val=2"], newline))
         end
 
+        function tFunctionTooltipReceivesColumnSlice(testCase)
+            % Two-arg function on a column target gets the whole column.
+            data = testCase.multivariableData();  % Numerical is [1..5]
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(~, col) "max=" + max(col), "column", 1);
+
+            testCase.verifyEqual(t.simulateBridgeHover(3, 1), "max=5")
+        end
+
+        function tFunctionTooltipReceivesRowSlice(testCase)
+            % Two-arg function on a row target gets a 1xN table row.
+            data = testCase.multivariableData();
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(~, row) "n=" + row.Numerical, "row", 2);
+
+            testCase.verifyEqual(t.simulateBridgeHover(2, 3), "n=2")
+        end
+
+        function tFunctionTooltipReceivesWholeTable(testCase)
+            data = testCase.multivariableData();
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(~, tbl) "rows=" + height(tbl), "table");
+
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), "rows=5")
+        end
+
         function tFunctionTooltipErrorIsContained(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.addTooltip(@(v) error("boom"), "cell", [2 1]);
