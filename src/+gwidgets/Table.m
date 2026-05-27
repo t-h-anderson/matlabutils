@@ -115,6 +115,7 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function delete(this)
+            this.detachMouseMotionListener();
             delete(this.FilterController);
             delete(this.CustomContextMenuItems);
             delete(this.ContextMenu);
@@ -782,6 +783,83 @@ classdef Table < gwidgets.internal.Reparentable
             style = gwidgets.internal.table.TableStyle(s, "row", "SelectionMode", "Display", "TargetFunction", @(this) this.VisibleGroupHeaderRowIdx);
         end
 
+    end
+
+    %% Tooltips
+    properties (Dependent)
+        Tooltip (1,1) string % Table-wide tooltip; pass-through to uitable.Tooltip
+    end
+
+    properties (GetAccess = ?matlab.unittest.TestCase, SetAccess = protected)
+        Tooltips (1,:) gwidgets.internal.table.TableTooltip
+    end
+
+    properties (Access = protected)
+        TableTooltipText_ (1,1) string = ""
+        MouseMotionListener_ event.listener {mustBeScalarOrEmpty} = event.listener.empty
+    end
+
+    methods
+        function addTooltip(this, text, tableTarget, targetIndicesOrFunction, nvp)
+            % addTooltip registers a hover-tooltip configuration. Mirrors addStyle.
+            %   addTooltip(t, "Click to open", "table")
+            %   addTooltip(t, "Patient height (cm)", "column", 4)
+            %   addTooltip(t, "Outlier", "cell", [3 2; 5 7])
+            arguments
+                this (1,1) gwidgets.Table
+                text (1,1) string
+                tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
+                targetIndicesOrFunction (:,:) = []
+                nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
+            end
+
+            if tableTarget == "table"
+                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, "SelectionMode", nvp.SelectionMode);
+            elseif isa(targetIndicesOrFunction, "function_handle")
+                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, "TargetFunction", targetIndicesOrFunction, "SelectionMode", nvp.SelectionMode);
+            elseif isnumeric(targetIndicesOrFunction)
+                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, "TargetIndices", targetIndicesOrFunction, "SelectionMode", nvp.SelectionMode);
+            else
+                error("GraphicsWidgets:Table:TooltipTarget", ...
+                    "Tooltip target must be an index array or a function that takes the table object as input.");
+            end
+
+            this.Tooltips(end+1) = newTooltip;
+            this.attachMouseMotionListener();
+        end
+
+        function removeTooltip(this, orderNum)
+            arguments
+                this
+                orderNum (1,:) double = []
+            end
+
+            if isempty(orderNum)
+                this.Tooltips(:) = [];
+            else
+                this.Tooltips(orderNum) = [];
+            end
+
+            if isempty(this.Tooltips)
+                this.detachMouseMotionListener();
+                if ~isempty(this.DisplayTable)
+                    this.DisplayTable.Tooltip = this.TableTooltipText_;
+                end
+            end
+        end
+    end
+
+    methods % Get/Set Tooltip
+        function val = get.Tooltip(this)
+            val = this.TableTooltipText_;
+        end
+
+        function set.Tooltip(this, val)
+            this.TableTooltipText_ = val;
+            if ~isempty(this.DisplayTable)
+                this.DisplayTable.Tooltip = val;
+            end
+        end
     end
 
     %% Context Menu
@@ -1512,6 +1590,12 @@ classdef Table < gwidgets.internal.Reparentable
             this.addContextMenu();
             this.setupColumnWidthBridge();
             this.doUpdateSequence();
+
+            % Apply any tooltip state that was configured before setup ran
+            this.DisplayTable.Tooltip = this.TableTooltipText_;
+            if ~isempty(this.Tooltips)
+                this.attachMouseMotionListener();
+            end
         end
 
         function updateDisplayData(this)
@@ -2372,6 +2456,8 @@ classdef Table < gwidgets.internal.Reparentable
                 this.GroupColumnIdx = zeros(1,0);
                 this.GroupFilteredCount = zeros(1,0);
                 this.GroupIdxs = zeros(1,0);
+                this.OpenGroups_ = string.empty(1,0);
+                this.HiddenGroups_ = string.empty(1,0);
 
                 this.GroupedDataToVisibleMap = this.FilteredDataToVisibleMap;
                 this.GroupedVisibleToDataMap = this.FilteredVisibleToDataMap;
@@ -2397,6 +2483,11 @@ classdef Table < gwidgets.internal.Reparentable
 
                 this.Groups = allGroups;
                 this.GroupIdxs = groupIdxs;
+
+                % Drop any open/hidden group state that no longer corresponds
+                % to a current group (e.g. after switching GroupingVariable).
+                this.OpenGroups_ = this.OpenGroups_(ismember(this.OpenGroups_, this.Groups));
+                this.HiddenGroups_ = this.HiddenGroups_(ismember(this.HiddenGroups_, this.Groups));
 
                 if numel(g) > 1
                     filteredGroupVars = arrayfun(@(x) this.FilteredData.(x), g, "UniformOutput", false);
@@ -2634,6 +2725,125 @@ classdef Table < gwidgets.internal.Reparentable
                 else
                     this.OpenGroups = [this.OpenGroups, group];
                 end
+            end
+        end
+
+        function attachMouseMotionListener(this)
+            if ~isempty(this.MouseMotionListener_) && isvalid(this.MouseMotionListener_)
+                return
+            end
+            if isempty(this.DisplayTable)
+                return
+            end
+            fig = ancestor(this.DisplayTable, "figure");
+            if isempty(fig)
+                return
+            end
+            if isempty(fig.WindowButtonMotionFcn)
+                fig.WindowButtonMotionFcn = @(~,~) [];
+            end
+            this.MouseMotionListener_ = event.listener(fig, ...
+                "WindowMouseMotion", @(~, evt) this.onTooltipMouseMotion(evt));
+        end
+
+        function detachMouseMotionListener(this)
+            if ~isempty(this.MouseMotionListener_)
+                delete(this.MouseMotionListener_);
+                this.MouseMotionListener_ = event.listener.empty;
+            end
+        end
+
+        function onTooltipMouseMotion(this, evt)
+            if isempty(this.DisplayTable) || ~isvalid(this.DisplayTable)
+                return
+            end
+            if isempty(this.Tooltips)
+                return
+            end
+
+            [displayRow, displayColumn, overTable] = this.cursorToDisplayCell(evt);
+            if ~overTable
+                this.applyTooltipText(this.TableTooltipText_);
+                return
+            end
+
+            text = this.resolveTooltipText(displayRow, displayColumn);
+            this.applyTooltipText(text);
+        end
+
+        function applyTooltipText(this, text)
+            if ~isequal(this.DisplayTable.Tooltip, text)
+                this.DisplayTable.Tooltip = text;
+            end
+        end
+
+        function text = resolveTooltipText(this, displayRow, displayColumn)
+            % Resolve hovered cell to the most specific tooltip text.
+            % Precedence (most specific wins, later registrations win ties):
+            % cell > row > column > table.
+            text = this.TableTooltipText_;
+            priorities = ["table", "column", "row", "cell"];
+            bestRank = 0;
+            for i = 1:numel(this.Tooltips)
+                tt = this.Tooltips(i);
+                idx = tt.indices(this);
+                if tt.Target ~= "table" && tt.SelectionMode == gwidgets.internal.table.SelectionMode.Data && ~isempty(idx)
+                    idx = this.dataSelectionToDisplaySelection(idx, tt.Target);
+                end
+                resolved = tt;
+                resolved.TargetIndices = idx;
+                if resolved.matches(displayRow, displayColumn)
+                    rank = find(priorities == tt.Target, 1);
+                    if rank >= bestRank
+                        bestRank = rank;
+                        text = tt.Text;
+                    end
+                end
+            end
+        end
+
+        function [displayRow, displayColumn, overTable] = cursorToDisplayCell(this, evt)
+            % Best-effort mapping from a WindowMouseMotion event point to a
+            % display (row, column) inside DisplayTable. The figure delivers
+            % `Point` in pixels relative to the figure. Returns overTable=false
+            % when the cursor is outside the table rectangle.
+            displayRow = 0;
+            displayColumn = 0;
+            overTable = false;
+
+            tbl = this.DisplayTable;
+            pos = getpixelposition(tbl, true);
+            point = evt.Point; % [x y] in figure pixels (y up from bottom)
+            x = point(1) - pos(1);
+            y = pos(2) + pos(4) - point(2); % distance from top of table
+
+            if x < 0 || y < 0 || x > pos(3) || y > pos(4)
+                return
+            end
+            overTable = true;
+
+            headerHeight = 22; % uitable default header row height in pixels
+            rowHeight = 22;    % uitable default body row height
+            if y < headerHeight
+                displayRow = 0; % cursor on header
+            else
+                displayRow = floor((y - headerHeight) / rowHeight) + 1;
+                nRows = size(this.DisplayTable.Data, 1);
+                if displayRow > nRows
+                    displayRow = 0;
+                end
+            end
+
+            widths = this.PixelColumnWidths;
+            if isempty(widths) || any(isnan(widths))
+                return
+            end
+            edges = [0, cumsum(widths)];
+            col = find(x >= edges(1:end-1) & x < edges(2:end), 1);
+            if isempty(col)
+                displayColumn = 0;
+            else
+                displayColumn = col;
             end
         end
 
