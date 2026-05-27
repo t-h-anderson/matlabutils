@@ -79,6 +79,29 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyError(fcn, "GraphicsWidgets:Table:TooltipTarget")
         end
 
+        function tHoverResolvesCellOverRow(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.addTooltip("table-wide");
+            t.addTooltip("row 2", "row", 2);
+            t.addTooltip("col 3", "column", 3);
+            t.addTooltip("cell (2,3)", "cell", [2 3]);
+
+            testCase.verifyEqual(t.simulateBridgeHover(2, 3), "cell (2,3)")
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "row 2")
+            testCase.verifyEqual(t.simulateBridgeHover(4, 3), "col 3")
+            testCase.verifyEqual(t.simulateBridgeHover(4, 1), "table-wide")
+        end
+
+        function tHoverFallsBackToTableTooltip(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.Tooltip = "default";
+            t.addTooltip("col 1", "column", 1);
+
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), "col 1")
+            % Cursor outside any cell (bridge sends 0,0).
+            testCase.verifyEqual(t.simulateBridgeHover(0, 0), "default")
+        end
+
         function tTooltipMatchesPrecedence(testCase)
             % cell match wins over row, which wins over column, which
             % wins over table.

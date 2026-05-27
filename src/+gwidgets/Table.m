@@ -115,7 +115,6 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function delete(this)
-            this.detachMouseMotionListener();
             delete(this.FilterController);
             delete(this.CustomContextMenuItems);
             delete(this.ContextMenu);
@@ -796,7 +795,6 @@ classdef Table < gwidgets.internal.Reparentable
 
     properties (Access = protected)
         TableTooltipText_ (1,1) string = ""
-        MouseMotionListener_ event.listener {mustBeScalarOrEmpty} = event.listener.empty
     end
 
     methods
@@ -824,8 +822,11 @@ classdef Table < gwidgets.internal.Reparentable
                     "Tooltip target must be an index array or a function that takes the table object as input.");
             end
 
+            wasEmpty = isempty(this.Tooltips);
             this.Tooltips(end+1) = newTooltip;
-            this.attachMouseMotionListener();
+            if wasEmpty
+                this.sendHoverEnableToBridge();
+            end
         end
 
         function removeTooltip(this, orderNum)
@@ -841,7 +842,7 @@ classdef Table < gwidgets.internal.Reparentable
             end
 
             if isempty(this.Tooltips)
-                this.detachMouseMotionListener();
+                this.sendHoverDisableToBridge();
                 if ~isempty(this.DisplayTable)
                     this.DisplayTable.Tooltip = this.TableTooltipText_;
                 end
@@ -1591,11 +1592,10 @@ classdef Table < gwidgets.internal.Reparentable
             this.setupColumnWidthBridge();
             this.doUpdateSequence();
 
-            % Apply any tooltip state that was configured before setup ran
+            % Apply any tooltip state that was configured before setup ran.
+            % The bridge will enable hover reports once it signals BridgeReady,
+            % and onBridgeData(BridgeReady) takes care of HoverEnable below.
             this.DisplayTable.Tooltip = this.TableTooltipText_;
-            if ~isempty(this.Tooltips)
-                this.attachMouseMotionListener();
-            end
         end
 
         function updateDisplayData(this)
@@ -1936,6 +1936,9 @@ classdef Table < gwidgets.internal.Reparentable
                         struct("tableTag", this.DisplayTableTag_));
                     sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", this.BridgeDiagEnabled);
                     this.sendReadyToBridge();
+                    if ~isempty(this.Tooltips)
+                        this.sendHoverEnableToBridge();
+                    end
 
                 case "ColumnWidthChanged"
                     % Bridge fires on every ResizeObserver callback.
@@ -1959,10 +1962,26 @@ classdef Table < gwidgets.internal.Reparentable
                         this.sendRestoreToBridge();
                     end
 
+                case "CellHover"
+                    if ~isempty(this.Tooltips)
+                        text = this.resolveTooltipText(double(d.row), double(d.col));
+                        this.applyTooltipText(text);
+                    end
+
                 case "BridgeDiag"
                     fprintf("%s\n", d.msg);
 
             end
+        end
+
+        function sendHoverEnableToBridge(this)
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "HoverEnable", []);
+        end
+
+        function sendHoverDisableToBridge(this)
+            if isempty(this.ColumnWidthBridge_), return; end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "HoverDisable", []);
         end
 
         function onBridgeReattachNeeded(this)
@@ -2004,6 +2023,14 @@ classdef Table < gwidgets.internal.Reparentable
             % pixelWidths: positive pixel widths for all visible columns.
             this.updateStoresFromBridgeWidths(pixelWidths);
             this.applyColumnWidthToDisplay();
+        end
+
+        function text = simulateBridgeHover(this, displayRow, displayColumn)
+            % Simulate a CellHover notification from the bridge without
+            % requiring a live DOM/figure. Returns the resolved tooltip text
+            % that would be displayed.
+            text = this.resolveTooltipText(displayRow, displayColumn);
+            this.applyTooltipText(text);
         end
 
         function changed = didBridgeWidthsChange(this, incomingPx)
@@ -2728,57 +2755,21 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function attachMouseMotionListener(this)
-            if ~isempty(this.MouseMotionListener_) && isvalid(this.MouseMotionListener_)
-                return
-            end
-            if isempty(this.DisplayTable)
-                return
-            end
-            fig = ancestor(this.DisplayTable, "figure");
-            if isempty(fig)
-                return
-            end
-            if isempty(fig.WindowButtonMotionFcn)
-                fig.WindowButtonMotionFcn = @(~,~) [];
-            end
-            this.MouseMotionListener_ = event.listener(fig, ...
-                "WindowMouseMotion", @(~, evt) this.onTooltipMouseMotion(evt));
-        end
-
-        function detachMouseMotionListener(this)
-            if ~isempty(this.MouseMotionListener_)
-                delete(this.MouseMotionListener_);
-                this.MouseMotionListener_ = event.listener.empty;
-            end
-        end
-
-        function onTooltipMouseMotion(this, evt)
+        function applyTooltipText(this, text)
             if isempty(this.DisplayTable) || ~isvalid(this.DisplayTable)
                 return
             end
-            if isempty(this.Tooltips)
-                return
-            end
-
-            [displayRow, displayColumn, overTable] = this.cursorToDisplayCell(evt);
-            if ~overTable
-                this.applyTooltipText(this.TableTooltipText_);
-                return
-            end
-
-            text = this.resolveTooltipText(displayRow, displayColumn);
-            this.applyTooltipText(text);
-        end
-
-        function applyTooltipText(this, text)
             if ~isequal(this.DisplayTable.Tooltip, text)
                 this.DisplayTable.Tooltip = text;
             end
         end
 
         function text = resolveTooltipText(this, displayRow, displayColumn)
-            % Resolve hovered cell to the most specific tooltip text.
+            % Resolve a hovered display cell to the most specific tooltip
+            % text. The bridge sends row=0 for the header and col=0 when the
+            % cursor is outside any cell — those degenerate coordinates
+            % won't match row/column/cell targets but a "table"-target
+            % tooltip still applies.
             % Precedence (most specific wins, later registrations win ties):
             % cell > row > column > table.
             text = this.TableTooltipText_;
@@ -2799,51 +2790,6 @@ classdef Table < gwidgets.internal.Reparentable
                         text = tt.Text;
                     end
                 end
-            end
-        end
-
-        function [displayRow, displayColumn, overTable] = cursorToDisplayCell(this, evt)
-            % Best-effort mapping from a WindowMouseMotion event point to a
-            % display (row, column) inside DisplayTable. The figure delivers
-            % `Point` in pixels relative to the figure. Returns overTable=false
-            % when the cursor is outside the table rectangle.
-            displayRow = 0;
-            displayColumn = 0;
-            overTable = false;
-
-            tbl = this.DisplayTable;
-            pos = getpixelposition(tbl, true);
-            point = evt.Point; % [x y] in figure pixels (y up from bottom)
-            x = point(1) - pos(1);
-            y = pos(2) + pos(4) - point(2); % distance from top of table
-
-            if x < 0 || y < 0 || x > pos(3) || y > pos(4)
-                return
-            end
-            overTable = true;
-
-            headerHeight = 22; % uitable default header row height in pixels
-            rowHeight = 22;    % uitable default body row height
-            if y < headerHeight
-                displayRow = 0; % cursor on header
-            else
-                displayRow = floor((y - headerHeight) / rowHeight) + 1;
-                nRows = size(this.DisplayTable.Data, 1);
-                if displayRow > nRows
-                    displayRow = 0;
-                end
-            end
-
-            widths = this.PixelColumnWidths;
-            if isempty(widths) || any(isnan(widths))
-                return
-            end
-            edges = [0, cumsum(widths)];
-            col = find(x >= edges(1:end-1) & x < edges(2:end), 1);
-            if isempty(col)
-                displayColumn = 0;
-            else
-                displayColumn = col;
             end
         end
 

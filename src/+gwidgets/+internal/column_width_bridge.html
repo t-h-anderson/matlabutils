@@ -8,18 +8,27 @@
   // ColumnWidthBridge — timer-free, MATLAB-driven
   //
   // MATLAB API (events sent TO the bridge):
-  //   Init       {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
-  //   Ready                   — attach/re-attach ResizeObserver
-  //   Suppress                — stop ColumnWidthChanged from being sent to MATLAB
-  //   Restore                 — re-enable ColumnWidthChanged
-  //   Diag       true|false   — enable/disable diagnostic messages to MATLAB
+  //   Init        {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
+  //   Ready                    — attach/re-attach ResizeObserver
+  //   Suppress                 — stop ColumnWidthChanged from being sent to MATLAB
+  //   Restore                  — re-enable ColumnWidthChanged
+  //   Diag        true|false   — enable/disable diagnostic messages to MATLAB
+  //   HoverEnable              — start reporting CellHover events
+  //   HoverDisable             — stop reporting CellHover events
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
+  //   CellHover               — {row:int, col:int} (row=0 means header; 0/0 means none)
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
   var COL_SELECTOR       = ".mw-table-header-column";
+  // Cell selectors. MATLAB's web table renders cells with role=gridcell and
+  // often a .mw-table-body-cell class. Walk ancestors so we tolerate spans
+  // inside cells. Header cells are role=columnheader.
+  var CELL_SELECTOR      = "[role='gridcell'], .mw-table-body-cell, .mw-table-cell";
+  var HEADER_SELECTOR    = "[role='columnheader'], .mw-table-header-column";
+  var ROW_SELECTOR       = "[role='row'], .mw-table-body-row";
 
   var resizeObserver     = null;
   var tableTag           = null;
@@ -28,6 +37,10 @@
   var callbackSuppressed = false;
   var diagEnabled        = false;
   var diagQueue          = [];
+  var hoverEnabled       = false;
+  var hoverListener      = null;
+  var lastHoverRow       = -1;
+  var lastHoverCol       = -1;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -117,6 +130,117 @@
     htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, moving: isMoving };
   }
 
+  // ---- Cell hover tracking ----
+
+  function findTableRoot() {
+    var parentDoc;
+    try { parentDoc = window.parent.document; } catch (e) { return null; }
+    if (tableTag) {
+      var el = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
+      if (el) return el;
+    }
+    return parentDoc;
+  }
+
+  function ancestorMatching(node, selector) {
+    while (node && node.nodeType === 1) {
+      if (node.matches && node.matches(selector)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function indexInParent(node, selector) {
+    // 1-based index among siblings that match the selector.
+    if (!node || !node.parentNode) return -1;
+    var siblings = node.parentNode.children;
+    var n = 0;
+    for (var i = 0; i < siblings.length; i++) {
+      if (!selector || siblings[i].matches(selector)) {
+        n++;
+        if (siblings[i] === node) return n;
+      }
+    }
+    return -1;
+  }
+
+  function cellPosition(cell) {
+    // Prefer ARIA attributes (1-based per spec) when present.
+    var ariaRow = parseInt(cell.getAttribute("aria-rowindex"), 10);
+    var ariaCol = parseInt(cell.getAttribute("aria-colindex"), 10);
+    var row = !isNaN(ariaRow) ? ariaRow : -1;
+    var col = !isNaN(ariaCol) ? ariaCol : -1;
+
+    // Fallback to DOM-position math when ARIA isn't present.
+    if (col < 0) {
+      col = indexInParent(cell, null);
+    }
+    if (row < 0) {
+      var rowEl = ancestorMatching(cell, ROW_SELECTOR);
+      if (rowEl) {
+        var ariaRowEl = parseInt(rowEl.getAttribute("aria-rowindex"), 10);
+        row = !isNaN(ariaRowEl) ? ariaRowEl : indexInParent(rowEl, ROW_SELECTOR);
+      }
+    }
+
+    // MATLAB display rows are 1-based. ARIA rowindex commonly counts the
+    // header as row 1 and bodies as 2..N+1; normalise so row 0 == header,
+    // row 1..N == display rows.
+    if (row > 0) row = row - 1;
+    return { row: row, col: col };
+  }
+
+  function sendHover(row, col) {
+    if (row === lastHoverRow && col === lastHoverCol) return;
+    lastHoverRow = row;
+    lastHoverCol = col;
+    bridgeLog("[Bridge] " + ts() + " hover row=" + row + " col=" + col);
+    flushDiag();
+    htmlComponent.Data = { event: "CellHover", row: row, col: col };
+  }
+
+  function onHoverMove(evt) {
+    if (!hoverEnabled) return;
+    var root = findTableRoot();
+    if (!root || !root.contains(evt.target)) {
+      sendHover(0, 0);
+      return;
+    }
+    var cell = ancestorMatching(evt.target, CELL_SELECTOR);
+    if (cell) {
+      var pos = cellPosition(cell);
+      sendHover(pos.row, pos.col);
+      return;
+    }
+    var header = ancestorMatching(evt.target, HEADER_SELECTOR);
+    if (header) {
+      var hcol = parseInt(header.getAttribute("aria-colindex"), 10);
+      if (isNaN(hcol)) hcol = indexInParent(header, null);
+      sendHover(0, hcol);
+      return;
+    }
+    sendHover(0, 0);
+  }
+
+  function attachHover() {
+    if (hoverListener) return;
+    try {
+      var pd = window.parent.document;
+      hoverListener = onHoverMove;
+      pd.addEventListener("mouseover", hoverListener, true);
+    } catch (e) {}
+  }
+
+  function detachHover() {
+    if (!hoverListener) return;
+    try {
+      window.parent.document.removeEventListener("mouseover", hoverListener, true);
+    } catch (e) {}
+    hoverListener = null;
+    lastHoverRow = -1;
+    lastHoverCol = -1;
+  }
+
   // ---- Event wiring ----
 
   function setup(component) {
@@ -150,6 +274,20 @@
     htmlComponent.addEventListener("Diag", function(event) {
       diagEnabled = !!(event.Data);
       console.log("[Bridge] " + ts() + " Diag: " + diagEnabled);
+    });
+
+    htmlComponent.addEventListener("HoverEnable", function() {
+      hoverEnabled = true;
+      attachHover();
+      bridgeLog("[Bridge] " + ts() + " HoverEnable");
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("HoverDisable", function() {
+      hoverEnabled = false;
+      detachHover();
+      bridgeLog("[Bridge] " + ts() + " HoverDisable");
+      flushDiag();
     });
 
     htmlComponent.Data = { event: "BridgeReady" };
