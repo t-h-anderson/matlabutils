@@ -46,7 +46,7 @@ classdef TooltipStyle
             % on top of TooltipStyle.default().
             arguments
                 this
-                override (1,1) gwidgets.internal.table.TooltipStyle
+                override (1,1) gwidgets.table.TooltipStyle
             end
             merged = this;
             if ~ismissing(override.BackgroundColor); merged.BackgroundColor = override.BackgroundColor; end
@@ -64,10 +64,10 @@ classdef TooltipStyle
             % popup div's style.cssText. Unset properties are omitted.
             parts = strings(0, 1);
             if ~ismissing(this.BackgroundColor)
-                parts(end+1, 1) = "background-color:" + gwidgets.internal.table.TooltipStyle.cssColor(this.BackgroundColor);
+                parts(end+1, 1) = "background-color:" + gwidgets.table.TooltipStyle.cssColor(this.BackgroundColor);
             end
             if ~ismissing(this.FontColor)
-                parts(end+1, 1) = "color:" + gwidgets.internal.table.TooltipStyle.cssColor(this.FontColor);
+                parts(end+1, 1) = "color:" + gwidgets.table.TooltipStyle.cssColor(this.FontColor);
             end
             if this.FontWeight ~= "normal"
                 parts(end+1, 1) = "font-weight:" + this.FontWeight;
@@ -82,7 +82,7 @@ classdef TooltipStyle
                 parts(end+1, 1) = "padding:" + this.Padding + "px";
             end
             if ~ismissing(this.BorderColor)
-                parts(end+1, 1) = "border:1px solid " + gwidgets.internal.table.TooltipStyle.cssColor(this.BorderColor);
+                parts(end+1, 1) = "border:1px solid " + gwidgets.table.TooltipStyle.cssColor(this.BorderColor);
             end
             if ~isnan(this.BorderRadius)
                 parts(end+1, 1) = "border-radius:" + this.BorderRadius + "px";
@@ -98,7 +98,7 @@ classdef TooltipStyle
         function s = default()
             % Library-wide baseline. Approximates the browser-native
             % yellow tooltip so existing usage looks unchanged.
-            s = gwidgets.internal.table.TooltipStyle( ...
+            s = gwidgets.table.TooltipStyle( ...
                 BackgroundColor="#ffffe1", ...
                 FontColor="#000000", ...
                 FontSize=12, ...

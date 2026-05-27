@@ -83,8 +83,8 @@ tb.addTooltip(@(ctx) "Total rows: " + height(ctx.Table),       "table");
 tb.addTooltip(@(ctx) "Row sum: " + sum(ctx.Row), "row", 3, "ContextShape", "Values");
 %[text] ### Styled tooltips
 %[text] Pass a `TooltipStyle` or a function returning one. Per-tooltip styles override the widget-wide `DefaultTooltipStyle`.
-tb.DefaultTooltipStyle = gwidgets.internal.table.TooltipStyle(BackgroundColor="#222", FontColor="white", Padding=6);
-heat = @(ctx) gwidgets.internal.table.TooltipStyle( ...
+tb.DefaultTooltipStyle = gwidgets.table.TooltipStyle(BackgroundColor="#222", FontColor="white", Padding=6);
+heat = @(ctx) gwidgets.table.TooltipStyle( ...
     BackgroundColor=string(sprintf("rgb(%d,80,80)", min(255, round(ctx.Value*4)))), ...
     FontColor="white", Padding=6);
 tb.addTooltip(@(ctx) "Value: " + string(ctx.Value), "column", 4, "Style", heat);

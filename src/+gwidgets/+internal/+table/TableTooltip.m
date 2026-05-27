@@ -10,9 +10,9 @@ classdef TableTooltip
     properties
         Text (1,1) string = ""
         TextFunction (1,:) function_handle {mustBeScalarOrEmpty}
-        Style (1,:) gwidgets.internal.table.TooltipStyle {mustBeScalarOrEmpty}
+        Style (1,:) gwidgets.table.TooltipStyle {mustBeScalarOrEmpty}
         StyleFunction (1,:) function_handle {mustBeScalarOrEmpty}
-        SelectionMode (1,1) gwidgets.internal.table.SelectionMode
+        SelectionMode (1,1) gwidgets.table.SelectionMode
         Target (1,1) string {mustBeMember(Target, ["table", "row", "column", "cell"])} = "table"
         ContextShape (1,1) string {mustBeMember(ContextShape, ["Values", "Table"])} = "Values"
     end
@@ -29,7 +29,7 @@ classdef TableTooltip
                 target (1,1) string {mustBeMember(target, ["table", "row", "column", "cell"])} = "table"
                 nvp.TargetIndices (:,:) double
                 nvp.TargetFunction (1,:) function_handle
-                nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
+                nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
                 nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = gwidgets.internal.table.TableTooltip.defaultContextShape(target)
                 nvp.Style = []
             end
@@ -45,11 +45,11 @@ classdef TableTooltip
             if ~isempty(nvp.Style)
                 if isa(nvp.Style, "function_handle")
                     this.StyleFunction = nvp.Style;
-                elseif isa(nvp.Style, "gwidgets.internal.table.TooltipStyle")
+                elseif isa(nvp.Style, "gwidgets.table.TooltipStyle")
                     this.Style = nvp.Style;
                 else
                     error("GraphicsWidgets:Table:TooltipStyleArg", ...
-                        "Style must be a gwidgets.internal.table.TooltipStyle or a function_handle returning one.");
+                        "Style must be a gwidgets.table.TooltipStyle or a function_handle returning one.");
                 end
             end
 
@@ -90,7 +90,7 @@ classdef TableTooltip
             % if no function is set, the static Text is returned.
             arguments
                 this
-                ctx (1,1) gwidgets.internal.table.TooltipContext
+                ctx (1,1) gwidgets.table.TooltipContext
             end
             if ~isempty(this.TextFunction)
                 txt = string(this.TextFunction(ctx));
@@ -108,13 +108,13 @@ classdef TableTooltip
             % the same TooltipContext as the TextFunction.
             arguments
                 this
-                ctx (1,1) gwidgets.internal.table.TooltipContext
+                ctx (1,1) gwidgets.table.TooltipContext
             end
-            sty = gwidgets.internal.table.TooltipStyle.empty;
+            sty = gwidgets.table.TooltipStyle.empty;
             if ~isempty(this.StyleFunction)
                 try
                     result = this.StyleFunction(ctx);
-                    if isa(result, "gwidgets.internal.table.TooltipStyle") && isscalar(result)
+                    if isa(result, "gwidgets.table.TooltipStyle") && isscalar(result)
                         sty = result;
                     end
                 catch

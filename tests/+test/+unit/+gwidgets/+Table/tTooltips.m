@@ -11,7 +11,7 @@ classdef tTooltips < test.WithExampleTables
 
         function tAddTooltipWithStaticStyle(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
-            sty = gwidgets.internal.table.TooltipStyle( ...
+            sty = gwidgets.table.TooltipStyle( ...
                 BackgroundColor="#222", FontColor="white");
             t.addTooltip("hi", "cell", [2 3], "Style", sty);
 
@@ -22,7 +22,7 @@ classdef tTooltips < test.WithExampleTables
 
         function tAddTooltipWithStyleFunction(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
-            fn = @(ctx) gwidgets.internal.table.TooltipStyle(BackgroundColor="red");
+            fn = @(ctx) gwidgets.table.TooltipStyle(BackgroundColor="red");
             t.addTooltip("hi", "column", 1, "Style", fn);
 
             testCase.assertNumElements(t.Tooltips, 1)
@@ -35,11 +35,11 @@ classdef tTooltips < test.WithExampleTables
             % over table-style; widget DefaultTooltipStyle is the base.
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.addTooltip("col", "column", 1, "Style", ...
-                gwidgets.internal.table.TooltipStyle(BackgroundColor="#aaa"));
+                gwidgets.table.TooltipStyle(BackgroundColor="#aaa"));
             t.addTooltip("row", "row", 2, "Style", ...
-                gwidgets.internal.table.TooltipStyle(BackgroundColor="#bbb"));
+                gwidgets.table.TooltipStyle(BackgroundColor="#bbb"));
             t.addTooltip("cell", "cell", [2 1], "Style", ...
-                gwidgets.internal.table.TooltipStyle(BackgroundColor="#ccc"));
+                gwidgets.table.TooltipStyle(BackgroundColor="#ccc"));
 
             [~, sty] = t.simulateBridgeHover(2, 1);
             testCase.verifyEqual(sty.BackgroundColor, "#ccc")
@@ -52,8 +52,8 @@ classdef tTooltips < test.WithExampleTables
             % the table tooltip has no per-tooltip style so it falls into
             % the (base) default-style group on its own.
             t = gwidgets.Table(Data=testCase.multivariableData());
-            red  = gwidgets.internal.table.TooltipStyle(BackgroundColor="red");
-            blue = gwidgets.internal.table.TooltipStyle(BackgroundColor="blue");
+            red  = gwidgets.table.TooltipStyle(BackgroundColor="red");
+            blue = gwidgets.table.TooltipStyle(BackgroundColor="blue");
 
             t.addTooltip("cell-text", "cell", [2 3], "Style", red);
             t.addTooltip("row-text",  "row",  2,     "Style", blue);
@@ -80,7 +80,7 @@ classdef tTooltips < test.WithExampleTables
             % and a cell tooltip uses red, the red group still leads
             % because the cell match appears first in the iteration.
             t = gwidgets.Table(Data=testCase.multivariableData());
-            red = gwidgets.internal.table.TooltipStyle(BackgroundColor="red");
+            red = gwidgets.table.TooltipStyle(BackgroundColor="red");
 
             t.addTooltip("col",  "column", 1, "Style", red);   % rank 3
             t.addTooltip("cell", "cell", [2 1], "Style", red); % rank 1
@@ -108,7 +108,7 @@ classdef tTooltips < test.WithExampleTables
 
         function tStyleFunctionReceivesContext(testCase)
             % StyleFunction takes the same TooltipContext as TextFunction.
-            makeStyle = @(ctx) gwidgets.internal.table.TooltipStyle( ...
+            makeStyle = @(ctx) gwidgets.table.TooltipStyle( ...
                 BackgroundColor=string(sprintf("#%02x%02x%02x", ctx.Value, ctx.Value, ctx.Value)));
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.addTooltip("col", "column", 1, "Style", makeStyle);
@@ -120,7 +120,7 @@ classdef tTooltips < test.WithExampleTables
 
         function tDefaultTooltipStyleAppliesAsFallback(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
-            t.DefaultTooltipStyle = gwidgets.internal.table.TooltipStyle( ...
+            t.DefaultTooltipStyle = gwidgets.table.TooltipStyle( ...
                 BackgroundColor="#123");
             t.addTooltip("col", "column", 1);
 
@@ -137,13 +137,13 @@ classdef tTooltips < test.WithExampleTables
             [text, sty] = t.simulateBridgeHover(1, 1);
             testCase.verifyEqual(text, "col")
             testCase.verifyEqual(sty.BackgroundColor, ...
-                gwidgets.internal.table.TooltipStyle.default().BackgroundColor)
+                gwidgets.table.TooltipStyle.default().BackgroundColor)
         end
 
         function tTooltipStyleMergeOverridesNonMissing(testCase)
-            base = gwidgets.internal.table.TooltipStyle( ...
+            base = gwidgets.table.TooltipStyle( ...
                 BackgroundColor="#aaa", FontSize=10, Padding=4);
-            override = gwidgets.internal.table.TooltipStyle( ...
+            override = gwidgets.table.TooltipStyle( ...
                 FontSize=14);
             merged = base.merge(override);
 
@@ -153,7 +153,7 @@ classdef tTooltips < test.WithExampleTables
         end
 
         function tTooltipStyleToCssOmitsUnset(testCase)
-            sty = gwidgets.internal.table.TooltipStyle( ...
+            sty = gwidgets.table.TooltipStyle( ...
                 BackgroundColor="red", FontColor=[0 0 0]);
             css = sty.toCss();
             testCase.verifyThat(css, ...

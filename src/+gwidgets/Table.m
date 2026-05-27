@@ -76,7 +76,7 @@ classdef Table < gwidgets.internal.Reparentable
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
 
         % Record whether data or view was specified on selection
-        SelectionMode (1,1) gwidgets.internal.table.SelectionMode = "Data"
+        SelectionMode (1,1) gwidgets.table.SelectionMode = "Data"
         Selection_ (:,:) % Selected Data: Either (:,2) for cell or (1,:) otherwise
 
         % Flag to prevent selection callback recursion
@@ -709,7 +709,7 @@ classdef Table < gwidgets.internal.Reparentable
                 s (1,1) matlab.ui.style.Style
                 tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
                 targetIndicesOrFunction (:,:) = []
-                nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
+                nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
             end
 
             if isa(targetIndicesOrFunction, "function_handle")
@@ -787,7 +787,7 @@ classdef Table < gwidgets.internal.Reparentable
     %% Tooltips
     properties (Dependent)
         Tooltip (1,1) string % Table-wide tooltip; pass-through to uitable.Tooltip
-        DefaultTooltipStyle (1,1) gwidgets.internal.table.TooltipStyle % Widget-wide fallback style
+        DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle % Widget-wide fallback style
     end
 
     properties (GetAccess = ?matlab.unittest.TestCase, SetAccess = protected)
@@ -796,7 +796,7 @@ classdef Table < gwidgets.internal.Reparentable
 
     properties (Access = protected)
         TableTooltipText_ (1,1) string = ""
-        DefaultTooltipStyle_ (1,1) gwidgets.internal.table.TooltipStyle = gwidgets.internal.table.TooltipStyle.default()
+        DefaultTooltipStyle_ (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
     end
 
     methods
@@ -806,7 +806,7 @@ classdef Table < gwidgets.internal.Reparentable
             %   addTooltip(t, "Patient height (cm)", "column", 4)
             %   addTooltip(t, "Outlier", "cell", [3 2; 5 7])
             %   addTooltip(t, @(ctx) "Value: " + ctx.Value, "column", [2 3])
-            %     ^ function form: receives a gwidgets.internal.table.TooltipContext
+            %     ^ function form: receives a gwidgets.table.TooltipContext
             %       with fields Value, Row, Column, Table, DisplayRow,
             %       DisplayColumn, DataRow, DataColumn, Target. Row and
             %       Column slices come from the underlying Data table
@@ -823,7 +823,7 @@ classdef Table < gwidgets.internal.Reparentable
                 text % string scalar OR function_handle (cellValue) -> string
                 tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
                 targetIndicesOrFunction (:,:) = []
-                nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
+                nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
                 nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = gwidgets.internal.table.TableTooltip.defaultContextShape(tableTarget)
                 nvp.Style = []
             end
@@ -844,7 +844,7 @@ classdef Table < gwidgets.internal.Reparentable
             % errors surface here, not later inside the hover callback.
             if tableTarget ~= "table"
                 idx = newTooltip.indices(this);
-                if newTooltip.SelectionMode == gwidgets.internal.table.SelectionMode.Data && ~isempty(idx)
+                if newTooltip.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
                     this.dataSelectionToDisplaySelection(idx, tableTarget);
                 end
             end
@@ -2741,7 +2741,7 @@ classdef Table < gwidgets.internal.Reparentable
                 target = thisStyle.Target;
 
                 index = thisStyle.indices(this);
-                if thisStyle.SelectionMode == gwidgets.internal.table.SelectionMode.Data
+                if thisStyle.SelectionMode == gwidgets.table.SelectionMode.Data
                     index = this.dataSelectionToDisplaySelection(index, thisStyle.Target);
                 end
                 this.DisplayTable.addStyle(style, target, index);
@@ -2829,7 +2829,7 @@ classdef Table < gwidgets.internal.Reparentable
                 if text == ""
                     return
                 end
-                base = gwidgets.internal.table.TooltipStyle.default();
+                base = gwidgets.table.TooltipStyle.default();
                 groups(1).Text = text;
                 groups(1).Style = base.merge(this.DefaultTooltipStyle_);
                 return
@@ -2859,7 +2859,7 @@ classdef Table < gwidgets.internal.Reparentable
             groups = this.resolveTooltipGroups(displayRow, displayColumn);
             if isempty(groups)
                 text = "";
-                base = gwidgets.internal.table.TooltipStyle.default();
+                base = gwidgets.table.TooltipStyle.default();
                 style = base.merge(this.DefaultTooltipStyle_);
                 return
             end
@@ -2875,7 +2875,7 @@ classdef Table < gwidgets.internal.Reparentable
             % resolved TooltipStyle (per-tooltip style layered on top of
             % DefaultTooltipStyle layered on TooltipStyle.default()).
             priorities = ["cell", "row", "column", "table"];
-            baseStyle = gwidgets.internal.table.TooltipStyle.default();
+            baseStyle = gwidgets.table.TooltipStyle.default();
             baseStyle = baseStyle.merge(this.DefaultTooltipStyle_);
             byRank = cell(1, numel(priorities));
 
@@ -2883,7 +2883,7 @@ classdef Table < gwidgets.internal.Reparentable
                 tt = this.Tooltips(i);
                 try
                     idx = tt.indices(this);
-                    if tt.Target ~= "table" && tt.SelectionMode == gwidgets.internal.table.SelectionMode.Data && ~isempty(idx)
+                    if tt.Target ~= "table" && tt.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
                         idx = this.dataSelectionToDisplaySelection(idx, tt.Target);
                     end
                 catch
@@ -2942,7 +2942,7 @@ classdef Table < gwidgets.internal.Reparentable
             % populated regardless of target; ContextShape controls the
             % shape of Row and Column.
             data = this.Data;
-            ctx = gwidgets.internal.table.TooltipContext;
+            ctx = gwidgets.table.TooltipContext;
             ctx.Target = target;
             ctx.Table  = data;
             ctx.DisplayRow    = displayRow;
