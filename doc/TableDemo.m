@@ -82,6 +82,13 @@ tb.addTooltip(@(~, row) "Row label: "   + string(row.Note), "row",    3);
 tb.addTooltip(@(~, tbl) "Total rows: "  + height(tbl),      "table");
 %[text] Use `ContextShape="Values"` to get the row as a vector for numeric aggregates:
 tb.addTooltip(@(~, row) "Row sum: " + sum(row), "row", 3, "ContextShape", "Values");
+%[text] ### Styled tooltips
+%[text] Pass a `TooltipStyle` or a function returning one. Per-tooltip styles override the widget-wide `DefaultTooltipStyle`.
+tb.DefaultTooltipStyle = gwidgets.internal.table.TooltipStyle(BackgroundColor="#222", FontColor="white", Padding=6);
+heat = @(v) gwidgets.internal.table.TooltipStyle( ...
+    BackgroundColor=string(sprintf("rgb(%d,80,80)", min(255, round(v*4)))), ...
+    FontColor="white", Padding=6);
+tb.addTooltip(@(v) "Value: " + string(v), "column", 4, "Style", heat);
 
 
 

@@ -8,13 +8,14 @@
   // ColumnWidthBridge — timer-free, MATLAB-driven
   //
   // MATLAB API (events sent TO the bridge):
-  //   Init        {tableTag}   — set DOM scoping tag (sent once on BridgeReady)
-  //   Ready                    — attach/re-attach ResizeObserver
-  //   Suppress                 — stop ColumnWidthChanged from being sent to MATLAB
-  //   Restore                  — re-enable ColumnWidthChanged
-  //   Diag        true|false   — enable/disable diagnostic messages to MATLAB
-  //   HoverEnable              — start reporting CellHover events
-  //   HoverDisable             — stop reporting CellHover events
+  //   Init        {tableTag}              — set DOM scoping tag (sent once on BridgeReady)
+  //   Ready                               — attach/re-attach ResizeObserver
+  //   Suppress                            — stop ColumnWidthChanged from being sent to MATLAB
+  //   Restore                             — re-enable ColumnWidthChanged
+  //   Diag        true|false              — enable/disable diagnostic messages to MATLAB
+  //   HoverEnable                         — start reporting CellHover events
+  //   HoverDisable                        — stop reporting CellHover events
+  //   SetTooltip  {blocks:[{text,css}...]}— render or hide the popup; empty list hides
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
@@ -42,6 +43,9 @@
   var lastHoverRow       = -1;
   var lastHoverCol       = -1;
   var lastHoverCellEl    = null;
+  var lastClientX        = 0;
+  var lastClientY        = 0;
+  var tooltipEl          = null;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -208,11 +212,73 @@
     return { row: row, col: col, cell: cellEl };
   }
 
-  function clearLastTitle() {
-    if (lastHoverCellEl && lastHoverCellEl.dataset && lastHoverCellEl.dataset.gwidgetsTitle === "1") {
-      lastHoverCellEl.removeAttribute("title");
-      delete lastHoverCellEl.dataset.gwidgetsTitle;
+  // ---- Custom popup (replaces native title) ----------------------
+
+  function ensureTooltipEl() {
+    if (tooltipEl && tooltipEl.isConnected) return tooltipEl;
+    var pd;
+    try { pd = window.parent.document; } catch (e) { return null; }
+    tooltipEl = pd.createElement("div");
+    tooltipEl.id = "gwidgets-tooltip";
+    tooltipEl.style.cssText = [
+      "position:fixed",
+      "z-index:9999",
+      "pointer-events:none",
+      "display:none",
+      "white-space:pre",
+      "font-family:sans-serif"
+    ].join(";") + ";";
+    pd.body.appendChild(tooltipEl);
+    return tooltipEl;
+  }
+
+  function hideTooltip() {
+    if (tooltipEl) tooltipEl.style.display = "none";
+  }
+
+  function positionTooltipNearCursor() {
+    if (!tooltipEl) return;
+    var pd;
+    try { pd = window.parent.document; } catch (e) { return; }
+    var w = tooltipEl.offsetWidth;
+    var h = tooltipEl.offsetHeight;
+    var viewW = pd.documentElement.clientWidth;
+    var viewH = pd.documentElement.clientHeight;
+    var x = lastClientX + 12;
+    var y = lastClientY + 16;
+    if (x + w + 8 > viewW) x = Math.max(0, lastClientX - w - 12);
+    if (y + h + 8 > viewH) y = Math.max(0, lastClientY - h - 12);
+    tooltipEl.style.left = x + "px";
+    tooltipEl.style.top  = y + "px";
+  }
+
+  function renderTooltipBlocks(blocks) {
+    var el = ensureTooltipEl();
+    if (!el) return;
+    if (!blocks || blocks.length === 0) {
+      hideTooltip();
+      return;
     }
+    // Reset container styles that per-block CSS shouldn't carry over.
+    el.style.cssText = [
+      "position:fixed",
+      "z-index:9999",
+      "pointer-events:none",
+      "white-space:pre",
+      "font-family:sans-serif"
+    ].join(";") + ";";
+    // Clear existing children.
+    while (el.firstChild) el.removeChild(el.firstChild);
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      var div = el.ownerDocument.createElement("div");
+      div.textContent = b.text || "";
+      if (b.css) div.style.cssText = b.css;
+      if (i > 0) div.style.marginTop = "2px";
+      el.appendChild(div);
+    }
+    el.style.display = "block";
+    positionTooltipNearCursor();
   }
 
   function sendHover(row, col) {
@@ -226,19 +292,25 @@
 
   function onHoverMove(evt) {
     if (!hoverEnabled) return;
+    lastClientX = evt.clientX;
+    lastClientY = evt.clientY;
     var root = findTableRoot();
     if (!root || !root.contains(evt.target)) {
-      clearLastTitle();
+      hideTooltip();
       lastHoverCellEl = null;
       sendHover(0, 0);
       return;
     }
     var pos = gridCoordsFromTarget(evt.target, root);
     if (pos.cell !== lastHoverCellEl) {
-      // Crossed into a new cell — strip the previous cell's title (only
-      // if we set it ourselves) before requesting the new one from MATLAB.
-      clearLastTitle();
+      // Crossed into a new cell — hide the previous popup until MATLAB
+      // resolves the new cell's text/style.
+      hideTooltip();
       lastHoverCellEl = pos.cell;
+    } else {
+      // Same cell, fresh mouse position — keep the popup glued to the
+      // cursor without waiting for MATLAB to roundtrip.
+      positionTooltipNearCursor();
     }
     sendHover(pos.row >= 0 ? pos.row : 0, pos.col >= 0 ? pos.col : 0);
   }
@@ -306,27 +378,18 @@
 
     htmlComponent.addEventListener("HoverDisable", function() {
       hoverEnabled = false;
-      clearLastTitle();
+      hideTooltip();
       lastHoverCellEl = null;
       detachHover();
       bridgeLog("[Bridge] " + ts() + " HoverDisable");
       flushDiag();
     });
 
-    htmlComponent.addEventListener("SetTitle", function(event) {
-      // MATLAB has resolved the tooltip text for the cell we last sent a
-      // CellHover for. Stamp the DOM `title` on that cell so the browser
-      // shows its native tooltip — uitable.Tooltip is only re-read on
-      // mouse-enter, so setting it dynamically while hovering does
-      // nothing.
-      if (!lastHoverCellEl) return;
-      var text = (event.Data && event.Data.text) || "";
-      if (text === "") {
-        clearLastTitle();
-      } else {
-        lastHoverCellEl.title = text;
-        if (lastHoverCellEl.dataset) lastHoverCellEl.dataset.gwidgetsTitle = "1";
-      }
+    htmlComponent.addEventListener("SetTooltip", function(event) {
+      // MATLAB has resolved the hovered cell to a list of styled blocks.
+      // Render them in our floating popup div near the cursor.
+      var blocks = (event.Data && event.Data.blocks) || [];
+      renderTooltipBlocks(blocks);
     });
 
     htmlComponent.Data = { event: "BridgeReady" };

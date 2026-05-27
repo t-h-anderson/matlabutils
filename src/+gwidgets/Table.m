@@ -787,6 +787,7 @@ classdef Table < gwidgets.internal.Reparentable
     %% Tooltips
     properties (Dependent)
         Tooltip (1,1) string % Table-wide tooltip; pass-through to uitable.Tooltip
+        DefaultTooltipStyle (1,1) gwidgets.internal.table.TooltipStyle % Widget-wide fallback style
     end
 
     properties (GetAccess = ?matlab.unittest.TestCase, SetAccess = protected)
@@ -795,6 +796,7 @@ classdef Table < gwidgets.internal.Reparentable
 
     properties (Access = protected)
         TableTooltipText_ (1,1) string = ""
+        DefaultTooltipStyle_ (1,1) gwidgets.internal.table.TooltipStyle = gwidgets.internal.table.TooltipStyle.default()
     end
 
     methods
@@ -824,9 +826,10 @@ classdef Table < gwidgets.internal.Reparentable
                 targetIndicesOrFunction (:,:) = []
                 nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
                 nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = gwidgets.internal.table.TableTooltip.defaultContextShape(tableTarget)
+                nvp.Style = []
             end
 
-            ttArgs = {"SelectionMode", nvp.SelectionMode, "ContextShape", nvp.ContextShape};
+            ttArgs = {"SelectionMode", nvp.SelectionMode, "ContextShape", nvp.ContextShape, "Style", nvp.Style};
             if tableTarget == "table"
                 newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, ttArgs{:});
             elseif isa(targetIndicesOrFunction, "function_handle")
@@ -882,6 +885,14 @@ classdef Table < gwidgets.internal.Reparentable
             if ~isempty(this.DisplayTable)
                 this.DisplayTable.Tooltip = val;
             end
+        end
+
+        function val = get.DefaultTooltipStyle(this)
+            val = this.DefaultTooltipStyle_;
+        end
+
+        function set.DefaultTooltipStyle(this, val)
+            this.DefaultTooltipStyle_ = val;
         end
     end
 
@@ -1986,8 +1997,7 @@ classdef Table < gwidgets.internal.Reparentable
 
                 case "CellHover"
                     if ~isempty(this.Tooltips)
-                        text = this.resolveTooltipText(double(d.row), double(d.col));
-                        this.applyTooltipText(text);
+                        this.applyTooltipPayload(double(d.row), double(d.col));
                     end
 
                 case "BridgeDiag"
@@ -2047,12 +2057,12 @@ classdef Table < gwidgets.internal.Reparentable
             this.applyColumnWidthToDisplay();
         end
 
-        function text = simulateBridgeHover(this, displayRow, displayColumn)
+        function [text, style] = simulateBridgeHover(this, displayRow, displayColumn)
             % Simulate a CellHover notification from the bridge without
-            % requiring a live DOM/figure. Returns the resolved tooltip text
-            % that would be displayed.
-            text = this.resolveTooltipText(displayRow, displayColumn);
-            this.applyTooltipText(text);
+            % requiring a live DOM/figure. Returns the resolved tooltip
+            % text (and resolved TooltipStyle) that would be displayed.
+            [text, style] = this.resolveTooltipTextAndStyle(displayRow, displayColumn);
+            this.applyTooltipPayload(displayRow, displayColumn);
         end
 
         function changed = didBridgeWidthsChange(this, incomingPx)
@@ -2777,31 +2787,46 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function applyTooltipText(this, text)
-            % Send the resolved text to the bridge, which stamps the DOM
-            % `title` attribute on the hovered cell. We deliberately do NOT
-            % write to DisplayTable.Tooltip — uitable only reads that
-            % property on mouse-enter, so updates while the cursor is over
-            % the table are invisible until the user leaves and comes
-            % back. The per-cell DOM title refreshes naturally on each
-            % cell transition.
+        function applyTooltipPayload(this, displayRow, displayColumn)
+            % Resolve the hovered cell to a list of styled blocks and
+            % send them to the bridge. v1 always emits a single block
+            % (joined text, single resolved style); v2 will emit one
+            % block per style group — the JS protocol already takes a
+            % list so that change is MATLAB-side only.
+            blocks = this.resolveTooltipBlocks(displayRow, displayColumn);
             if isempty(this.ColumnWidthBridge_) || ~isvalid(this.ColumnWidthBridge_)
                 return
             end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTitle", ...
-                struct("text", char(text)));
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTooltip", ...
+                struct("blocks", {blocks}));
         end
 
-        function text = resolveTooltipText(this, displayRow, displayColumn)
-            % Resolve a hovered display cell to tooltip text. Every matching
-            % tooltip contributes one line; lines are ordered most-specific
-            % to least (cell -> row -> column -> table). Among entries with
-            % the same target, registration order is preserved. If nothing
-            % matches, fall back to the table-wide Tooltip property.
+        function blocks = resolveTooltipBlocks(this, displayRow, displayColumn)
+            % v1: one block. Returns a cell array of struct("text", char,
+            % "css", char) — empty cell if nothing to show.
+            [text, style] = this.resolveTooltipTextAndStyle(displayRow, displayColumn);
+            if text == ""
+                blocks = {};
+                return
+            end
+            blocks = {struct("text", char(text), "css", char(style.toCss()))};
+        end
+
+        function [text, style] = resolveTooltipTextAndStyle(this, displayRow, displayColumn)
+            % Resolve a hovered display cell to tooltip text + style.
+            % Text: every matching tooltip contributes one line, ordered
+            % most-specific to least (cell -> row -> column -> table);
+            % registration order preserved within a target.
+            % Style: the most-specific match's resolved style, layered
+            % onto DefaultTooltipStyle, layered onto TooltipStyle.default().
             priorities = ["cell", "row", "column", "table"];
             byRank = cell(1, numel(priorities));
             anyMatch = false;
             cellValue = this.cellValueForHover(displayRow, displayColumn);
+
+            mostSpecificRank = numel(priorities) + 1;
+            mostSpecificStyle = gwidgets.internal.table.TooltipStyle.empty;
+
             for i = 1:numel(this.Tooltips)
                 tt = this.Tooltips(i);
                 try
@@ -2810,33 +2835,52 @@ classdef Table < gwidgets.internal.Reparentable
                         idx = this.dataSelectionToDisplaySelection(idx, tt.Target);
                     end
                 catch
-                    % Configured indices don't resolve against current data
-                    % (e.g. data shape changed since registration). Skip this
-                    % tooltip rather than breaking the hover callback.
                     continue
                 end
                 resolved = tt;
                 resolved.TargetIndices = idx;
-                if resolved.matches(displayRow, displayColumn)
-                    rank = find(priorities == tt.Target, 1);
-                    try
-                        contextValue = this.contextForHover(tt.Target, tt.ContextShape, displayRow, displayColumn);
-                        rendered = tt.textFor(cellValue, contextValue);
-                    catch err
-                        rendered = "[tooltip error: " + string(err.message) + "]";
+                if ~resolved.matches(displayRow, displayColumn)
+                    continue
+                end
+
+                rank = find(priorities == tt.Target, 1);
+
+                try
+                    contextValue = this.contextForHover(tt.Target, tt.ContextShape, displayRow, displayColumn);
+                    rendered = tt.textFor(cellValue, contextValue);
+                catch err
+                    rendered = "[tooltip error: " + string(err.message) + "]";
+                    contextValue = missing;
+                end
+                byRank{rank} = [byRank{rank}; rendered];
+                anyMatch = true;
+
+                if rank < mostSpecificRank
+                    candidateStyle = tt.styleFor(cellValue, contextValue);
+                    if ~isempty(candidateStyle)
+                        mostSpecificStyle = candidateStyle;
+                        mostSpecificRank = rank;
                     end
-                    byRank{rank} = [byRank{rank}; rendered];
-                    anyMatch = true;
                 end
             end
 
             if ~anyMatch
                 text = this.TableTooltipText_;
-                return
+            else
+                lines = vertcat(byRank{:});
+                text = strjoin(lines, newline);
             end
 
-            lines = vertcat(byRank{:});
-            text = strjoin(lines, newline);
+            base = gwidgets.internal.table.TooltipStyle.default();
+            style = base.merge(this.DefaultTooltipStyle_);
+            if ~isempty(mostSpecificStyle)
+                style = style.merge(mostSpecificStyle);
+            end
+        end
+
+        function text = resolveTooltipText(this, displayRow, displayColumn)
+            % Back-compat shim — some test hooks still ask only for text.
+            text = this.resolveTooltipTextAndStyle(displayRow, displayColumn);
         end
 
         function val = cellValueForHover(this, displayRow, displayColumn)
