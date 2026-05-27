@@ -60,7 +60,7 @@ classdef Table < gwidgets.internal.Reparentable
         DataColumnEditable_ (1,:) logical % Logical array indicating which columns are editable
         DataColumnSortable_ (1,:) logical % Logical array indicating which columns are sortable
 
-        % Column-width bridge
+        % Table bridge
         DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
 
         % Column-width stores — three parallel arrays aligned to DataColumnNames.
@@ -1520,8 +1520,8 @@ classdef Table < gwidgets.internal.Reparentable
 
         function toggleBridgeDiag(this, val)
             this.BridgeDiagEnabled_ = val;
-            if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", val);
+            if ~isempty(this.TableBridge_)
+                sendEventToHTMLSource(this.TableBridge_, "Diag", val);
             end
         end
 
@@ -1574,7 +1574,7 @@ classdef Table < gwidgets.internal.Reparentable
         DisplayTable (1,:) matlab.ui.control.Table {mustBeScalarOrEmpty}
 
         HelpPanel (1,:) matlab.ui.container.Panel {mustBeScalarOrEmpty}
-        ColumnWidthBridge_ (1,:) matlab.ui.control.HTML {mustBeScalarOrEmpty}
+        TableBridge_ (1,:) matlab.ui.control.HTML {mustBeScalarOrEmpty}
     end
 
     properties (SetAccess = private)
@@ -1621,7 +1621,7 @@ classdef Table < gwidgets.internal.Reparentable
             this.DisplayTable.Layout.Row = 3;
 
             this.addContextMenu();
-            this.setupColumnWidthBridge();
+            this.setupTableBridge();
             this.doUpdateSequence();
 
             % Apply any tooltip state that was configured before setup ran.
@@ -1917,15 +1917,17 @@ classdef Table < gwidgets.internal.Reparentable
 
     end
 
-    % Column-width bridge
+    % Table bridge — column-width tracking + cell-hover detection
     methods (Access = private)
 
-        function setupColumnWidthBridge(this)
-            % Create a tiny (2 px tall) uihtml component that uses a
-            % ResizeObserver in the figure's web context to detect when the
-            % user drags a column divider and report the new pixel widths
-            % back to MATLAB.  The component lives in row 4 of this.Grid,
-            % which has a fixed height of 2 px so it is effectively invisible.
+        function setupTableBridge(this)
+            % Create a tiny (2 px tall) uihtml component that lives in the
+            % same browser context as the table. Hosts the ResizeObserver
+            % used to detect column-divider drags AND the mouseover
+            % listener used to drive cell-level tooltips. See
+            % doc/TableBridge_DeveloperNotes.md for the full design.
+            % The component lives in row 4 of this.Grid, which has a
+            % fixed height of 2 px so it is effectively invisible.
 
             % Assign a unique tag to the uitable so the bridge JS can scope
             % its DOM query to this table specifically (avoids cross-talk
@@ -1935,16 +1937,16 @@ classdef Table < gwidgets.internal.Reparentable
 
             htmlFile = fullfile(fileparts(mfilename("fullpath")), ...
                 "+internal", ...
-                "column_width_bridge.html");
+                "table_bridge.html");
 
-            this.ColumnWidthBridge_ = uihtml( ...
+            this.TableBridge_ = uihtml( ...
                 "Parent",       this.Grid, ...
                 "HTMLSource",   htmlFile, ...
                 "DataChangedFcn", @(src,~) this.onBridgeData(src), ...
                 "Visible","off");
 
-            this.ColumnWidthBridge_.Layout.Row    = 4;
-            this.ColumnWidthBridge_.Layout.Column = 1;
+            this.TableBridge_.Layout.Row    = 4;
+            this.TableBridge_.Layout.Column = 1;
 
             % Enforce default in JS
             this.BridgeDiagEnabled = this.BridgeDiagEnabled;
@@ -1964,9 +1966,9 @@ classdef Table < gwidgets.internal.Reparentable
                 case "BridgeReady"
                     % setup() has run — send Init then Ready so the bridge
                     % attaches its ResizeObserver to the (already-rendered) table.
-                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
+                    sendEventToHTMLSource(this.TableBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
-                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", this.BridgeDiagEnabled);
+                    sendEventToHTMLSource(this.TableBridge_, "Diag", this.BridgeDiagEnabled);
                     this.sendReadyToBridge();
                     if ~isempty(this.Tooltips)
                         this.sendHoverEnableToBridge();
@@ -2006,13 +2008,13 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function sendHoverEnableToBridge(this)
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "HoverEnable", []);
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "HoverEnable", []);
         end
 
         function sendHoverDisableToBridge(this)
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "HoverDisable", []);
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "HoverDisable", []);
         end
 
         function onBridgeReattachNeeded(this)
@@ -2024,23 +2026,23 @@ classdef Table < gwidgets.internal.Reparentable
             % Tell the bridge to stop reporting ColumnWidthChanged events.
             % Queue this before DisplayTable.ColumnWidth changes so the
             % ResizeObserver echo during our own DOM update is silently dropped.
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Suppress", []);
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "Suppress", []);
         end
 
         function sendRestoreToBridge(this)
             % Tell the bridge to re-enable reporting and re-enable
             % ColumnWidthChanged callbacks.
 
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "Restore", []);
         end
 
         function sendReadyToBridge(this)
             % Signal the bridge to (re-)attach its ResizeObserver once the
             % table DOM has settled.
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Ready", []);
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "Ready", []);
         end
 
     end
@@ -2793,10 +2795,10 @@ classdef Table < gwidgets.internal.Reparentable
             % block per style group — the JS protocol already takes a
             % list so that change is MATLAB-side only.
             blocks = this.resolveTooltipBlocks(displayRow, displayColumn);
-            if isempty(this.ColumnWidthBridge_) || ~isvalid(this.ColumnWidthBridge_)
+            if isempty(this.TableBridge_) || ~isvalid(this.TableBridge_)
                 return
             end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTooltip", ...
+            sendEventToHTMLSource(this.TableBridge_, "SetTooltip", ...
                 struct("blocks", {blocks}));
         end
 
@@ -2873,11 +2875,6 @@ classdef Table < gwidgets.internal.Reparentable
             if ~isempty(mostSpecificStyle)
                 style = style.merge(mostSpecificStyle);
             end
-        end
-
-        function text = resolveTooltipText(this, displayRow, displayColumn)
-            % Back-compat shim — some test hooks still ask only for text.
-            text = this.resolveTooltipTextAndStyle(displayRow, displayColumn);
         end
 
         function val = cellValueForHover(this, displayRow, displayColumn)

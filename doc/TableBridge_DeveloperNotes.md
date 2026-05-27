@@ -1,8 +1,14 @@
-# Column Width Bridge — Developer Notes
+# Table Bridge — Developer Notes
 
 > **Files covered**
-> - `src/+gwidgets/+internal/column_width_bridge.html` — the JS bridge (runs in a `uihtml` iframe)
-> - `src/+gwidgets/Table.m` — the MATLAB host (methods in the *Column-width bridge* section)
+> - `src/+gwidgets/+internal/table_bridge.html` — the JS bridge (runs in a `uihtml` iframe)
+> - `src/+gwidgets/Table.m` — the MATLAB host (methods in the *Table bridge* section)
+>
+> The bridge has two responsibilities sharing the same iframe:
+> 1. column-width tracking (described below), and
+> 2. cell-level hover detection driving the tooltip popup (see the
+>    `HoverEnable` / `HoverDisable` / `SetTooltip` / `CellHover` events in the
+>    JS header).
 
 ---
 
@@ -36,7 +42,7 @@ Figure
         ├── Row 1  HelpPanel (filter help, width=0 when hidden)
         ├── Row 2  (height 0 — unused / filter row placeholder)
         ├── Row 3  DisplayTable  (matlab uitable)   ← columns observed here
-        └── Row 4  ColumnWidthBridge_ (uihtml, height=2px)  ← bridge iframe
+        └── Row 4  TableBridge_ (uihtml, height=2px)  ← bridge iframe
 ```
 
 The bridge iframe is a sibling of the `uitable` in the same DOM tree, so
@@ -49,7 +55,7 @@ The bridge iframe is a sibling of the `uitable` in the same DOM tree, so
 ```
 MATLAB                                  JS bridge
 ------                                  ---------
-setupColumnWidthBridge()
+setupTableBridge()
   assign unique DisplayTableTag_
   set DisplayTable.Tag = tag
   create uihtml (loads async)
@@ -323,12 +329,6 @@ echo of a bridge-initiated drag, not for independent programmatic
 ---
 
 ## 10. Known limitations
-
-- **No timer cancellation on rapid pauses** — `pauseColumnWidthBridge` starts
-  a new `timer` on each call without cancelling any in-flight timer from a
-  prior call.  Since all calls use the same `pauseMs` value (500 or 1200 ms),
-  concurrent timers are harmless in practice, but the flag may be cleared
-  slightly after the expected deadline if a 500 ms timer races a 1200 ms one.
 
 - **Redistribution uses pre-reflow container width** — `containerW` is read
   synchronously inside `applyColumnWidths` before the browser has reflowed the
