@@ -852,9 +852,6 @@ classdef Table < gwidgets.internal.Reparentable
 
             if isempty(this.Tooltips)
                 this.sendHoverDisableToBridge();
-                if ~isempty(this.DisplayTable)
-                    this.DisplayTable.Tooltip = this.TableTooltipText_;
-                end
             end
         end
     end
@@ -2765,12 +2762,18 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function applyTooltipText(this, text)
-            if isempty(this.DisplayTable) || ~isvalid(this.DisplayTable)
+            % Send the resolved text to the bridge, which stamps the DOM
+            % `title` attribute on the hovered cell. We deliberately do NOT
+            % write to DisplayTable.Tooltip — uitable only reads that
+            % property on mouse-enter, so updates while the cursor is over
+            % the table are invisible until the user leaves and comes
+            % back. The per-cell DOM title refreshes naturally on each
+            % cell transition.
+            if isempty(this.ColumnWidthBridge_) || ~isvalid(this.ColumnWidthBridge_)
                 return
             end
-            if ~isequal(this.DisplayTable.Tooltip, text)
-                this.DisplayTable.Tooltip = text;
-            end
+            sendEventToHTMLSource(this.ColumnWidthBridge_, "SetTitle", ...
+                struct("text", char(text)));
         end
 
         function text = resolveTooltipText(this, displayRow, displayColumn)

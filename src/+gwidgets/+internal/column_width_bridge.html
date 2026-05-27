@@ -41,6 +41,7 @@
   var hoverListener      = null;
   var lastHoverRow       = -1;
   var lastHoverCol       = -1;
+  var lastHoverCellEl    = null;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -183,6 +184,7 @@
       while (node && node.nodeType === 1 && node !== root) {
         if (node.matches && node.matches(CELL_SELECTOR + "," + HEADER_SELECTOR)) {
           legacyCell = node;
+          if (!cellEl) cellEl = node;
           break;
         }
         node = node.parentNode;
@@ -205,7 +207,14 @@
     // are 1-based, so shift by +1 here.
     if (row >= 0) row = row + 1;
     if (col >= 0) col = col + 1;
-    return { row: row, col: col };
+    return { row: row, col: col, cell: cellEl };
+  }
+
+  function clearLastTitle() {
+    if (lastHoverCellEl && lastHoverCellEl.dataset && lastHoverCellEl.dataset.gwidgetsTitle === "1") {
+      lastHoverCellEl.removeAttribute("title");
+      delete lastHoverCellEl.dataset.gwidgetsTitle;
+    }
   }
 
   function sendHover(row, col) {
@@ -221,10 +230,18 @@
     if (!hoverEnabled) return;
     var root = findTableRoot();
     if (!root || !root.contains(evt.target)) {
+      clearLastTitle();
+      lastHoverCellEl = null;
       sendHover(0, 0);
       return;
     }
     var pos = gridCoordsFromTarget(evt.target, root);
+    if (pos.cell !== lastHoverCellEl) {
+      // Crossed into a new cell — strip the previous cell's title (only
+      // if we set it ourselves) before requesting the new one from MATLAB.
+      clearLastTitle();
+      lastHoverCellEl = pos.cell;
+    }
     sendHover(pos.row >= 0 ? pos.row : 0, pos.col >= 0 ? pos.col : 0);
   }
 
@@ -291,9 +308,27 @@
 
     htmlComponent.addEventListener("HoverDisable", function() {
       hoverEnabled = false;
+      clearLastTitle();
+      lastHoverCellEl = null;
       detachHover();
       bridgeLog("[Bridge] " + ts() + " HoverDisable");
       flushDiag();
+    });
+
+    htmlComponent.addEventListener("SetTitle", function(event) {
+      // MATLAB has resolved the tooltip text for the cell we last sent a
+      // CellHover for. Stamp the DOM `title` on that cell so the browser
+      // shows its native tooltip — uitable.Tooltip is only re-read on
+      // mouse-enter, so setting it dynamically while hovering does
+      // nothing.
+      if (!lastHoverCellEl) return;
+      var text = (event.Data && event.Data.text) || "";
+      if (text === "") {
+        clearLastTitle();
+      } else {
+        lastHoverCellEl.title = text;
+        if (lastHoverCellEl.dataset) lastHoverCellEl.dataset.gwidgetsTitle = "1";
+      }
     });
 
     htmlComponent.Data = { event: "BridgeReady" };
