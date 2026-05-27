@@ -164,6 +164,31 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEqual(t.simulateBridgeHover(1, 1), "rows=5")
         end
 
+        function tFunctionTooltipSeesHiddenColumns(testCase)
+            % Hiding a column doesn't remove it from the data; tooltip
+            % functions get the full underlying Data so aggregates can
+            % reach hidden columns and filtered-out rows.
+            m = magic(5);
+            t = gwidgets.Table(Data=array2table(m));
+            t.HiddenColumnNames = "Var2";
+            t.addTooltip(@(~, tbl) strjoin(string(tbl.Var2), ","), "table");
+
+            expected = strjoin(string(m(:, 2)), ",");
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), expected)
+        end
+
+        function tFunctionTooltipRowIncludesHiddenColumns(testCase)
+            % Row slice is a 1xN slice of the underlying Data table, so
+            % hidden columns are still reachable by name.
+            m = magic(5);
+            t = gwidgets.Table(Data=array2table(m));
+            t.HiddenColumnNames = "Var2";
+            t.addTooltip(@(~, row) "v=" + row.Var2, "row", 1);
+
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), ...
+                "v=" + string(m(1, 2)))
+        end
+
         function tFunctionTooltipErrorIsContained(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.addTooltip(@(v) error("boom"), "cell", [2 1]);

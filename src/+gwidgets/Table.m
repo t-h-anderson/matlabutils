@@ -2851,19 +2851,24 @@ classdef Table < gwidgets.internal.Reparentable
             % Shape depends on the tooltip's target:
             %   "column" -> the hovered column as a vector
             %   "row"    -> the hovered row as a 1xN table
-            %   "table"  -> the full DisplayData table
+            %   "table"  -> the full Data table
             %   "cell"   -> the hovered cell value (same as the first arg)
-            data = this.DisplayData;
+            % All slices come from the underlying Data table (not
+            % DisplayData), so hidden columns and rows currently filtered
+            % out are still reachable.
+            data = this.Data;
             switch target
                 case "column"
-                    if displayColumn >= 1 && displayColumn <= width(data)
-                        ctx = data{:, displayColumn};
+                    dataCol = this.safeDisplayToDataIndex(displayColumn, "column");
+                    if ~isnan(dataCol) && dataCol >= 1 && dataCol <= width(data)
+                        ctx = data{:, dataCol};
                     else
                         ctx = missing;
                     end
                 case "row"
-                    if displayRow >= 1 && displayRow <= size(data, 1)
-                        ctx = data(displayRow, :);
+                    dataRow = this.safeDisplayToDataIndex(displayRow, "row");
+                    if ~isnan(dataRow) && dataRow >= 1 && dataRow <= height(data)
+                        ctx = data(dataRow, :);
                     else
                         ctx = missing;
                     end
@@ -2871,6 +2876,25 @@ classdef Table < gwidgets.internal.Reparentable
                     ctx = data;
                 otherwise
                     ctx = this.cellValueForHover(displayRow, displayColumn);
+            end
+        end
+
+        function dataIdx = safeDisplayToDataIndex(this, displayIdx, type)
+            % displaySelectionToDataSelection asserts on inputs; wrap so a
+            % hover over a header row or out-of-range cell yields NaN
+            % instead of crashing the bridge callback.
+            if displayIdx < 1
+                dataIdx = NaN;
+                return
+            end
+            try
+                dataIdx = this.displaySelectionToDataSelection(displayIdx, type);
+            catch
+                dataIdx = NaN;
+                return
+            end
+            if isempty(dataIdx) || ~isscalar(dataIdx)
+                dataIdx = NaN;
             end
         end
 
