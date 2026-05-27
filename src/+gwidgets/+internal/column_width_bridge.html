@@ -143,11 +143,13 @@
   }
 
   function indexInParent(node) {
-    // 1-based index of node among its element siblings.
+    // 0-based index of node among its element siblings. Both the ARIA
+    // path and this fallback feed into gridCoordsFromTarget's final
+    // 0→1-based shift so all paths agree.
     if (!node || !node.parentNode) return -1;
     var siblings = node.parentNode.children;
     for (var i = 0; i < siblings.length; i++) {
-      if (siblings[i] === node) return i + 1;
+      if (siblings[i] === node) return i;
     }
     return -1;
   }
@@ -198,9 +200,11 @@
       }
     }
 
-    // ARIA rowindex counts the header as row 1 (body rows 2..N+1).
-    // Normalise so row 0 == header, row 1..N == display rows.
-    if (row > 0) row = row - 1;
+    // MATLAB's table reports aria-rowindex / aria-colindex as 0-based
+    // (header row excluded, first body row = 0). MATLAB display indices
+    // are 1-based, so shift by +1 here.
+    if (row >= 0) row = row + 1;
+    if (col >= 0) col = col + 1;
     return { row: row, col: col };
   }
 
