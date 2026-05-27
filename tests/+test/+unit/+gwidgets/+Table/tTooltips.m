@@ -148,12 +148,26 @@ classdef tTooltips < test.WithExampleTables
         end
 
         function tFunctionTooltipReceivesRowSlice(testCase)
-            % Two-arg function on a row target gets a 1xN table row.
-            data = testCase.multivariableData();
-            t = gwidgets.Table(Data=data);
-            t.addTooltip(@(~, row) "n=" + row.Numerical, "row", 2);
+            % Two-arg function on a row target gets a values vector when
+            % the table's columns can concatenate.
+            m = magic(5);
+            t = gwidgets.Table(Data=array2table(m));
+            t.addTooltip(@(~, row) "max=" + max(row), "row", 2);
 
-            testCase.verifyEqual(t.simulateBridgeHover(2, 3), "n=2")
+            % Row 2 of magic(5) is [23 5 7 14 16]; max == 23.
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), ...
+                "max=" + string(max(m(2, :))))
+        end
+
+        function tFunctionTooltipRowSliceMixedTypesFallsBackToTable(testCase)
+            % For mixed-type tables, the values can't concatenate into a
+            % single vector — row context falls back to a 1xN table so
+            % the user can still reach variables by name.
+            data = testCase.multivariableData(); % Numerical, Categorical, Logical, String
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(~, row) "n=" + row.Numerical + " s=" + row.String, "row", 2);
+
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "n=2 s=x")
         end
 
         function tFunctionTooltipReceivesWholeTable(testCase)
@@ -178,15 +192,15 @@ classdef tTooltips < test.WithExampleTables
         end
 
         function tFunctionTooltipRowIncludesHiddenColumns(testCase)
-            % Row slice is a 1xN slice of the underlying Data table, so
-            % hidden columns are still reachable by name.
-            m = magic(5);
-            t = gwidgets.Table(Data=array2table(m));
-            t.HiddenColumnNames = "Var2";
-            t.addTooltip(@(~, row) "v=" + row.Var2, "row", 1);
+            % Row slice is taken from the underlying Data, so hidden
+            % columns are still part of the slice. Use a mixed-type table
+            % to force the 1xN-table fallback so we can address by name.
+            data = testCase.multivariableData(); % Numerical, Categorical, Logical, String
+            t = gwidgets.Table(Data=data);
+            t.HiddenColumnNames = "String";
+            t.addTooltip(@(~, row) "s=" + row.String, "row", 2);
 
-            testCase.verifyEqual(t.simulateBridgeHover(1, 1), ...
-                "v=" + string(m(1, 2)))
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "s=x")
         end
 
         function tFunctionTooltipErrorIsContained(testCase)

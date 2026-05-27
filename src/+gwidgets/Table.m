@@ -807,8 +807,13 @@ classdef Table < gwidgets.internal.Reparentable
             %     ^ function form (1 arg): hovered cell value
             %   addTooltip(t, @(~, col) "Max: " + max(col), "column", 4)
             %     ^ function form (2 args): cell value + target-shaped
-            %       context (column -> vector, row -> 1xN table,
-            %       table -> full DisplayData, cell -> cell value)
+            %       context. The slice comes from the underlying Data
+            %       (hidden columns and filtered-out rows reachable):
+            %         column -> values vector
+            %         row    -> values vector (homogeneous tables) or 1xN
+            %                   table (mixed-type tables)
+            %         table  -> full Data table
+            %         cell   -> hovered cell value (same as the first arg)
             arguments
                 this (1,1) gwidgets.Table
                 text % string scalar OR function_handle (cellValue) -> string
@@ -2850,7 +2855,11 @@ classdef Table < gwidgets.internal.Reparentable
             % Build the second argument passed to a tooltip's TextFunction.
             % Shape depends on the tooltip's target:
             %   "column" -> the hovered column as a vector
-            %   "row"    -> the hovered row as a 1xN table
+            %   "row"    -> the hovered row as a vector when the row's
+            %               values can concatenate (typical for
+            %               homogeneous-type tables like array2table),
+            %               otherwise a 1xN table so mixed-type rows are
+            %               still reachable by variable name
             %   "table"  -> the full Data table
             %   "cell"   -> the hovered cell value (same as the first arg)
             % All slices come from the underlying Data table (not
@@ -2868,7 +2877,11 @@ classdef Table < gwidgets.internal.Reparentable
                 case "row"
                     dataRow = this.safeDisplayToDataIndex(displayRow, "row");
                     if ~isnan(dataRow) && dataRow >= 1 && dataRow <= height(data)
-                        ctx = data(dataRow, :);
+                        try
+                            ctx = data{dataRow, :}; % vector if homogeneous
+                        catch
+                            ctx = data(dataRow, :); % 1xN table on mixed types
+                        end
                     else
                         ctx = missing;
                     end
