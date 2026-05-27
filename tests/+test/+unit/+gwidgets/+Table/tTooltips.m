@@ -73,6 +73,29 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEmpty(t.Tooltips)
         end
 
+        function tAddTooltipOutOfRangeErrors(testCase)
+            % magic(5) becomes a 5x1 table (one variable holding the matrix),
+            % so cell [2,3] is out of range and addTooltip should say so up
+            % front rather than crashing later in the hover callback.
+            t = gwidgets.Table(Data=table(magic(5)));
+            fcn = @() t.addTooltip("hello", "cell", [2 3]);
+            testCase.verifyError(fcn, "GraphicsWidgets:Table:SelectionOutOfRange")
+        end
+
+        function tHoverSkipsTooltipsThatNoLongerFit(testCase)
+            % If data shape changes after a tooltip is registered so its
+            % configured indices no longer resolve, the hover path must not
+            % throw — that tooltip is just skipped.
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.addTooltip("col 3", "column", 3);
+
+            % Reassign data to a single-column table; column 3 no longer exists.
+            t.Data = table((1:5)');
+
+            % Hover must not error.
+            testCase.verifyWarningFree(@() t.simulateBridgeHover(1, 1));
+        end
+
         function tInvalidTooltipTarget(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             fcn = @() t.addTooltip("X", "cell", "not_numeric_or_function");

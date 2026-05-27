@@ -822,6 +822,15 @@ classdef Table < gwidgets.internal.Reparentable
                     "Tooltip target must be an index array or a function that takes the table object as input.");
             end
 
+            % Validate indices upfront against current data so registration
+            % errors surface here, not later inside the hover callback.
+            if tableTarget ~= "table"
+                idx = newTooltip.indices(this);
+                if newTooltip.SelectionMode == gwidgets.internal.table.SelectionMode.Data && ~isempty(idx)
+                    this.dataSelectionToDisplaySelection(idx, tableTarget);
+                end
+            end
+
             wasEmpty = isempty(this.Tooltips);
             this.Tooltips(end+1) = newTooltip;
             if wasEmpty
@@ -2777,9 +2786,16 @@ classdef Table < gwidgets.internal.Reparentable
             bestRank = 0;
             for i = 1:numel(this.Tooltips)
                 tt = this.Tooltips(i);
-                idx = tt.indices(this);
-                if tt.Target ~= "table" && tt.SelectionMode == gwidgets.internal.table.SelectionMode.Data && ~isempty(idx)
-                    idx = this.dataSelectionToDisplaySelection(idx, tt.Target);
+                try
+                    idx = tt.indices(this);
+                    if tt.Target ~= "table" && tt.SelectionMode == gwidgets.internal.table.SelectionMode.Data && ~isempty(idx)
+                        idx = this.dataSelectionToDisplaySelection(idx, tt.Target);
+                    end
+                catch
+                    % Configured indices don't resolve against current data
+                    % (e.g. data shape changed since registration). Skip this
+                    % tooltip rather than breaking the hover callback.
+                    continue
                 end
                 resolved = tt;
                 resolved.TargetIndices = idx;
