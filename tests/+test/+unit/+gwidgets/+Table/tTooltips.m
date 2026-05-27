@@ -195,9 +195,8 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEqual(t.simulateBridgeHover(0, 0), "default")
         end
 
-        function tTooltipMatchesPrecedence(testCase)
-            % cell match wins over row, which wins over column, which
-            % wins over table.
+        function tTableTooltipMatchesShape(testCase)
+            % Sanity-check TableTooltip.matches for each target shape.
             tt = gwidgets.internal.table.TableTooltip("col", "column", "TargetIndices", 2);
             tt.TargetIndices = 2;
             testCase.verifyTrue(tt.matches(1, 2))
@@ -213,6 +212,38 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyTrue(ttCell.matches(2, 3))
             testCase.verifyTrue(ttCell.matches(4, 5))
             testCase.verifyFalse(ttCell.matches(2, 5))
+        end
+
+        function tAddFunctionTooltipStoresHandle(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            fn = @(v) "Cell: " + string(v);
+            t.addTooltip(fn, "column", 1);
+            testCase.assertNumElements(t.Tooltips, 1)
+            testCase.verifyEqual(t.Tooltips(1).Text, "")
+            testCase.verifyEqual(t.Tooltips(1).TextFunction, fn)
+        end
+
+        function tFunctionTooltipColumnSliceIsHoveredColumn(testCase)
+            % When a column tooltip targets multiple columns, the slice
+            % passed to the function is the column the user is actually
+            % hovering — not all configured columns concatenated.
+            data = testCase.multivariableData(); % Numerical=1..5, Logical=[1 0 1 0 1]
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(~, col) "sum=" + sum(col), "column", [1 3]);
+
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), "sum=15") % Numerical
+            testCase.verifyEqual(t.simulateBridgeHover(1, 3), "sum=3")  % Logical
+        end
+
+        function tFunctionTooltipCellTargetGetsValueTwice(testCase)
+            % For "cell" target, both args of a two-arg function receive
+            % the hovered cell value.
+            data = testCase.multivariableData();
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(v, ctx) "v=" + string(v) + " ctx=" + string(ctx), ...
+                "cell", [2 1]);
+
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "v=2 ctx=2")
         end
 
     end

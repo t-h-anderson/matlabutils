@@ -61,10 +61,25 @@ tb.addContextMenuItem(m); %[output:4bc1b97d]
 %[text] ## Custom style example
 %[text] Create a style that highlights rows with Value \> 60
 s = matlab.ui.style.Style(BackgroundColor=[0.8 0.2 0.5]);
-%[text] target function takes the Table object 
+%[text] target function takes the Table object
 %[text] Apply a "row" style using the widget's addStyle API. SelectionMode "Display" makes the style use visible selection mapping.
 tb.removeStyle()
 tb.addStyle(s, "row", "Value>48");
+%%
+%[text] ## Custom tooltip example
+%[text] Tooltips are registered with `addTooltip(text, target, indices)` — same shape as `addStyle`. All matching tooltips for the hovered cell are joined most-specific-first (cell → row → column → table). Hover briefly over a cell to see the popup.
+tb.removeTooltip()
+%[text] Static text per target. The whole-table `Tooltip` property is the fallback when nothing more specific matches.
+tb.Tooltip = "Hover any cell for details";
+tb.addTooltip("Categorical group label", "column", 2);
+tb.addTooltip("Highlighted row",         "row",    3);
+tb.addTooltip("Outlier",                 "cell",   [5 4]);
+%[text] Function form (1 arg): the hovered cell value.
+tb.addTooltip(@(v) "Cell value: " + string(v), "column", 4);
+%[text] Function form (2 args): cell value plus a target-shaped context — vector for `column`, 1×N table for `row`, full `DisplayData` for `table`.
+tb.addTooltip(@(~, col) "Column max: "  + max(col),    "column", 4);
+tb.addTooltip(@(~, row) "Row label: "   + string(row.Note), "row", 3);
+tb.addTooltip(@(~, tbl) "Total rows: "  + height(tbl), "table");
 
 
 
