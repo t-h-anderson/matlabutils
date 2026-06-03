@@ -82,6 +82,10 @@ classdef Table < gwidgets.internal.Reparentable
         % Flag to prevent selection callback recursion
         IsSettingSelectionProgrammatically (1,1) logical = false
 
+        % Avoid global pause/drawnow flushes while the widget is still
+        % being constructed; a single refresh is enough once setup is live.
+        SuppressForceRefresh_ (1,1) logical = true
+
     end
 
     % Custom table callbacks
@@ -112,6 +116,11 @@ classdef Table < gwidgets.internal.Reparentable
 
             % Support creation with filtering and grouping set
             this.doUpdateSequence();
+
+            this.SuppressForceRefresh_ = false;
+            if ~isempty(this.Parent)
+                this.forceRefresh();
+            end
         end
 
         function delete(this)
@@ -1432,7 +1441,6 @@ classdef Table < gwidgets.internal.Reparentable
             groupHeaderRowIdxs = [groupHeaderRowIdxs, height(data)+1]; % Add an extra fake group start to make calculating start and end group idxs easy
 
             if ~isempty(sortByDataVars)
-
                 for iGroup = 1:(numel(groupHeaderRowIdxs)-1)
 
                     dataStartIdx = groupHeaderRowIdxs(iGroup) + 1;
@@ -2474,10 +2482,12 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
-        function forceRefresh(~)
+        function forceRefresh(this)
             % Force a refresh
-            pause(0);
-            drawnow limitrate
+            if this.SuppressForceRefresh_
+                return
+            end
+            gwidgets.internal.Drawnow.runWithPause("limitrate");
         end
     end
 

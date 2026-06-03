@@ -595,7 +595,7 @@ classdef FilterController < gwidgets.internal.Reparentable
             % Listen for this event, and pass a table into 
             % applyCurrentFilter
             this.FilterValue = this.FilterDropDown.Value;
-            pause(0) % Required to make the filter value update on error
+            gwidgets.internal.Drawnow.runWithPause(); % Required to make the filter value update on error
             notify(this, "FilterChanged");
         end
 
