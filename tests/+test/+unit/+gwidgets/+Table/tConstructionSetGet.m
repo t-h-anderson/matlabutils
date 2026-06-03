@@ -9,6 +9,17 @@ classdef tConstructionSetGet < test.WithExampleTables
             testCase.verifyEqual(t.Data, table.empty(0,0));
         end
 
+        function tHeadlessConstructionSkipsForceRefresh(testCase)
+            d = gwidgets.internal.Drawnow.make(true);
+            d.IsEnabled = true;
+
+            t = testCase.verifyWarningFree(@() gwidgets.Table());
+
+            testCase.verifyEqual(d.Total, 0)
+            testCase.verifyEqual(d.Skipped, 0)
+            delete(t);
+        end
+
         function tDefaultValue(testCase)
             % Test default values that are not tested in the unit tests.
             t = testCase.verifyWarningFree(@() gwidgets.Table());

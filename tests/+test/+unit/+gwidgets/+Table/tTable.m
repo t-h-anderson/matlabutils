@@ -160,6 +160,17 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture
 
         end
 
+        function tCreationWithParentUsesSingleForceRefresh(testCase)
+            d = gwidgets.internal.Drawnow.make(true);
+            d.IsEnabled = true;
+
+            fh = testCase.figureFixture(Type="uifigure");
+            t = testCase.verifyWarningFree(@() gwidgets.Table("Parent", fh));
+
+            testCase.verifyLessThanOrEqual(d.Total, 1)
+            delete(t);
+        end
+
         function tDeletionClearsUpChildren(testCase)
             
             fh = testCase.figureFixture(Type="uifigure");
