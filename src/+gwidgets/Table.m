@@ -60,7 +60,7 @@ classdef Table < gwidgets.internal.Reparentable
         DataColumnEditable_ (1,:) logical % Logical array indicating which columns are editable
         DataColumnSortable_ (1,:) logical % Logical array indicating which columns are sortable
 
-        % Column-width bridge
+        % Table bridge
         DisplayTableTag_ (1,1) string   % Unique DOM tag used to scope bridge JS queries
 
         % Column-width stores — three parallel arrays aligned to DataColumnNames.
@@ -76,7 +76,7 @@ classdef Table < gwidgets.internal.Reparentable
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
 
         % Record whether data or view was specified on selection
-        SelectionMode (1,1) gwidgets.internal.table.SelectionMode = "Data"
+        SelectionMode (1,1) gwidgets.table.SelectionMode = "Data"
         Selection_ (:,:) % Selected Data: Either (:,2) for cell or (1,:) otherwise
 
         % Flag to prevent selection callback recursion
@@ -709,7 +709,7 @@ classdef Table < gwidgets.internal.Reparentable
                 s (1,1) matlab.ui.style.Style
                 tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
                 targetIndicesOrFunction (:,:) = []
-                nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
+                nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
             end
 
             if isa(targetIndicesOrFunction, "function_handle")
@@ -782,6 +782,117 @@ classdef Table < gwidgets.internal.Reparentable
             style = gwidgets.internal.table.TableStyle(s, "row", "SelectionMode", "Display", "TargetFunction", @(this) this.VisibleGroupHeaderRowIdx);
         end
 
+    end
+
+    %% Tooltips
+    properties (Dependent)
+        Tooltip (1,1) string % Table-wide tooltip; pass-through to uitable.Tooltip
+        DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle % Widget-wide fallback style
+    end
+
+    properties (GetAccess = ?matlab.unittest.TestCase, SetAccess = protected)
+        Tooltips (1,:) gwidgets.internal.table.TableTooltip
+    end
+
+    properties (Access = protected)
+        TableTooltipText_ (1,1) string = ""
+        DefaultTooltipStyle_ (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
+    end
+
+    methods
+        function addTooltip(this, text, tableTarget, targetIndicesOrFunction, nvp)
+            % addTooltip registers a hover-tooltip configuration. Mirrors addStyle.
+            %   addTooltip(t, "Click to open", "table")
+            %   addTooltip(t, "Patient height (cm)", "column", 4)
+            %   addTooltip(t, "Outlier", "cell", [3 2; 5 7])
+            %   addTooltip(t, @(ctx) "Value: " + ctx.Value, "column", [2 3])
+            %     ^ function form: receives a gwidgets.table.TooltipContext
+            %       with fields Value, Row, Column, Table, DisplayRow,
+            %       DisplayColumn, DataRow, DataColumn, Target. Row and
+            %       Column slices come from the underlying Data table
+            %       (hidden columns / filtered-out rows reachable).
+            %
+            %   Pass ContextShape to control the shape of ctx.Row and
+            %   ctx.Column:
+            %     "Values" -> vectors
+            %     "Table"  -> 1xN / Mx1 tables
+            %   Per-target defaults: column=Values, row=Table,
+            %   table=Table, cell=Values.
+            arguments
+                this (1,1) gwidgets.Table
+                text % string scalar OR function_handle (cellValue) -> string
+                tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
+                targetIndicesOrFunction (:,:) = []
+                nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
+                nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = gwidgets.internal.table.TableTooltip.defaultContextShape(tableTarget)
+                nvp.Style = []
+            end
+
+            ttArgs = {"SelectionMode", nvp.SelectionMode, "ContextShape", nvp.ContextShape, "Style", nvp.Style};
+            if tableTarget == "table"
+                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, ttArgs{:});
+            elseif isa(targetIndicesOrFunction, "function_handle")
+                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, "TargetFunction", targetIndicesOrFunction, ttArgs{:});
+            elseif isnumeric(targetIndicesOrFunction)
+                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, "TargetIndices", targetIndicesOrFunction, ttArgs{:});
+            else
+                error("GraphicsWidgets:Table:TooltipTarget", ...
+                    "Tooltip target must be an index array or a function that takes the table object as input.");
+            end
+
+            % Validate indices upfront against current data so registration
+            % errors surface here, not later inside the hover callback.
+            if tableTarget ~= "table"
+                idx = newTooltip.indices(this);
+                if newTooltip.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
+                    this.dataSelectionToDisplaySelection(idx, tableTarget);
+                end
+            end
+
+            wasEmpty = isempty(this.Tooltips);
+            this.Tooltips(end+1) = newTooltip;
+            if wasEmpty
+                this.sendHoverEnableToBridge();
+            end
+        end
+
+        function removeTooltip(this, orderNum)
+            arguments
+                this
+                orderNum (1,:) double = []
+            end
+
+            if isempty(orderNum)
+                this.Tooltips(:) = [];
+            else
+                this.Tooltips(orderNum) = [];
+            end
+
+            if isempty(this.Tooltips)
+                this.sendHoverDisableToBridge();
+            end
+        end
+    end
+
+    methods % Get/Set Tooltip
+        function val = get.Tooltip(this)
+            val = this.TableTooltipText_;
+        end
+
+        function set.Tooltip(this, val)
+            this.TableTooltipText_ = val;
+            if ~isempty(this.DisplayTable)
+                this.DisplayTable.Tooltip = val;
+            end
+        end
+
+        function val = get.DefaultTooltipStyle(this)
+            val = this.DefaultTooltipStyle_;
+        end
+
+        function set.DefaultTooltipStyle(this, val)
+            this.DefaultTooltipStyle_ = val;
+        end
     end
 
     %% Context Menu
@@ -1409,8 +1520,8 @@ classdef Table < gwidgets.internal.Reparentable
 
         function toggleBridgeDiag(this, val)
             this.BridgeDiagEnabled_ = val;
-            if ~isempty(this.ColumnWidthBridge_)
-                sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", val);
+            if ~isempty(this.TableBridge_)
+                sendEventToHTMLSource(this.TableBridge_, "Diag", val);
             end
         end
 
@@ -1463,7 +1574,7 @@ classdef Table < gwidgets.internal.Reparentable
         DisplayTable (1,:) matlab.ui.control.Table {mustBeScalarOrEmpty}
 
         HelpPanel (1,:) matlab.ui.container.Panel {mustBeScalarOrEmpty}
-        ColumnWidthBridge_ (1,:) matlab.ui.control.HTML {mustBeScalarOrEmpty}
+        TableBridge_ (1,:) matlab.ui.control.HTML {mustBeScalarOrEmpty}
     end
 
     properties (SetAccess = private)
@@ -1510,8 +1621,13 @@ classdef Table < gwidgets.internal.Reparentable
             this.DisplayTable.Layout.Row = 3;
 
             this.addContextMenu();
-            this.setupColumnWidthBridge();
+            this.setupTableBridge();
             this.doUpdateSequence();
+
+            % Apply any tooltip state that was configured before setup ran.
+            % The bridge will enable hover reports once it signals BridgeReady,
+            % and onBridgeData(BridgeReady) takes care of HoverEnable below.
+            this.DisplayTable.Tooltip = this.TableTooltipText_;
         end
 
         function updateDisplayData(this)
@@ -1801,15 +1917,17 @@ classdef Table < gwidgets.internal.Reparentable
 
     end
 
-    % Column-width bridge
+    % Table bridge — column-width tracking + cell-hover detection
     methods (Access = private)
 
-        function setupColumnWidthBridge(this)
-            % Create a tiny (2 px tall) uihtml component that uses a
-            % ResizeObserver in the figure's web context to detect when the
-            % user drags a column divider and report the new pixel widths
-            % back to MATLAB.  The component lives in row 4 of this.Grid,
-            % which has a fixed height of 2 px so it is effectively invisible.
+        function setupTableBridge(this)
+            % Create a tiny (2 px tall) uihtml component that lives in the
+            % same browser context as the table. Hosts the ResizeObserver
+            % used to detect column-divider drags AND the mouseover
+            % listener used to drive cell-level tooltips. See
+            % doc/TableBridge_DeveloperNotes.md for the full design.
+            % The component lives in row 4 of this.Grid, which has a
+            % fixed height of 2 px so it is effectively invisible.
 
             % Assign a unique tag to the uitable so the bridge JS can scope
             % its DOM query to this table specifically (avoids cross-talk
@@ -1819,16 +1937,16 @@ classdef Table < gwidgets.internal.Reparentable
 
             htmlFile = fullfile(fileparts(mfilename("fullpath")), ...
                 "+internal", ...
-                "column_width_bridge.html");
+                "table_bridge.html");
 
-            this.ColumnWidthBridge_ = uihtml( ...
+            this.TableBridge_ = uihtml( ...
                 "Parent",       this.Grid, ...
                 "HTMLSource",   htmlFile, ...
                 "DataChangedFcn", @(src,~) this.onBridgeData(src), ...
                 "Visible","off");
 
-            this.ColumnWidthBridge_.Layout.Row    = 4;
-            this.ColumnWidthBridge_.Layout.Column = 1;
+            this.TableBridge_.Layout.Row    = 4;
+            this.TableBridge_.Layout.Column = 1;
 
             % Enforce default in JS
             this.BridgeDiagEnabled = this.BridgeDiagEnabled;
@@ -1848,10 +1966,13 @@ classdef Table < gwidgets.internal.Reparentable
                 case "BridgeReady"
                     % setup() has run — send Init then Ready so the bridge
                     % attaches its ResizeObserver to the (already-rendered) table.
-                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Init", ...
+                    sendEventToHTMLSource(this.TableBridge_, "Init", ...
                         struct("tableTag", this.DisplayTableTag_));
-                    sendEventToHTMLSource(this.ColumnWidthBridge_, "Diag", this.BridgeDiagEnabled);
+                    sendEventToHTMLSource(this.TableBridge_, "Diag", this.BridgeDiagEnabled);
                     this.sendReadyToBridge();
+                    if ~isempty(this.Tooltips)
+                        this.sendHoverEnableToBridge();
+                    end
 
                 case "ColumnWidthChanged"
                     % Bridge fires on every ResizeObserver callback.
@@ -1875,10 +1996,25 @@ classdef Table < gwidgets.internal.Reparentable
                         this.sendRestoreToBridge();
                     end
 
+                case "CellHover"
+                    if ~isempty(this.Tooltips)
+                        this.applyTooltipPayload(double(d.row), double(d.col));
+                    end
+
                 case "BridgeDiag"
                     fprintf("%s\n", d.msg);
 
             end
+        end
+
+        function sendHoverEnableToBridge(this)
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "HoverEnable", []);
+        end
+
+        function sendHoverDisableToBridge(this)
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "HoverDisable", []);
         end
 
         function onBridgeReattachNeeded(this)
@@ -1890,23 +2026,23 @@ classdef Table < gwidgets.internal.Reparentable
             % Tell the bridge to stop reporting ColumnWidthChanged events.
             % Queue this before DisplayTable.ColumnWidth changes so the
             % ResizeObserver echo during our own DOM update is silently dropped.
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Suppress", []);
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "Suppress", []);
         end
 
         function sendRestoreToBridge(this)
             % Tell the bridge to re-enable reporting and re-enable
             % ColumnWidthChanged callbacks.
 
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Restore", []);
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "Restore", []);
         end
 
         function sendReadyToBridge(this)
             % Signal the bridge to (re-)attach its ResizeObserver once the
             % table DOM has settled.
-            if isempty(this.ColumnWidthBridge_), return; end
-            sendEventToHTMLSource(this.ColumnWidthBridge_, "Ready", []);
+            if isempty(this.TableBridge_), return; end
+            sendEventToHTMLSource(this.TableBridge_, "Ready", []);
         end
 
     end
@@ -1920,6 +2056,14 @@ classdef Table < gwidgets.internal.Reparentable
             % pixelWidths: positive pixel widths for all visible columns.
             this.updateStoresFromBridgeWidths(pixelWidths);
             this.applyColumnWidthToDisplay();
+        end
+
+        function [text, style] = simulateBridgeHover(this, displayRow, displayColumn)
+            % Simulate a CellHover notification from the bridge without
+            % requiring a live DOM/figure. Returns the resolved tooltip
+            % text (and resolved TooltipStyle) that would be displayed.
+            [text, style] = this.resolveTooltipTextAndStyle(displayRow, displayColumn);
+            this.applyTooltipPayload(displayRow, displayColumn);
         end
 
         function changed = didBridgeWidthsChange(this, incomingPx)
@@ -2372,6 +2516,8 @@ classdef Table < gwidgets.internal.Reparentable
                 this.GroupColumnIdx = zeros(1,0);
                 this.GroupFilteredCount = zeros(1,0);
                 this.GroupIdxs = zeros(1,0);
+                this.OpenGroups_ = string.empty(1,0);
+                this.HiddenGroups_ = string.empty(1,0);
 
                 this.GroupedDataToVisibleMap = this.FilteredDataToVisibleMap;
                 this.GroupedVisibleToDataMap = this.FilteredVisibleToDataMap;
@@ -2397,6 +2543,11 @@ classdef Table < gwidgets.internal.Reparentable
 
                 this.Groups = allGroups;
                 this.GroupIdxs = groupIdxs;
+
+                % Drop any open/hidden group state that no longer corresponds
+                % to a current group (e.g. after switching GroupingVariable).
+                this.OpenGroups_ = this.OpenGroups_(ismember(this.OpenGroups_, this.Groups));
+                this.HiddenGroups_ = this.HiddenGroups_(ismember(this.HiddenGroups_, this.Groups));
 
                 if numel(g) > 1
                     filteredGroupVars = arrayfun(@(x) this.FilteredData.(x), g, "UniformOutput", false);
@@ -2590,7 +2741,7 @@ classdef Table < gwidgets.internal.Reparentable
                 target = thisStyle.Target;
 
                 index = thisStyle.indices(this);
-                if thisStyle.SelectionMode == gwidgets.internal.table.SelectionMode.Data
+                if thisStyle.SelectionMode == gwidgets.table.SelectionMode.Data
                     index = this.dataSelectionToDisplaySelection(index, thisStyle.Target);
                 end
                 this.DisplayTable.addStyle(style, target, index);
@@ -2634,6 +2785,236 @@ classdef Table < gwidgets.internal.Reparentable
                 else
                     this.OpenGroups = [this.OpenGroups, group];
                 end
+            end
+        end
+
+        function applyTooltipPayload(this, displayRow, displayColumn)
+            % Resolve the hovered cell to a list of styled blocks and send
+            % them to the bridge. One block per unique resolved style;
+            % within a block, lines are joined most-specific-first.
+            blocks = this.resolveTooltipBlocks(displayRow, displayColumn);
+            if isempty(this.TableBridge_) || ~isvalid(this.TableBridge_)
+                return
+            end
+            sendEventToHTMLSource(this.TableBridge_, "SetTooltip", ...
+                struct("blocks", {blocks}));
+        end
+
+        function blocks = resolveTooltipBlocks(this, displayRow, displayColumn)
+            % Convert the internal groups to the JS payload shape:
+            %   cell array of
+            %     struct("containerCss", char,
+            %            "lines",        {cell of struct("text", char, "css", char)})
+            groups = this.resolveTooltipGroups(displayRow, displayColumn);
+            blocks = cell(1, numel(groups));
+            for k = 1:numel(groups)
+                g = groups(k);
+                lineCells = cell(1, numel(g.Lines));
+                for j = 1:numel(g.Lines)
+                    lineCells{j} = struct( ...
+                        "text", char(g.Lines(j).Text), ...
+                        "css",  char(g.Lines(j).LineStyle.lineCss()));
+                end
+                blocks{k} = struct( ...
+                    "containerCss", char(g.ContainerStyle.containerCss()), ...
+                    "lines",        {lineCells});
+            end
+        end
+
+        function groups = resolveTooltipGroups(this, displayRow, displayColumn)
+            % Resolve a hovered cell to a struct array of grouped matches.
+            % Each group is:
+            %   struct("ContainerStyle", TooltipStyle,
+            %          "Lines",          struct array of (Text, LineStyle))
+            % Two matches share a group when their resolved styles agree
+            % on every container property (background, padding, border,
+            % border-radius) — even if their line properties (font color,
+            % weight, size, family) differ. Within a group, lines are
+            % ordered most-specific-first (cell -> row -> column -> table;
+            % registration order preserved within a target). Group order
+            % is the order of first-appearance, which means the group
+            % containing the most-specific match comes first.
+            matches = this.collectTooltipMatches(displayRow, displayColumn);
+
+            groups = struct("ContainerStyle", {}, "Lines", {});
+
+            if isempty(matches)
+                text = this.TableTooltipText_;
+                if text == ""
+                    return
+                end
+                base = gwidgets.table.TooltipStyle.default();
+                base = base.merge(this.DefaultTooltipStyle_);
+                groups(1).ContainerStyle = base;
+                groups(1).Lines = struct("Text", text, "LineStyle", base);
+                return
+            end
+
+            for k = 1:numel(matches)
+                m = matches(k);
+                key = m.Style.containerKey();
+                gIdx = [];
+                for g = 1:numel(groups)
+                    if isequaln(groups(g).ContainerStyle.containerKey(), key)
+                        gIdx = g;
+                        break
+                    end
+                end
+                if isempty(gIdx)
+                    groups(end+1).ContainerStyle = m.Style; %#ok<AGROW>
+                    groups(end).Lines = struct("Text", m.Text, "LineStyle", m.Style);
+                else
+                    groups(gIdx).Lines(end+1).Text = m.Text;
+                    groups(gIdx).Lines(end).LineStyle = m.Style;
+                end
+            end
+        end
+
+        function [text, style] = resolveTooltipTextAndStyle(this, displayRow, displayColumn)
+            % Back-compat helper for tests: text = every line in every
+            % group, joined by newline; style = the first matching
+            % tooltip's full style (= the first line of the first group).
+            groups = this.resolveTooltipGroups(displayRow, displayColumn);
+            if isempty(groups)
+                text = "";
+                base = gwidgets.table.TooltipStyle.default();
+                style = base.merge(this.DefaultTooltipStyle_);
+                return
+            end
+            allLines = strings(0, 1);
+            for k = 1:numel(groups)
+                for j = 1:numel(groups(k).Lines)
+                    allLines(end+1, 1) = groups(k).Lines(j).Text; %#ok<AGROW>
+                end
+            end
+            text = strjoin(allLines, newline);
+            style = groups(1).Lines(1).LineStyle;
+        end
+
+        function matches = collectTooltipMatches(this, displayRow, displayColumn)
+            % Returns a struct array (fields Text, Style, Rank) of every
+            % tooltip that matches the hovered cell, ordered by Rank
+            % ascending with registration order preserved within rank.
+            % Rank: 1=cell, 2=row, 3=column, 4=table. Style is the fully
+            % resolved TooltipStyle (per-tooltip style layered on top of
+            % DefaultTooltipStyle layered on TooltipStyle.default()).
+            priorities = ["cell", "row", "column", "table"];
+            baseStyle = gwidgets.table.TooltipStyle.default();
+            baseStyle = baseStyle.merge(this.DefaultTooltipStyle_);
+            byRank = cell(1, numel(priorities));
+
+            for i = 1:numel(this.Tooltips)
+                tt = this.Tooltips(i);
+                try
+                    idx = tt.indices(this);
+                    if tt.Target ~= "table" && tt.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
+                        idx = this.dataSelectionToDisplaySelection(idx, tt.Target);
+                    end
+                catch
+                    continue
+                end
+                resolved = tt;
+                resolved.TargetIndices = idx;
+                if ~resolved.matches(displayRow, displayColumn)
+                    continue
+                end
+
+                rank = find(priorities == tt.Target, 1);
+                ctx = this.buildHoverContext(tt.Target, tt.ContextShape, displayRow, displayColumn);
+                try
+                    rendered = tt.textFor(ctx);
+                catch err
+                    rendered = "[tooltip error: " + string(err.message) + "]";
+                end
+                ttStyle = tt.styleFor(ctx);
+                if isempty(ttStyle)
+                    resolvedStyle = baseStyle;
+                else
+                    resolvedStyle = baseStyle.merge(ttStyle);
+                end
+
+                entry = struct("Text", rendered, "Style", resolvedStyle, "Rank", rank);
+                byRank{rank} = [byRank{rank}; entry];
+            end
+
+            matches = vertcat(byRank{:});
+            if isempty(matches)
+                matches = struct("Text", {}, "Style", {}, "Rank", {});
+            end
+        end
+
+        function val = cellValueForHover(this, displayRow, displayColumn)
+            % Return the value at the hovered display cell, or missing
+            % when (row, col) doesn't reference a body cell.
+            val = missing;
+            if displayRow < 1 || displayColumn < 1
+                return
+            end
+            data = this.DisplayData;
+            if displayRow > size(data, 1) || displayColumn > width(data)
+                return
+            end
+            val = data{displayRow, displayColumn};
+            if iscell(val) && isscalar(val)
+                val = val{1};
+            end
+        end
+
+        function ctx = buildHoverContext(this, target, shape, displayRow, displayColumn)
+            % Compose the single TooltipContext value passed to a
+            % tooltip's TextFunction / StyleFunction. All fields are
+            % populated regardless of target; ContextShape controls the
+            % shape of Row and Column.
+            data = this.Data;
+            ctx = gwidgets.table.TooltipContext;
+            ctx.Target = target;
+            ctx.Table  = data;
+            ctx.DisplayRow    = displayRow;
+            ctx.DisplayColumn = displayColumn;
+            ctx.Value         = this.cellValueForHover(displayRow, displayColumn);
+
+            dataRow = this.safeDisplayToDataIndex(displayRow, "row");
+            dataCol = this.safeDisplayToDataIndex(displayColumn, "column");
+            ctx.DataRow    = dataRow;
+            ctx.DataColumn = dataCol;
+
+            if ~isnan(dataRow) && dataRow >= 1 && dataRow <= height(data)
+                if shape == "Values"
+                    try
+                        ctx.Row = data{dataRow, :};
+                    catch
+                        ctx.Row = missing; % mixed-type row can't concatenate
+                    end
+                else
+                    ctx.Row = data(dataRow, :);
+                end
+            end
+
+            if ~isnan(dataCol) && dataCol >= 1 && dataCol <= width(data)
+                if shape == "Values"
+                    ctx.Column = data{:, dataCol};
+                else
+                    ctx.Column = data(:, dataCol);
+                end
+            end
+        end
+
+        function dataIdx = safeDisplayToDataIndex(this, displayIdx, type)
+            % displaySelectionToDataSelection asserts on inputs; wrap so a
+            % hover over a header row or out-of-range cell yields NaN
+            % instead of crashing the bridge callback.
+            if displayIdx < 1
+                dataIdx = NaN;
+                return
+            end
+            try
+                dataIdx = this.displaySelectionToDataSelection(displayIdx, type);
+            catch
+                dataIdx = NaN;
+                return
+            end
+            if isempty(dataIdx) || ~isscalar(dataIdx)
+                dataIdx = NaN;
             end
         end
 

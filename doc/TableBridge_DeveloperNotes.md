@@ -1,29 +1,48 @@
-# Column Width Bridge — Developer Notes
+# Table Bridge — Developer Notes
 
 > **Files covered**
-> - `src/+gwidgets/+internal/column_width_bridge.html` — the JS bridge (runs in a `uihtml` iframe)
-> - `src/+gwidgets/Table.m` — the MATLAB host (methods in the *Column-width bridge* section)
+> - `src/+gwidgets/+internal/table_bridge.html` — the JS bridge (runs in a `uihtml` iframe)
+> - `src/+gwidgets/Table.m` — the MATLAB host (methods in the *Table bridge* section)
+>
+> The bridge has two responsibilities sharing the same iframe:
+> 1. column-width tracking (described below), and
+> 2. cell-level hover detection driving the tooltip popup (see the
+>    `HoverEnable` / `HoverDisable` / `SetTooltip` / `CellHover` events in the
+>    JS header).
 
 ---
 
 ## 1. Why the bridge exists
 
-MATLAB's `uitable` renders as a web component.  When the user drags a column
-divider, MATLAB updates `ColumnWidth` internally but does **not** fire the
-property's set-listener, so MATLAB code cannot detect the drag via normal
-property observation.
+MATLAB's `uitable` renders as a web component, and several things the widget
+needs to do can't be reached through MATLAB's property/event API — they
+require touching the DOM directly.  The bridge is a tiny `uihtml` iframe
+(2 px tall, invisible) that lives in the same browser context as the table
+and brokers events in both directions.
 
-The bridge solves this by mounting a `ResizeObserver` on the header column
-elements from a tiny `uihtml` iframe (2 px tall, invisible) that lives in the
-same browser context as the table.  When columns resize the observer fires,
-and the bridge decides whether the change was a user drag or a window resize,
-then tells MATLAB via `htmlComponent.Data`.
+It currently handles two responsibilities:
 
-A second responsibility is the reverse direction: when MATLAB pushes new
-widths programmatically, the browser may not honour `uitable.ColumnWidth` if
-the user has previously dragged (MATLAB treats a user-dragged column as
-"sticky").  The bridge works around this by directly stamping `min-width` /
-`max-width` on the header `<th>` elements and the body `<td>` cells.
+1. **Column-width tracking.**  When the user drags a column divider,
+   MATLAB updates `ColumnWidth` internally but does **not** fire the
+   property's set-listener.  A `ResizeObserver` mounted on the header
+   column elements catches the resize and reports the new pixel widths
+   to MATLAB.  Conversely, when MATLAB pushes new widths programmatically,
+   the browser may not honour `uitable.ColumnWidth` if the user has
+   previously dragged (MATLAB treats user-dragged columns as "sticky"),
+   so the bridge stamps `min-width` / `max-width` directly on the
+   header `<th>` and body `<td>` elements.
+
+2. **Cell-level hover detection** for the tooltip system.  `uitable.Tooltip`
+   is read by MATLAB once on mouse-enter and isn't re-read while hovering,
+   so MATLAB can't drive per-cell tooltips through it.  The bridge attaches
+   a `mouseover` listener at the figure document root, walks up from the
+   event target to find ARIA grid coordinates (`aria-rowindex` /
+   `aria-colindex`, with a class-selector fallback), and reports the
+   hovered `{row, col}` to MATLAB.  MATLAB resolves the tooltip text and
+   style and pushes them back as a list of styled blocks, which the
+   bridge renders in its own absolutely-positioned popup `<div>` —
+   independent of the browser's native title popup, so it refreshes
+   immediately on every cell transition and supports CSS styling.
 
 ---
 
@@ -36,11 +55,17 @@ Figure
         ├── Row 1  HelpPanel (filter help, width=0 when hidden)
         ├── Row 2  (height 0 — unused / filter row placeholder)
         ├── Row 3  DisplayTable  (matlab uitable)   ← columns observed here
-        └── Row 4  ColumnWidthBridge_ (uihtml, height=2px)  ← bridge iframe
+        └── Row 4  TableBridge_ (uihtml, height=2px)  ← bridge iframe
+
+window.parent.document.body
+  └── <div id="gwidgets-tooltip">  ← tooltip popup (only present while hovering)
 ```
 
 The bridge iframe is a sibling of the `uitable` in the same DOM tree, so
-`window.parent` gives it access to the figure's document.
+`window.parent` gives it access to the figure's document.  The tooltip
+popup is appended to the figure's `<body>` directly (not inside the bridge
+iframe) so it can overlay cells without being clipped by the bridge's own
+2-pixel-tall layout slot.
 
 ---
 
@@ -49,7 +74,7 @@ The bridge iframe is a sibling of the `uitable` in the same DOM tree, so
 ```
 MATLAB                                  JS bridge
 ------                                  ---------
-setupColumnWidthBridge()
+setupTableBridge()
   assign unique DisplayTableTag_
   set DisplayTable.Tag = tag
   create uihtml (loads async)
@@ -322,13 +347,101 @@ echo of a bridge-initiated drag, not for independent programmatic
 
 ---
 
-## 10. Known limitations
+## 10. Cell hover and tooltip rendering
 
-- **No timer cancellation on rapid pauses** — `pauseColumnWidthBridge` starts
-  a new `timer` on each call without cancelling any in-flight timer from a
-  prior call.  Since all calls use the same `pauseMs` value (500 or 1200 ms),
-  concurrent timers are harmless in practice, but the flag may be cleared
-  slightly after the expected deadline if a 500 ms timer races a 1200 ms one.
+The bridge's second job is driving the `gwidgets.Table` tooltip system.
+`uitable.Tooltip` is only re-read on mouse-enter, so MATLAB can't update it
+per cell while hovering — instead the bridge owns its own popup `<div>` and
+swaps content based on which cell the cursor is currently over.
+
+### 10.1 Event protocol
+
+MATLAB → bridge:
+
+| Event         | Payload                                       | Meaning |
+|---------------|-----------------------------------------------|---------|
+| `HoverEnable` | —                                             | Start reporting `CellHover` events. Sent when the first tooltip is registered (or on `BridgeReady` if any tooltips already exist). |
+| `HoverDisable`| —                                             | Stop reporting and hide the popup. Sent when the last tooltip is removed. |
+| `SetTooltip`  | `{ blocks: [{ containerCss, lines: [{ text, css }, ...] }, ...] }` | Render or hide the popup. An empty `blocks` list hides it. Each block has its own container CSS (background, padding, border) and a list of styled lines (font color, weight, size, family). |
+
+Bridge → MATLAB:
+
+| Event       | Payload              | Meaning |
+|-------------|----------------------|---------|
+| `CellHover` | `{ row, col }`       | Cursor entered a new cell (deduped — no event if same `{row, col}` as the previous one). `row=0` means header / no body row; `col=0` means off-cell. Coordinates are 1-based display indices. |
+
+### 10.2 Cell-coordinate extraction
+
+On every `mouseover` inside the table root, `gridCoordsFromTarget` walks
+up the ancestor chain from `evt.target` looking for the first element with
+`aria-rowindex` and the first with `aria-colindex`.  MATLAB's table emits
+those 1-based against its own display order with no header counted, so they
+match `gwidgets.Table.DisplayData` row/column indices directly — no shift
+needed.
+
+A class-selector fallback (`.mw-table-body-cell`, `.mw-table-cell`,
+`.mw-table-header-column`, `[role='gridcell']`, `[role='columnheader']`,
+`[role='row']`) is in place for table DOM variants that don't expose ARIA
+attributes; it infers indices from sibling position via `indexInParent`.
+
+### 10.3 Popup rendering
+
+The popup is a single `<div id="gwidgets-tooltip">` lazily appended to
+`window.parent.document.body` on first hover, with:
+
+- `position: fixed` so it floats above the table regardless of scroll;
+- `pointer-events: none` so it doesn't interfere with table interactions;
+- `z-index: 9999` to sit above MATLAB dropdowns/menus.
+
+Each `SetTooltip` event clears the container and rebuilds it in a
+nested loop:
+
+- one outer `<div>` per **block**, with `containerCss` applied (background,
+  padding, border, border-radius);
+- one inner `<div>` per **line** inside that block, with `textContent`
+  carrying the text (never `innerHTML`, to avoid HTML injection from
+  cell values) and `style.cssText` carrying the line's CSS (font color,
+  weight, size, family).
+
+Blocks after the first get a `margin-top: 2px` divider so distinct
+backgrounds visibly separate.  The popup is positioned next to the
+cursor on each event and on every mouseover within the same cell
+(`positionTooltipNearCursor`).  Edge detection flips the popup to the
+other side of the cursor when it would otherwise extend past the right
+or bottom of the viewport.
+
+### 10.4 Grouping rule
+
+`resolveTooltipGroups` (MATLAB side) decides which matches share a
+block.  Two matches share a block when their resolved styles agree on
+every **container** property (`BackgroundColor`, `Padding`,
+`BorderColor`, `BorderRadius`) — comparison is `isequaln` on the struct
+returned by `TooltipStyle.containerKey()` so NaN/missing sentinels treat
+unset==unset.  Line properties (`FontColor`, `FontWeight`, `FontSize`,
+`FontFamily`) do **not** affect grouping — each line keeps its own line
+style.
+
+Within a block, lines are ordered most-specific-first (cell → row →
+column → table; registration order preserved within a target).  Block
+order is the order of first-appearance, which is also most-specific-first.
+
+### 10.5 Lifecycle
+
+- `HoverEnable` arrives → `attachHover()` adds the `mouseover` listener at
+  `window.parent.document`, capture phase.
+- Crossing into a new cell → `hideTooltip()` clears the previous content,
+  then `sendHover(row, col)` posts to MATLAB.  Brief flicker is preferable
+  to showing stale text from the previous cell while waiting for the
+  roundtrip.
+- Cursor moves within the same cell → `positionTooltipNearCursor()` only
+  (no roundtrip).
+- `SetTooltip` arrives → `renderTooltipBlocks(blocks)` shows/hides.
+- `HoverDisable` arrives → `hideTooltip()`, `detachHover()`, reset
+  `lastHoverCellEl` / `lastHoverRow` / `lastHoverCol`.
+
+---
+
+## 11. Known limitations
 
 - **Redistribution uses pre-reflow container width** — `containerW` is read
   synchronously inside `applyColumnWidths` before the browser has reflowed the
@@ -353,7 +466,7 @@ echo of a bridge-initiated drag, not for independent programmatic
 
 ---
 
-## 11. Bug history (key fixes)
+## 12. Bug history (key fixes)
 
 | Commit | Issue fixed |
 |---|---|
@@ -368,7 +481,7 @@ echo of a bridge-initiated drag, not for independent programmatic
 
 ---
 
-## 12. How to test
+## 13. How to test
 
 1. **Pixel drag** — set all columns to fixed pixel widths; drag any divider;
    verify `ColumnWidth` / `PixelColumnWidths` update and body cells track header.

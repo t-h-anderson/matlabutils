@@ -125,6 +125,24 @@ classdef tFolding < test.WithExampleTables
             testCase.verifyEmpty(t.ClosedGroups)
         end
 
+        function tSwitchGroupingVariableClearsStaleOpenGroups(testCase)
+            % Regression: opening a group, switching GroupingVariable, then
+            % opening another previously errored because stale entries
+            % remained in OpenGroups_ that no longer existed in Groups.
+            data = testCase.multivariableData();
+            t = gwidgets.Table(Data=data);
+
+            t.GroupingVariable = "Categorical"; % groups: a, b
+            t.OpenGroups = "a";
+
+            t.GroupingVariable = "String"; % groups: x, y
+            testCase.verifyEmpty(t.OpenGroups)
+
+            % This previously errored with NonexistentGroupingVariable
+            t.OpenGroups = "x";
+            testCase.verifyEqual(t.OpenGroups, "x")
+        end
+
         function tSortedGroupHeaderRowIdx(testCase)
             data = testCase.categoricalData();
             t = gwidgets.Table(Data=data);

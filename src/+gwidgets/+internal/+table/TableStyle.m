@@ -2,7 +2,7 @@ classdef TableStyle
     
     properties
         Style (1,1) matlab.ui.style.Style
-        SelectionMode (1,1) gwidgets.internal.table.SelectionMode
+        SelectionMode (1,1) gwidgets.table.SelectionMode
         Target (1,1) string {mustBeMember(Target, ["table", "row", "column", "cell"])} = "table"  
     end
 
@@ -19,7 +19,7 @@ classdef TableStyle
                 target (1,1) string {mustBeMember(target, ["table", "row", "column", "cell"])} = "table"  
                 nvp.TargetIndices (:,:) double
                 nvp.TargetFunction (1,:) function_handle
-                nvp.SelectionMode (1,1) gwidgets.internal.table.SelectionMode = gwidgets.internal.table.SelectionMode.Data
+                nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
             end
 
             this.Style = style;

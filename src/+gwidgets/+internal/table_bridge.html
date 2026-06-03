@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { margin: 0; overflow: hidden; background: transparent; }
+  </style>
+  <script>
+  // TableBridge — timer-free, MATLAB-driven (column-width tracking + cell hover)
+  //
+  // MATLAB API (events sent TO the bridge):
+  //   Init        {tableTag}              — set DOM scoping tag (sent once on BridgeReady)
+  //   Ready                               — attach/re-attach ResizeObserver
+  //   Suppress                            — stop ColumnWidthChanged from being sent to MATLAB
+  //   Restore                             — re-enable ColumnWidthChanged
+  //   Diag        true|false              — enable/disable diagnostic messages to MATLAB
+  //   HoverEnable                         — start reporting CellHover events
+  //   HoverDisable                        — stop reporting CellHover events
+  //   SetTooltip  {blocks:[{containerCss, lines:[{text,css}...]}, ...]}
+  //                           — render or hide the popup; empty list hides.
+  //                             Each block is a styled container <div>;
+  //                             each line inside has its own per-line CSS.
+  //
+  // Bridge reports (events sent FROM the bridge):
+  //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
+  //   ColumnWidthChanged      — {widths:[...], moving:bool}
+  //   CellHover               — {row:int, col:int} (row=0 means header; 0/0 means none)
+  //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
+
+  var COL_SELECTOR       = ".mw-table-header-column";
+  // Cell selectors. MATLAB's web table renders cells with role=gridcell and
+  // often a .mw-table-body-cell class. Walk ancestors so we tolerate spans
+  // inside cells. Header cells are role=columnheader.
+  var CELL_SELECTOR      = "[role='gridcell'], .mw-table-body-cell, .mw-table-cell";
+  var HEADER_SELECTOR    = "[role='columnheader'], .mw-table-header-column";
+  var ROW_SELECTOR       = "[role='row'], .mw-table-body-row";
+
+  var resizeObserver     = null;
+  var tableTag           = null;
+  var htmlComponent      = null;
+  var isMoving           = false;
+  var callbackSuppressed = false;
+  var diagEnabled        = false;
+  var diagQueue          = [];
+  var hoverEnabled       = false;
+  var hoverListener      = null;
+  var lastHoverRow       = -1;
+  var lastHoverCol       = -1;
+  var lastHoverCellEl    = null;
+  var lastClientX        = 0;
+  var lastClientY        = 0;
+  var tooltipEl          = null;
+
+  var t0 = Date.now();
+  function ts() { return "t+" + (Date.now() - t0) + "ms"; }
+
+  // ---- Diagnostic logging ----
+
+  function bridgeLog(msg) {
+    console.log(msg);
+    if (diagEnabled) diagQueue.push(msg);
+  }
+
+  function flushDiag() {
+    if (!diagEnabled || diagQueue.length === 0 || !htmlComponent) return;
+    htmlComponent.Data = { event: "BridgeDiag", msg: diagQueue.join("\n") };
+    diagQueue = [];
+  }
+
+  // ---- DOM helpers ----
+
+  function colWidthsFromDOM(cols) {
+    return cols.map(function(c) { return Math.round(c.getBoundingClientRect().width); });
+  }
+
+  // ---- DOM locator ----
+
+  function findColumns() {
+    var parentDoc;
+    try { parentDoc = window.parent.document; } catch (e) { return []; }
+    if (tableTag) {
+      var tableEl = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
+      if (tableEl) {
+        var cols = Array.from(tableEl.querySelectorAll(COL_SELECTOR));
+        if (cols.length > 0) return cols;
+      }
+    }
+    return Array.from(parentDoc.querySelectorAll(COL_SELECTOR));
+  }
+
+  // ---- Mouse tracking — drives the moving flag ----
+
+  function setupMouseTracking() {
+    try {
+      var pd = window.parent.document;
+      pd.addEventListener("mousedown", function() { isMoving = true; }, true);
+      pd.addEventListener("mouseup", function() {
+        // isMoving must be false before we call onResize so the settled
+        // event carries moving=false.  ResizeObserver won't fire after
+        // release (size stopped changing), so we send one explicit report.
+        isMoving = false;
+        onResize();
+        // Self-suppress: block the snap-back ResizeObserver callback that fires
+        // ~120ms after mouseup when the drag handler releases its px constraints
+        // and the <th> reverts to the pre-drag <col> widths.  MATLAB takes ~133ms
+        // to process the ColumnWidthChanged above and deliver Suppress — too late.
+        // We suppress here instead; MATLAB un-suppresses via Restore as normal.
+        callbackSuppressed = true;
+        bridgeLog("[Bridge] " + ts() + " mouseup self-suppress");
+        flushDiag();
+      }, true);
+    } catch (e) {}
+  }
+
+  // ---- Observer management ----
+
+  function attachObserver() {
+    if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+    var cols = findColumns();
+    bridgeLog("[Bridge] " + ts() + " attachObserver: found=" + cols.length +
+              (cols.length ? " widths=[" + colWidthsFromDOM(cols).join(",") + "]" : ""));
+    if (cols.length === 0) return;
+    resizeObserver = new ResizeObserver(onResize);
+    cols.forEach(function(col) { resizeObserver.observe(col); });
+  }
+
+  // ---- ResizeObserver callback ----
+
+  function onResize() {
+    if (callbackSuppressed) return;
+    var cols = findColumns();
+    if (cols.length === 0) return;
+    var widths = colWidthsFromDOM(cols);
+    if (widths.every(function(w) { return w === 0; })) return;
+
+    bridgeLog("[Bridge] " + ts() + " resize: widths=[" + widths.join(",") + "]" +
+              " moving=" + isMoving);
+    flushDiag();
+    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, moving: isMoving };
+  }
+
+  // ---- Cell hover tracking ----
+
+  function findTableRoot() {
+    var parentDoc;
+    try { parentDoc = window.parent.document; } catch (e) { return null; }
+    if (tableTag) {
+      var el = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
+      if (el) return el;
+    }
+    return parentDoc;
+  }
+
+  function indexInParent(node) {
+    // 1-based index of node among its element siblings.
+    if (!node || !node.parentNode) return -1;
+    var siblings = node.parentNode.children;
+    for (var i = 0; i < siblings.length; i++) {
+      if (siblings[i] === node) return i + 1;
+    }
+    return -1;
+  }
+
+  function gridCoordsFromTarget(target, root) {
+    // Walk up from the event target collecting any aria-rowindex /
+    // aria-colindex attributes. This is the generic ARIA grid approach
+    // and works regardless of which exact class names MATLAB happens
+    // to use for cells/rows in a given release.
+    var row = -1, col = -1;
+    var cellEl = null;
+    var node = target;
+    while (node && node.nodeType === 1 && node !== root) {
+      if (col < 0) {
+        var c = parseInt(node.getAttribute && node.getAttribute("aria-colindex"), 10);
+        if (!isNaN(c)) { col = c; if (!cellEl) cellEl = node; }
+      }
+      if (row < 0) {
+        var r = parseInt(node.getAttribute && node.getAttribute("aria-rowindex"), 10);
+        if (!isNaN(r)) row = r;
+      }
+      if (row >= 0 && col >= 0) break;
+      node = node.parentNode;
+    }
+
+    // Fallback: if the cell has no ARIA indices, try the legacy class
+    // selectors and infer indices from DOM order.
+    if (col < 0 || row < 0) {
+      var legacyCell = null;
+      node = target;
+      while (node && node.nodeType === 1 && node !== root) {
+        if (node.matches && node.matches(CELL_SELECTOR + "," + HEADER_SELECTOR)) {
+          legacyCell = node;
+          if (!cellEl) cellEl = node;
+          break;
+        }
+        node = node.parentNode;
+      }
+      if (legacyCell) {
+        if (col < 0) col = indexInParent(legacyCell);
+        if (row < 0) {
+          var rowEl = legacyCell.parentNode;
+          while (rowEl && rowEl !== root) {
+            if (rowEl.matches && rowEl.matches(ROW_SELECTOR)) break;
+            rowEl = rowEl.parentNode;
+          }
+          if (rowEl && rowEl !== root) row = indexInParent(rowEl);
+        }
+      }
+    }
+
+    // MATLAB's table emits aria-rowindex / aria-colindex 1-based against
+    // its own display order (no header counted as row 1), which matches
+    // MATLAB display indices directly — no shift needed. Header cells
+    // have no aria-rowindex, so row stays at -1 and onHoverMove maps
+    // that to 0 (= "header row").
+    return { row: row, col: col, cell: cellEl };
+  }
+
+  // ---- Custom popup (replaces native title) ----------------------
+
+  function ensureTooltipEl() {
+    if (tooltipEl && tooltipEl.isConnected) return tooltipEl;
+    var pd;
+    try { pd = window.parent.document; } catch (e) { return null; }
+    tooltipEl = pd.createElement("div");
+    tooltipEl.id = "gwidgets-tooltip";
+    tooltipEl.style.cssText = [
+      "position:fixed",
+      "z-index:9999",
+      "pointer-events:none",
+      "display:none",
+      "white-space:pre",
+      "font-family:sans-serif"
+    ].join(";") + ";";
+    pd.body.appendChild(tooltipEl);
+    return tooltipEl;
+  }
+
+  function hideTooltip() {
+    if (tooltipEl) tooltipEl.style.display = "none";
+  }
+
+  function positionTooltipNearCursor() {
+    if (!tooltipEl) return;
+    var pd;
+    try { pd = window.parent.document; } catch (e) { return; }
+    var w = tooltipEl.offsetWidth;
+    var h = tooltipEl.offsetHeight;
+    var viewW = pd.documentElement.clientWidth;
+    var viewH = pd.documentElement.clientHeight;
+    var x = lastClientX + 12;
+    var y = lastClientY + 16;
+    if (x + w + 8 > viewW) x = Math.max(0, lastClientX - w - 12);
+    if (y + h + 8 > viewH) y = Math.max(0, lastClientY - h - 12);
+    tooltipEl.style.left = x + "px";
+    tooltipEl.style.top  = y + "px";
+  }
+
+  function renderTooltipBlocks(blocks) {
+    var el = ensureTooltipEl();
+    if (!el) return;
+    if (!blocks || blocks.length === 0) {
+      hideTooltip();
+      return;
+    }
+    // Reset container styles that per-block CSS shouldn't carry over.
+    el.style.cssText = [
+      "position:fixed",
+      "z-index:9999",
+      "pointer-events:none",
+      "font-family:sans-serif"
+    ].join(";") + ";";
+    // Clear existing children.
+    while (el.firstChild) el.removeChild(el.firstChild);
+    // Each block is an outer container <div> (background, padding,
+    // border) wrapping one inner <div> per line (font color, weight,
+    // size, family).
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      var blockDiv = el.ownerDocument.createElement("div");
+      if (b.containerCss) blockDiv.style.cssText = b.containerCss;
+      if (i > 0) blockDiv.style.marginTop = "2px";
+      var lines = b.lines || [];
+      for (var j = 0; j < lines.length; j++) {
+        var ln = lines[j];
+        var lineDiv = el.ownerDocument.createElement("div");
+        lineDiv.textContent = ln.text || "";
+        if (ln.css) lineDiv.style.cssText = ln.css;
+        blockDiv.appendChild(lineDiv);
+      }
+      el.appendChild(blockDiv);
+    }
+    el.style.display = "block";
+    positionTooltipNearCursor();
+  }
+
+  function sendHover(row, col) {
+    if (row === lastHoverRow && col === lastHoverCol) return;
+    lastHoverRow = row;
+    lastHoverCol = col;
+    bridgeLog("[Bridge] " + ts() + " hover row=" + row + " col=" + col);
+    flushDiag();
+    htmlComponent.Data = { event: "CellHover", row: row, col: col };
+  }
+
+  function onHoverMove(evt) {
+    if (!hoverEnabled) return;
+    lastClientX = evt.clientX;
+    lastClientY = evt.clientY;
+    var root = findTableRoot();
+    if (!root || !root.contains(evt.target)) {
+      hideTooltip();
+      lastHoverCellEl = null;
+      sendHover(0, 0);
+      return;
+    }
+    var pos = gridCoordsFromTarget(evt.target, root);
+    if (pos.cell !== lastHoverCellEl) {
+      // Crossed into a new cell — hide the previous popup until MATLAB
+      // resolves the new cell's text/style.
+      hideTooltip();
+      lastHoverCellEl = pos.cell;
+    } else {
+      // Same cell, fresh mouse position — keep the popup glued to the
+      // cursor without waiting for MATLAB to roundtrip.
+      positionTooltipNearCursor();
+    }
+    sendHover(pos.row >= 0 ? pos.row : 0, pos.col >= 0 ? pos.col : 0);
+  }
+
+  function attachHover() {
+    if (hoverListener) return;
+    try {
+      var pd = window.parent.document;
+      hoverListener = onHoverMove;
+      pd.addEventListener("mouseover", hoverListener, true);
+    } catch (e) {}
+  }
+
+  function detachHover() {
+    if (!hoverListener) return;
+    try {
+      window.parent.document.removeEventListener("mouseover", hoverListener, true);
+    } catch (e) {}
+    hoverListener = null;
+    lastHoverRow = -1;
+    lastHoverCol = -1;
+  }
+
+  // ---- Event wiring ----
+
+  function setup(component) {
+    htmlComponent = component;
+    setupMouseTracking();
+
+    htmlComponent.addEventListener("Init", function(event) {
+      tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
+      bridgeLog("[Bridge] " + ts() + " Init: tableTag=" + tableTag);
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("Ready", function() {
+      bridgeLog("[Bridge] " + ts() + " Ready");
+      attachObserver();
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("Suppress", function() {
+      callbackSuppressed = true;
+      bridgeLog("[Bridge] " + ts() + " Suppress");
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("Restore", function() {
+      callbackSuppressed = false;
+      bridgeLog("[Bridge] " + ts() + " Restore");
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("Diag", function(event) {
+      diagEnabled = !!(event.Data);
+      console.log("[Bridge] " + ts() + " Diag: " + diagEnabled);
+    });
+
+    htmlComponent.addEventListener("HoverEnable", function() {
+      hoverEnabled = true;
+      attachHover();
+      bridgeLog("[Bridge] " + ts() + " HoverEnable");
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("HoverDisable", function() {
+      hoverEnabled = false;
+      hideTooltip();
+      lastHoverCellEl = null;
+      detachHover();
+      bridgeLog("[Bridge] " + ts() + " HoverDisable");
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("SetTooltip", function(event) {
+      // MATLAB has resolved the hovered cell to a list of styled blocks.
+      // Render them in our floating popup div near the cursor.
+      var blocks = (event.Data && event.Data.blocks) || [];
+      renderTooltipBlocks(blocks);
+    });
+
+    htmlComponent.Data = { event: "BridgeReady" };
+  }
+  </script>
+</head>
+<body></body>
+</html>
