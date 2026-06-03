@@ -58,7 +58,7 @@ classdef tTooltips < test.WithExampleTables
             t.addTooltip("col-text",  "column", 3,   "Style", red);
             t.addTooltip("tbl-text",  "table");
 
-            blocks = t.resolveTooltipBlocks(2, 3);
+            blocks = t.simulateTooltipBlocks(2, 3);
             testCase.assertNumElements(blocks, 3)
 
             % Block 1: red container, two lines (cell + col).
@@ -92,7 +92,7 @@ classdef tTooltips < test.WithExampleTables
             t.addTooltip("alpha", "cell", [1 1], "Style", greenBlack);
             t.addTooltip("beta",  "cell", [1 1], "Style", greenWhite);
 
-            blocks = t.resolveTooltipBlocks(1, 1);
+            blocks = t.simulateTooltipBlocks(1, 1);
             testCase.assertNumElements(blocks, 1)
             testCase.assertNumElements(blocks{1}.lines, 2)
             testCase.verifyThat(blocks{1}.containerCss, ...
@@ -117,7 +117,7 @@ classdef tTooltips < test.WithExampleTables
             t.addTooltip("col",  "column", 1, "Style", red);   % rank 3
             t.addTooltip("cell", "cell", [2 1], "Style", red); % rank 1
 
-            blocks = t.resolveTooltipBlocks(2, 1);
+            blocks = t.simulateTooltipBlocks(2, 1);
             testCase.assertNumElements(blocks, 1)
             testCase.assertNumElements(blocks{1}.lines, 2)
             testCase.verifyEqual(string(blocks{1}.lines{1}.text), "cell")
@@ -126,14 +126,14 @@ classdef tTooltips < test.WithExampleTables
 
         function tBlocksEmptyWhenNothingToShow(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
-            blocks = t.resolveTooltipBlocks(2, 1);
+            blocks = t.simulateTooltipBlocks(2, 1);
             testCase.verifyEmpty(blocks)
         end
 
         function tBlocksFallBackToTableTooltipWithBaseStyle(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.Tooltip = "table-wide";
-            blocks = t.resolveTooltipBlocks(2, 1);
+            blocks = t.simulateTooltipBlocks(2, 1);
             testCase.assertNumElements(blocks, 1)
             testCase.assertNumElements(blocks{1}.lines, 1)
             testCase.verifyEqual(string(blocks{1}.lines{1}.text), "table-wide")
@@ -382,8 +382,10 @@ classdef tTooltips < test.WithExampleTables
             % columns reachable by name.
             m = magic(5);
             t = gwidgets.Table(Data=array2table(m));
-            t.HiddenColumnNames = "Var2";
-            t.addTooltip(@(ctx) strjoin(string(ctx.Table.Var2), ","), "table");
+            hiddenAlias = t.ColumnNames(2);
+            hiddenVar = t.DataColumnNames(2);
+            t.HiddenColumnNames = hiddenAlias;
+            t.addTooltip(@(ctx) strjoin(string(ctx.Table.(hiddenVar)), ","), "table");
 
             expected = strjoin(string(m(:, 2)), ",");
             testCase.verifyEqual(t.simulateBridgeHover(1, 1), expected)

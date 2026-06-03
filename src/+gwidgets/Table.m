@@ -2067,6 +2067,12 @@ classdef Table < gwidgets.internal.Reparentable
             this.applyTooltipPayload(displayRow, displayColumn);
         end
 
+        function blocks = simulateTooltipBlocks(this, displayRow, displayColumn)
+            % Resolve a hovered cell to the same block payload that would
+            % be sent to the HTML bridge.
+            blocks = this.resolveTooltipBlocks(displayRow, displayColumn);
+        end
+
         function changed = didBridgeWidthsChange(this, incomingPx)
             % Return true when the incoming pixel widths differ from the stored
             % PixelDataColumnWidths_ by more than 1 px (browser-rounding
