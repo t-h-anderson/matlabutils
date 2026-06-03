@@ -1414,7 +1414,8 @@ classdef Table < gwidgets.internal.Reparentable
 
             sortByGroupVars = sortBy(ismember(sortBy, groupVars));
             sortByDataVars = sortBy(ismember(sortBy, dataVars));
-            dataColIdx = ismember(dataVars, sortBy);
+            [isDataSortVar, dataColIdx] = ismember(sortByDataVars, dataVars);
+            dataColIdx = dataColIdx(isDataSortVar);
 
             % Sort the content of each group
             d2vMap = this.GroupedDataToVisibleMap;
