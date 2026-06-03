@@ -61,10 +61,33 @@ tb.addContextMenuItem(m); %[output:4bc1b97d]
 %[text] ## Custom style example
 %[text] Create a style that highlights rows with Value \> 60
 s = matlab.ui.style.Style(BackgroundColor=[0.8 0.2 0.5]);
-%[text] target function takes the Table object 
+%[text] target function takes the Table object
 %[text] Apply a "row" style using the widget's addStyle API. SelectionMode "Display" makes the style use visible selection mapping.
 tb.removeStyle()
 tb.addStyle(s, "row", "Value>48");
+%%
+%[text] ## Custom tooltip example
+%[text] Tooltips are registered with `addTooltip(text, target, indices)` — same shape as `addStyle`. All matching tooltips for the hovered cell are joined most-specific-first (cell → row → column → table). Hover briefly over a cell to see the popup.
+tb.removeTooltip()
+%[text] Static text per target. The whole-table `Tooltip` property is the fallback when nothing more specific matches.
+tb.Tooltip = "Hover any cell for details";
+tb.addTooltip("Categorical group label", "column", 2);
+tb.addTooltip("Highlighted row",         "row",    3);
+tb.addTooltip("Outlier",                 "cell",   [5 4]);
+%[text] Function form: receives a `TooltipContext` with fields `Value`, `Row`, `Column`, `Table`, `DisplayRow`/`DisplayColumn`, `DataRow`/`DataColumn`, and `Target`. `Row` / `Column` slices come from the underlying `Data` table (hidden columns and filtered-out rows reachable). Per-target `ContextShape` defaults: `column`=Values vector, `row`=1×N Table, `table`=full Data, `cell`=cell value. Override with `ContextShape="Values"` or `ContextShape="Table"`.
+tb.addTooltip(@(ctx) "Cell value: " + string(ctx.Value),       "column", 4);
+tb.addTooltip(@(ctx) "Column max: " + max(ctx.Column),         "column", 4);
+tb.addTooltip(@(ctx) "Row label: "  + string(ctx.Row.Note),    "row",    3);
+tb.addTooltip(@(ctx) "Total rows: " + height(ctx.Table),       "table");
+%[text] Use `ContextShape="Values"` to get the row as a vector for numeric aggregates:
+tb.addTooltip(@(ctx) "Row sum: " + sum(ctx.Row), "row", 3, "ContextShape", "Values");
+%[text] ### Styled tooltips
+%[text] Pass a `TooltipStyle` or a function returning one. Per-tooltip styles override the widget-wide `DefaultTooltipStyle`.
+tb.DefaultTooltipStyle = gwidgets.table.TooltipStyle(BackgroundColor="#222", FontColor="white", Padding=6);
+heat = @(ctx) gwidgets.table.TooltipStyle( ...
+    BackgroundColor=string(sprintf("rgb(%d,80,80)", min(255, round(ctx.Value*4)))), ...
+    FontColor="white", Padding=6);
+tb.addTooltip(@(ctx) "Value: " + string(ctx.Value), "column", 4, "Style", heat);
 
 
 
