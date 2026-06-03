@@ -3370,7 +3370,7 @@ classdef Table < gwidgets.internal.Reparentable
             % and Relative column types are supported.
             val = convertCharsToStrings(val);
             if isempty(val)
-                val = {"fit"};
+                val = {};
             elseif ~iscell(val)
                 val = num2cell(val);
             else
