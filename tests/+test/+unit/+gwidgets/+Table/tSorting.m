@@ -203,6 +203,49 @@ classdef tSorting < test.WithExampleTables
             testCase.verifyEqual(t.DisplayData.Var2, [1; 1; 2; 2])
         end
 
+        function tGroupedMultiColumnSortUsesTypedColumns(testCase)
+            data = table( ...
+                ["g1"; "g1"; "g1"; "g2"; "g2"], ...
+                categorical(["b"; "a"; "a"; "b"; "a"]), ...
+                [2; 2; 1; 1; 2], ...
+                'VariableNames', {'Group', 'Cat', 'Num'});
+            t = gwidgets.Table(Data=data);
+            t.GroupingVariable = "Group";
+            t.SortDirection = "Ascend";
+            t.ColumnSortable = true;
+            t.SortByColumn = ["Cat", "Num"];
+
+            rowIdx = [2 3 4 6 7];
+            actualCat = arrayfun(@(idx) string(t.SortedVisibleData{idx, 1}), rowIdx);
+            actualNum = cell2mat(t.SortedVisibleData(rowIdx, 2));
+
+            testCase.verifyEqual(actualCat, ["a", "a", "b", "a", "b"])
+            testCase.verifyEqual(actualNum, [1; 2; 2; 2; 1])
+            testCase.verifyEqual(t.SortedGroupHeaderRowIdx, [1 5])
+            testCase.verifyEqual(t.SortedVisibleToDataMap(rowIdx), [3 2 1 5 4])
+            testCase.verifyEqual(t.SortedDataToVisibleMap, [4 3 2 7 6])
+        end
+
+        function tGroupedSortFallsBackForCharMatrixColumns(testCase)
+            data = table( ...
+                ["g1"; "g1"; "g2"; "g2"], ...
+                char(["bb"; "aa"; "dd"; "cc"]), ...
+                'VariableNames', {'Group', 'Text'});
+            t = gwidgets.Table(Data=data);
+            t.GroupingVariable = "Group";
+            t.SortDirection = "Ascend";
+            t.ColumnSortable = true;
+            t.SortByColumn = "Text";
+
+            rowIdx = [2 3 5 6];
+            actualText = arrayfun(@(idx) string(t.SortedVisibleData{idx, 1}), rowIdx);
+
+            testCase.verifyEqual(actualText, ["aa", "bb", "cc", "dd"])
+            testCase.verifyEqual(t.SortedGroupHeaderRowIdx, [1 4])
+            testCase.verifyEqual(t.SortedVisibleToDataMap(rowIdx), [2 1 4 3])
+            testCase.verifyEqual(t.SortedDataToVisibleMap, [3 2 6 5])
+        end
+
     end
 
 end

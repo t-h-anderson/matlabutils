@@ -1441,30 +1441,40 @@ classdef Table < gwidgets.internal.Reparentable
             groupHeaderRowIdxs = [groupHeaderRowIdxs, height(data)+1]; % Add an extra fake group start to make calculating start and end group idxs easy
 
             if ~isempty(sortByDataVars)
+                [typedSortColumns, canUseTypedSort] = this.buildTypedSortColumns(sortByDataVars);
                 for iGroup = 1:(numel(groupHeaderRowIdxs)-1)
 
                     dataStartIdx = groupHeaderRowIdxs(iGroup) + 1;
                     dataEndIdx = groupHeaderRowIdxs(iGroup+1) - 1;
 
                     groupIdxs = dataStartIdx:dataEndIdx;
+                    groupDataRowIdx = v2dMap(groupIdxs);
 
-                    subData = data(groupIdxs, dataColIdx);
+                    if canUseTypedSort
+                        try
+                            orderIdx = this.orderRowsByTypedColumns( ...
+                                groupDataRowIdx, typedSortColumns, sortDirection);
+                        catch
+                            canUseTypedSort = false;
+                        end
+                    end
 
-                    subData = cell2table(subData, 'VariableNames', sortByDataVars); % TODO: This is probably slow
-                    [~, orderIdx] = sortrows(subData, sortBy, sortDirection);
+                    if ~canUseTypedSort
+                        subData = data(groupIdxs, dataColIdx);
+                        subData = cell2table(subData, 'VariableNames', sortByDataVars); % Fallback for unsupported column types/shapes
+                        [~, orderIdx] = sortrows(subData, sortByDataVars, sortDirection);
+                    end
 
                     groupIdxsReordered = groupIdxs(orderIdx);
 
                     data(groupIdxs, :) = data(groupIdxsReordered, :);
 
                     % Update the maps
-                    idx = ismember(d2vMap, groupIdxs);
-                    tmp = d2vMap(idx);
+                    tmp = d2vMap(groupDataRowIdx);
                     tmp(orderIdx) = tmp;
-                    d2vMap(idx) = tmp;
+                    d2vMap(groupDataRowIdx) = tmp;
 
-                    tmp = v2dMap(groupIdxs);
-                    v2dMap(groupIdxs) = tmp(orderIdx);
+                    v2dMap(groupIdxs) = groupDataRowIdx(orderIdx);
                 end
             end
 
@@ -2787,6 +2797,59 @@ classdef Table < gwidgets.internal.Reparentable
 
     % Internal callbacks
     methods (Access = private)
+
+        function [typedSortColumns, canUseTypedSort] = buildTypedSortColumns(this, sortByDataVars)
+            arguments
+                this (1,1) gwidgets.Table
+                sortByDataVars (1,:) string
+            end
+
+            nFilteredRows = height(this.FilteredData);
+            typedSortColumns = cell(1, numel(sortByDataVars));
+            canUseTypedSort = true;
+
+            for i = 1:numel(sortByDataVars)
+                varData = this.FilteredData.(sortByDataVars(i));
+
+                if size(varData, 1) ~= nFilteredRows || size(varData, 2) ~= 1
+                    canUseTypedSort = false;
+                    typedSortColumns = {};
+                    return
+                end
+
+                if iscellstr(varData)
+                    typedSortColumns{i} = string(varData);
+                elseif isnumeric(varData) || islogical(varData) ...
+                        || isstring(varData) || iscategorical(varData) ...
+                        || isdatetime(varData) || isduration(varData) ...
+                        || iscalendarDuration(varData)
+                    typedSortColumns{i} = varData;
+                else
+                    canUseTypedSort = false;
+                    typedSortColumns = {};
+                    return
+                end
+            end
+        end
+
+        function orderIdx = orderRowsByTypedColumns(~, filteredRowIdx, typedSortColumns, sortDirection)
+            arguments
+                ~
+                filteredRowIdx (1,:) double
+                typedSortColumns (1,:) cell
+                sortDirection (1,1) string
+            end
+
+            orderIdx = 1:numel(filteredRowIdx);
+
+            % Apply the least-significant sort first so later passes
+            % preserve the requested precedence.
+            for iSort = numel(typedSortColumns):-1:1
+                values = typedSortColumns{iSort}(filteredRowIdx(orderIdx), :);
+                [~, idx] = sort(values, sortDirection);
+                orderIdx = orderIdx(idx);
+            end
+        end
 
         function onCellClicked_(this, displayIdx)
             arguments
