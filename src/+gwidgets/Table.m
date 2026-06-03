@@ -2581,44 +2581,56 @@ classdef Table < gwidgets.internal.Reparentable
                 tmpData(:, idx) = []; % Remove the group column
                 tmpData = table2cell(tmpData); % Create cell so can manipulate fully
 
-                groupedData = cell(1, 2*numel(allGroups));
-                headerIdx = false(0,1);
-                groupTotalCounts = zeros(0,1);
-                groupFilteredCount = zeros(0,1);
+                nGroups = numel(allGroups);
+                allGroupCount = accumarray(groupIdxs(:), 1, [nGroups 1], @sum, 0);
+                if isempty(filteredGroupVars)
+                    filteredToAllGroupIdx = zeros(0,1);
+                    groupFilteredCount = zeros(nGroups,1);
+                    filteredRowIdxByGroup = cell(nGroups,1);
+                    [filteredRowIdxByGroup{:}] = deal(zeros(1,0));
+                else
+                    [~, filteredToAllGroupIdx] = ismember(filteredGroupVars, allGroups);
+                    filteredToAllGroupIdx = filteredToAllGroupIdx(:);
+                    groupFilteredCount = accumarray(filteredToAllGroupIdx, 1, [nGroups 1], @sum, 0);
+                    filteredRowIdxByGroup = accumarray(filteredToAllGroupIdx, ...
+                        (1:height(tmpData)).', [nGroups 1], ...
+                        @(rows) {rows(:).'}, {zeros(1,0)});
+                end
+
+                groupedData = cell(1, 2*nGroups);
+                headerIdx = false(1, nGroups + (size(tmpData, 2) > 0) * height(tmpData));
 
                 data2visible = this.FilteredDataToVisibleMap;
                 d2v = find(~ismissing(data2visible));
                 visible2data = this.FilteredVisibleToDataMap;
-                updatedVisible2data = NaN(1, numel(allGroups) + height(tmpData));
+                updatedVisible2data = NaN(1, nGroups + height(tmpData));
 
                 nVisibleRows = 0;
+                headerPos = 1;
 
-                for i = 1:numel(allGroups)
+                for i = 1:nGroups
                     thisGroup = allGroups(i);
-
-                    thisGroupMemberIdx = ismember(filteredGroupVars, thisGroup);
-                    nInGroup = nnz(thisGroupMemberIdx);
-                    thisGroupDisp = tmpData(thisGroupMemberIdx, :);
+                    rowIdxs = filteredRowIdxByGroup{i};
+                    nInGroup = groupFilteredCount(i);
+                    thisGroupDisp = tmpData(rowIdxs, :);
 
                     % Mapping from data to visible rows
                     nVisibleRows = nVisibleRows + 1; % Row header
                     visibleRowIdxs = nVisibleRows + (1:nInGroup);
-                    data2visible(d2v(thisGroupMemberIdx)) = visibleRowIdxs;
+                    data2visible(d2v(rowIdxs)) = visibleRowIdxs;
 
                     % Mapping from visible to data rows
-                    updatedVisible2data((nVisibleRows+1):(nVisibleRows+nInGroup)) = visible2data(thisGroupMemberIdx);
+                    updatedVisible2data((nVisibleRows+1):(nVisibleRows+nInGroup)) = visible2data(rowIdxs);
                     nVisibleRows = nVisibleRows + nInGroup;
 
                     % Add the "visible/total" to the group heading
-                    allIdx = ismember(allGroupVars, thisGroup);
-                    nAll = nnz(allIdx);
+                    nAll = allGroupCount(i);
 
                     thisGroupHeading = cell(1, size(thisGroupDisp, 2));
                     thisGroupHeading{1} = string(thisGroup) + " (" + nInGroup + "/" + nAll + ")";
-                    thisGroupData = tmpData(thisGroupMemberIdx, :);
+                    thisGroupData = thisGroupDisp;
 
                     % Keep track of the number of items in each group
-                    groupFilteredCount = [groupFilteredCount; nInGroup]; %#ok<AGROW>
                     if size(thisGroupData, 2) == 0
                         % No columns except group column so no rows to show
                         nInGroup = 0;
@@ -2629,8 +2641,8 @@ classdef Table < gwidgets.internal.Reparentable
                     groupedData{2*i-1} = thisGroupHeading;
                     groupedData{2*i} = thisGroupData;
 
-                    headerIdx = [headerIdx, true, false(1, nInGroup)]; %#ok<AGROW>
-                    groupTotalCounts = [groupTotalCounts; nAll]; %#ok<AGROW>
+                    headerIdx(headerPos) = true;
+                    headerPos = headerPos + 1 + nInGroup;
                 end
 
                 groupedData = vertcat(groupedData{:});
@@ -2645,7 +2657,7 @@ classdef Table < gwidgets.internal.Reparentable
                 this.GroupedDataVariables = groupedDataVariables;
 
                 this.GroupHeaderRowIdx = find(headerIdx);
-                this.GroupFilteredCount = groupFilteredCount;
+                this.GroupFilteredCount = groupFilteredCount.';
 
                 this.GroupedDataToVisibleMap = data2visible;
                 this.GroupedVisibleToDataMap = updatedVisible2data;
