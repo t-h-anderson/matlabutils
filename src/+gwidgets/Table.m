@@ -2677,37 +2677,38 @@ classdef Table < gwidgets.internal.Reparentable
 
             visRowToRemove = false(1,height(groupedData));
 
-            this.DisplayGroups = this.SortedGroupValues;
+            displayGroups = this.SortedGroupValues;
+            this.DisplayGroups = displayGroups;
 
-            hiddenGroups = string.empty(1,0);
+            isHiddenGroup = ~this.ShowEmptyGroups & this.GroupFilteredCount == 0;
+            isOpenGroup = ismember(displayGroups, this.OpenGroups);
+            hiddenGroups = displayGroups(isHiddenGroup);
+            hiddenGroups = hiddenGroups(end:-1:1);
             for i = numel(idxsHeaderRow):-1:1
 
-                thisGroup = this.DisplayGroups(i);
+                thisGroup = displayGroups(i);
                 idxHeaderRow = idxsHeaderRow(i);
                 idxGroupData = (idxHeading(i) + 1):(idxHeading(i+1)-1);
 
-                isHidden = (~this.ShowEmptyGroups && this.GroupFilteredCount(i) == 0);
-
-                if ~isHidden && ~ismember(thisGroup, this.OpenGroups)
+                if ~isHiddenGroup(i) && ~isOpenGroup(i)
                     % Group is closed, so update the header to show it is
                     % closed and removed the rows corresponding to the group
                     groupedData{idxHeaderRow, 1} = "⮞ " + groupedData{idxHeaderRow, 1};
                     visRowToRemove(idxGroupData) = true;
 
-                elseif ~isHidden
+                elseif ~isHiddenGroup(i)
                     % Group is open, so update the header to show it is
                     % open
                     groupedData{idxHeaderRow, 1} = "⮟ " + groupedData{idxHeaderRow, 1};
                 else
                     % Group is hidden, so remove it from the view
-                    hiddenGroups = [hiddenGroups, thisGroup]; %#ok<AGROW>
-
                     visRowToRemove(idxGroupData) = true;
                     visRowToRemove(idxHeaderRow) = true;
-                    this.DisplayGroups(i) = [];
                 end
 
             end
+
+            this.DisplayGroups(isHiddenGroup) = [];
 
             groupedData(visRowToRemove, :) = [];
             idxVisibleHeaderRowMask(visRowToRemove) = [];
@@ -2719,12 +2720,15 @@ classdef Table < gwidgets.internal.Reparentable
 
             % Update data to visible map
             dataToVisibleMap = this.SortedDataToVisibleMap;
-            visRowToRemoveId = find(visRowToRemove); % Headers and groups to remove
-            dataToVisibleMap(ismember(dataToVisibleMap, visRowToRemoveId)) = NaN;
+            validMapIdx = ~isnan(dataToVisibleMap);
+            if any(visRowToRemove) && any(validMapIdx)
+                visibleRowIdx = dataToVisibleMap(validMapIdx);
+                isRemovedRow = visRowToRemove(visibleRowIdx);
+                removedBeforeRow = cumsum(visRowToRemove);
 
-            % Remove row counts from map when rows are hidden
-            if ~isempty(visRowToRemoveId)
-                dataToVisibleMap = dataToVisibleMap - sum(dataToVisibleMap > visRowToRemoveId', 1);
+                visibleRowIdx(~isRemovedRow) = visibleRowIdx(~isRemovedRow) - removedBeforeRow(visibleRowIdx(~isRemovedRow));
+                visibleRowIdx(isRemovedRow) = NaN;
+                dataToVisibleMap(validMapIdx) = visibleRowIdx;
             end
 
             this.FoldedDataToVisibleMap = dataToVisibleMap;
