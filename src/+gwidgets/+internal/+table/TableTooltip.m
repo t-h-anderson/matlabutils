@@ -58,9 +58,9 @@ classdef TableTooltip
 
             if target == "table"
                 % "table" target ignores indices entirely
-                this.TargetFunction = @(varargin) [];
+                this.TargetIndices = [];
             elseif hasIndices && ~hasFunction
-                this.TargetFunction = @(varargin) nvp.TargetIndices;
+                this.TargetIndices = nvp.TargetIndices;
             elseif hasFunction && ~hasIndices
                 this.TargetFunction = nvp.TargetFunction;
             else
@@ -81,7 +81,11 @@ classdef TableTooltip
                 this
                 tbl = []
             end
-            idx = this.TargetFunction(tbl);
+            if isempty(this.TargetFunction)
+                idx = this.TargetIndices;
+            else
+                idx = this.TargetFunction(tbl);
+            end
         end
 
         function txt = textFor(this, ctx)
