@@ -191,6 +191,18 @@ classdef tSorting < test.WithExampleTables
             testCase.verifyEqual(t.ColumnSortable, true(1,3))
         end
 
+        function tMultiColumnSortRespectsRequestedOrder(testCase)
+            data = table([2; 1; 2; 1], [2; 2; 1; 1], ...
+                'VariableNames', {'Var1', 'Var2'});
+            t = gwidgets.Table(Data=data);
+            t.SortDirection = "Ascend";
+            t.ColumnSortable = true;
+            t.SortByColumn = ["Var2", "Var1"];
+
+            testCase.verifyEqual(t.DisplayData.Var1, [1; 2; 1; 2])
+            testCase.verifyEqual(t.DisplayData.Var2, [1; 1; 2; 2])
+        end
+
     end
 
 end
