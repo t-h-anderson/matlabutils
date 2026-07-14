@@ -9,6 +9,21 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEmpty(t.Tooltips)
         end
 
+        function tTooltipControllerCreatedOnFirstCustomTooltip(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            testCase.verifyFalse(t.hasTooltipController())
+
+            t.Tooltip = "native tooltip";
+            t.DefaultTooltipStyle = gwidgets.table.TooltipStyle(BackgroundColor="#123");
+            testCase.verifyEqual(t.Tooltip, "native tooltip")
+            testCase.verifyEmpty(t.Tooltips)
+            t.removeTooltip()
+            testCase.verifyFalse(t.hasTooltipController())
+
+            t.addTooltip("custom tooltip", "column", 1);
+            testCase.verifyTrue(t.hasTooltipController())
+        end
+
         function tAddTooltipWithStaticStyle(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             sty = gwidgets.table.TooltipStyle( ...

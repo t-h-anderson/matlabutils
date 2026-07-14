@@ -113,16 +113,19 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
         end
 
-        function obj = parenAssign(obj,indexOp,val)
+        function obj = parenAssign(obj, indexOp, val)
 
             % Grow the underlying table when assigning past its end so
             % `t(N+k,:) = ...` succeeds rather than erroring.
-            h = indexOp.Indices{1} - height(obj.DataTable);
-            if h > 0
-                obj = obj.addRows(h);
+            rowIdx = indexOp.Indices{1};
+            if isnumeric(rowIdx)
+                nNewRows = max(rowIdx, [], "all") - height(obj.DataTable);
+                if nNewRows > 0
+                    obj = obj.addRows(nNewRows);
+                end
             end
 
-            obj.DataTable(indexOp) = val;
+            obj.DataTable(indexOp.Indices{:}) = val;
 
         end
 
@@ -174,7 +177,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
             elseif isa(rhs, "mlut.tabular.RTabular")
                 [obj.DataTable.(indexOp)] = rhs.DataTable.Variables;
             else
-                if numel(rhs) == 1
+                if isscalar(rhs)
                     % Broadcast a scalar across the column so
                     % `t.Column = v` mirrors built-in table semantics.
                     rhs = repelem(rhs, height(obj.DataTable), 1);
@@ -248,7 +251,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
             if numel(varargin) > 2
                 tmpTbl = obj.horzcat_(varargin{end-1}, varargin{end});
                 outTbl = obj.horzcat_(varargin{1:end-2}, tmpTbl);
-            elseif numel(varargin) == 1
+            elseif isscalar(varargin)
                 outTbl = varargin{1};
             elseif numel(varargin) == 0
                 outTbl = obj.tabularEmpty(1,0);
@@ -289,7 +292,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
             if numel(varargin) > 2
                 tmpTbl = obj.vertcat_(varargin{end-1}, varargin{end});
                 outTbl = obj.vertcat_(varargin{1:end-2}, tmpTbl);
-            elseif numel(varargin) == 1
+            elseif isscalar(varargin)
                 outTbl = varargin{1};
             elseif numel(varargin) == 0
                 outTbl = obj.tabularEmpty(1,0);
@@ -348,8 +351,8 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
         function types = dataTypes(tbl)
             % VariableTypes was added in R2023b (MATLAB 23.3); fall back
             % to varfun(@class,...) on older releases.
-            if verLessThan("MATLAB", "23.3")
-                types = varfun(@class,tbl,'OutputFormat','cell');
+            if isMATLABReleaseOlderThan("R2023b")
+                types = varfun(@class, tbl, OutputFormat="cell");
                 types = string(types);
             else
                 types = tbl.Properties.VariableTypes;

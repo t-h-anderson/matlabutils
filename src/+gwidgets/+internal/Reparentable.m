@@ -12,7 +12,7 @@ classdef (Abstract) Reparentable < matlab.ui.componentcontainer.ComponentContain
                  "Units", "normalized", ...
                  "Position", [0, 0, 1, 1]);
 
-            this.FigureObserver = gwidgets.internal.FigureObserver( this );
+            this.FigureObserver = gwidgets.internal.FigureObserver(this);
             this.FigureChangedListener = this.weaklistener(this.FigureObserver, "FigureChanged");
         end
     end
@@ -20,7 +20,7 @@ classdef (Abstract) Reparentable < matlab.ui.componentcontainer.ComponentContain
     methods (Access = {?gwidgets.internal.WithWeakListeners})
         function onFigureChanged(this, ~, e)
             f = e.NewFigure;
-            if isempty( f )
+            if isempty(f)
                 this.reactToFigureRemoved();
             else
                 this.reactToFigureChanged();
@@ -29,11 +29,11 @@ classdef (Abstract) Reparentable < matlab.ui.componentcontainer.ComponentContain
     end
 
     methods (Access = protected)
-        function reactToFigureRemoved(this)
+        function reactToFigureRemoved(~)
             % By default, do nothing. Overload to customise behaviour.
         end
 
-        function reactToFigureChanged(this)
+        function reactToFigureChanged(~)
             % By default, do nothing. Overload to customise behaviour.
         end
 

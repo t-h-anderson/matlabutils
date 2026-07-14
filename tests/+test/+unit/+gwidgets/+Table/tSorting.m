@@ -4,6 +4,23 @@ classdef tSorting < test.WithExampleTables
 
     methods (Test)
 
+        function tSortingControllerCreatedOnFirstActiveSort(testCase)
+            t = gwidgets.Table(Data=testCase.sortableData());
+
+            testCase.verifyFalse(t.hasSortingController())
+
+            t.SortDirection = "Ascend";
+            testCase.verifyFalse(t.hasSortingController())
+
+            t.SortDirection = "None";
+            t.ColumnSortable = true;
+            t.SortByColumn = "Var1";
+            testCase.verifyFalse(t.hasSortingController())
+
+            t.SortDirection = "Ascend";
+            testCase.verifyTrue(t.hasSortingController())
+        end
+
         function tUnsortedTable(testCase)
             t = gwidgets.Table(Data=testCase.sortableData());
 

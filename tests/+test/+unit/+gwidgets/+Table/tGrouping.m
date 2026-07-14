@@ -3,6 +3,19 @@ classdef tGrouping < test.WithExampleTables
 
     methods (Test)
 
+        function tGroupingControllerCreatedOnFirstGrouping(testCase)
+            data = testCase.stringData();
+            t = gwidgets.Table(Data=data);
+
+            testCase.verifyFalse(t.hasGroupingController())
+
+            t.ShowEmptyGroups = true;
+            testCase.verifyFalse(t.hasGroupingController())
+
+            t.GroupingVariable = "Var2";
+            testCase.verifyTrue(t.hasGroupingController())
+        end
+
         function tUngroupedTable(testCase)
             data = testCase.stringData();
             t = gwidgets.Table(Data=data);

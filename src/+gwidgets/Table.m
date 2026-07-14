@@ -125,6 +125,8 @@ classdef Table < gwidgets.internal.Reparentable
 
         function delete(this)
             delete(this.FilterController);
+            delete(this.GroupingController_);
+            delete(this.SortingController_);
             delete(this.CustomContextMenuItems);
             delete(this.ContextMenu);
         end
@@ -191,10 +193,12 @@ classdef Table < gwidgets.internal.Reparentable
             if this.UpdateManager.doRun("Data")
                 try
                     this.doUpdateSequence();
-                catch
+                catch ME
                     % Update failed with new data, e.g. caused by change in
                     % size of table or data types, so reset the table
                     this.reset();
+                    warning("GraphicsWidgets:Table:DataUpdateReset", ...
+                        "Data update failed; table was reset. Original error: %s", ME.message);
                 end
             end
         end
@@ -721,17 +725,8 @@ classdef Table < gwidgets.internal.Reparentable
                 nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
             end
 
-            if isa(targetIndicesOrFunction, "function_handle")
-                newStyle = gwidgets.internal.table.TableStyle(s, tableTarget, "TargetFunction", targetIndicesOrFunction, "SelectionMode", nvp.SelectionMode);
-            elseif isa(targetIndicesOrFunction, "string")
-                targetIndicesOrFunction =  @(t) t.find(targetIndicesOrFunction, tableTarget);
-                newStyle = gwidgets.internal.table.TableStyle(s, tableTarget, "TargetFunction", targetIndicesOrFunction, "SelectionMode", nvp.SelectionMode);
-            elseif isnumeric(targetIndicesOrFunction)
-                newStyle = gwidgets.internal.table.TableStyle(s, tableTarget, "TargetIndices", targetIndicesOrFunction, "SelectionMode", nvp.SelectionMode);
-            else
-                error("Table index must an index array, or a function that takes the table object as input");
-            end
-
+            newStyle = gwidgets.internal.table.StyleController.createStyle( ...
+                s, tableTarget, targetIndicesOrFunction, nvp.SelectionMode);
             this.Styles(end+1) = newStyle;
 
             if this.UpdateManager.doRun("UpdateStyle")
@@ -739,23 +734,20 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
+
         function removeStyle(this, orderNum)
             arguments
                 this
                 orderNum (1,:) double = []
             end
 
-            if isempty(orderNum)
-                this.Styles(:) = [];
-            else
-                this.Styles(orderNum) = [];
-            end
+            this.Styles = gwidgets.internal.table.StyleController.removeStyle(this.Styles, orderNum);
 
             if this.UpdateManager.doRun("UpdateStyle")
                 this.doUpdateSequence("StartFrom", "Style");
             end
-
         end
+
 
     end
 
@@ -799,11 +791,12 @@ classdef Table < gwidgets.internal.Reparentable
         DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle % Widget-wide fallback style
     end
 
-    properties (GetAccess = ?matlab.unittest.TestCase, SetAccess = protected)
+    properties (Dependent, GetAccess = ?matlab.unittest.TestCase, SetAccess = protected)
         Tooltips (1,:) gwidgets.internal.table.TableTooltip
     end
 
     properties (Access = protected)
+        TooltipController_ (1,:) gwidgets.internal.table.TooltipController {mustBeScalarOrEmpty}
         TableTooltipText_ (1,1) string = ""
         DefaultTooltipStyle_ (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
     end
@@ -833,34 +826,18 @@ classdef Table < gwidgets.internal.Reparentable
                 tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
                 targetIndicesOrFunction (:,:) = []
                 nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
-                nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = gwidgets.internal.table.TableTooltip.defaultContextShape(tableTarget)
+                nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = ...
+                    gwidgets.internal.table.TableTooltip.defaultContextShape(tableTarget)
                 nvp.Style = []
             end
 
-            ttArgs = {"SelectionMode", nvp.SelectionMode, "ContextShape", nvp.ContextShape, "Style", nvp.Style};
-            if tableTarget == "table"
-                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, ttArgs{:});
-            elseif isa(targetIndicesOrFunction, "function_handle")
-                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, "TargetFunction", targetIndicesOrFunction, ttArgs{:});
-            elseif isnumeric(targetIndicesOrFunction)
-                newTooltip = gwidgets.internal.table.TableTooltip(text, tableTarget, "TargetIndices", targetIndicesOrFunction, ttArgs{:});
-            else
-                error("GraphicsWidgets:Table:TooltipTarget", ...
-                    "Tooltip target must be an index array or a function that takes the table object as input.");
-            end
-
-            % Validate indices upfront against current data so registration
-            % errors surface here, not later inside the hover callback.
-            if tableTarget ~= "table"
-                idx = newTooltip.indices(this);
-                if newTooltip.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
-                    this.dataSelectionToDisplaySelection(idx, tableTarget);
-                end
-            end
-
-            wasEmpty = isempty(this.Tooltips);
-            this.Tooltips(end+1) = newTooltip;
-            if wasEmpty
+            controller = this.tooltipController();
+            didEnableHover = controller.addTooltip( ...
+                this, text, tableTarget, targetIndicesOrFunction, ...
+                SelectionMode=nvp.SelectionMode, ...
+                ContextShape=nvp.ContextShape, ...
+                Style=nvp.Style);
+            if didEnableHover
                 this.sendHoverEnableToBridge();
             end
         end
@@ -871,13 +848,12 @@ classdef Table < gwidgets.internal.Reparentable
                 orderNum (1,:) double = []
             end
 
-            if isempty(orderNum)
-                this.Tooltips(:) = [];
-            else
-                this.Tooltips(orderNum) = [];
+            controller = this.tooltipControllerIfPresent();
+            didDisableHover = false;
+            if ~isempty(controller)
+                didDisableHover = controller.removeTooltip(orderNum);
             end
-
-            if isempty(this.Tooltips)
+            if didDisableHover
                 this.sendHoverDisableToBridge();
             end
         end
@@ -890,6 +866,10 @@ classdef Table < gwidgets.internal.Reparentable
 
         function set.Tooltip(this, val)
             this.TableTooltipText_ = val;
+            controller = this.tooltipControllerIfPresent();
+            if ~isempty(controller)
+                controller.setTooltipText(val);
+            end
             if ~isempty(this.DisplayTable)
                 this.DisplayTable.Tooltip = val;
             end
@@ -901,6 +881,29 @@ classdef Table < gwidgets.internal.Reparentable
 
         function set.DefaultTooltipStyle(this, val)
             this.DefaultTooltipStyle_ = val;
+            controller = this.tooltipControllerIfPresent();
+            if ~isempty(controller)
+                controller.setDefaultTooltipStyle(val);
+            end
+        end
+
+        function val = get.Tooltips(this)
+            controller = this.tooltipControllerIfPresent();
+            if isempty(controller)
+                val = gwidgets.internal.table.TableTooltip.empty(1,0);
+            else
+                val = controller.Tooltips;
+            end
+        end
+    end
+
+    methods (Access = ?gwidgets.internal.table.TooltipController)
+        function displaySelection = tooltipDataToDisplay(this, dataSelection, target)
+            displaySelection = this.dataSelectionToDisplaySelection(dataSelection, target);
+        end
+
+        function dataSelection = tooltipDisplayToData(this, displaySelection, target)
+            dataSelection = this.displaySelectionToDataSelection(displaySelection, target);
         end
     end
 
@@ -1160,6 +1163,8 @@ classdef Table < gwidgets.internal.Reparentable
         % performance reasons
         FoldedVisibleToDataMap (1,:) double % Mapping from visible rows to data rows
         FoldedDataToVisibleMap (1,:) double % Mapping from data rows to visible rows
+
+        GroupingController_ (1,:) gwidgets.internal.table.GroupingController {mustBeScalarOrEmpty}
     end
 
     methods
@@ -1305,6 +1310,10 @@ classdef Table < gwidgets.internal.Reparentable
         SortDirection_ (1,1) string {mustBeMember(SortDirection_, ["Ascend", "Descend", "None"])} = "None"
     end
 
+    properties (Access = private)
+        SortingController_ (1,:) gwidgets.internal.table.SortingController {mustBeScalarOrEmpty}
+    end
+
     methods
 
         function val = get.SortByColumn(this)
@@ -1389,152 +1398,27 @@ classdef Table < gwidgets.internal.Reparentable
                 this (1,1) gwidgets.Table
             end
 
-            data = this.GroupedVisibleData;
-
-            % Pass forwards the data in case we return early
-            this.SortedVisibleData = data;
+            this.SortedVisibleData = this.GroupedVisibleData;
             this.SortedDataToVisibleMap = this.GroupedDataToVisibleMap;
             this.SortedVisibleToDataMap = this.GroupedVisibleToDataMap;
             this.SortedGroupHeaderRowIdx = this.GroupHeaderRowIdx;
             this.SortedGroupValues = this.Groups;
 
-            if this.SortDirection == "None"
+            if this.SortDirection == "None" || isempty(this.SortByDataColumn)
                 return
             end
 
-            % Separate the group variables from the data variables. Group variables are
-            % sorted separately.
-            dataVars = this.GroupedDataVariables;
-            groupVars = this.GroupingVariable;
+            controller = this.sortingController();
+            result = controller.sort(this.FilteredData, this.Data_, this.GroupedVisibleData, ...
+                this.GroupedDataVariables, this.GroupingVariable, this.Groups, this.GroupHeaderRowIdx, ...
+                this.GroupedVisibleToDataMap, this.GroupedDataToVisibleMap, this.DataColumnSortable, ...
+                this.SortByDataColumn, this.SortDirection);
 
-            sortBy = this.SortByDataColumn;
-
-            % Don't allow sort by columns that aren't sortable
-            if isempty(this.DataColumnSortable) ... % unset
-                    || (isscalar(this.DataColumnSortable) && ~this.DataColumnSortable)... % single false
-                    || (~isscalar(this.DataColumnSortable) && all(~this.DataColumnSortable)) % all false
-                % Table is not sortable
-                return
-            elseif ~isscalar(this.DataColumnSortable)
-                vars = string(this.Data_.Properties.VariableNames);
-                sortableVars = vars(this.DataColumnSortable);
-                sortBy = sortBy(ismember(sortBy, sortableVars));
-            end
-
-            sortByGroupVars = sortBy(ismember(sortBy, groupVars));
-            sortByDataVars = sortBy(ismember(sortBy, dataVars));
-            [isDataSortVar, dataColIdx] = ismember(sortByDataVars, dataVars);
-            dataColIdx = dataColIdx(isDataSortVar);
-
-            % Sort the content of each group
-            d2vMap = this.GroupedDataToVisibleMap;
-            v2dMap = this.GroupedVisibleToDataMap;
-            sortDirection = lower(this.SortDirection);
-
-            groupHeaderRowIdxs = this.GroupHeaderRowIdx;
-
-            if isempty(groupHeaderRowIdxs)
-                % No grouping, so "group" is everying and starts at 0
-                groupHeaderRowIdxs = 0;
-            end
-
-            groupHeaderRowIdxs = [groupHeaderRowIdxs, height(data)+1]; % Add an extra fake group start to make calculating start and end group idxs easy
-
-            if ~isempty(sortByDataVars)
-                [typedSortColumns, canUseTypedSort] = this.buildTypedSortColumns(sortByDataVars);
-                for iGroup = 1:(numel(groupHeaderRowIdxs)-1)
-
-                    dataStartIdx = groupHeaderRowIdxs(iGroup) + 1;
-                    dataEndIdx = groupHeaderRowIdxs(iGroup+1) - 1;
-
-                    groupIdxs = dataStartIdx:dataEndIdx;
-                    groupDataRowIdx = v2dMap(groupIdxs);
-
-                    if canUseTypedSort
-                        try
-                            orderIdx = this.orderRowsByTypedColumns( ...
-                                groupDataRowIdx, typedSortColumns, sortDirection);
-                        catch
-                            canUseTypedSort = false;
-                        end
-                    end
-
-                    if ~canUseTypedSort
-                        subData = data(groupIdxs, dataColIdx);
-                        subData = cell2table(subData, 'VariableNames', sortByDataVars); % Fallback for unsupported column types/shapes
-                        [~, orderIdx] = sortrows(subData, sortByDataVars, sortDirection);
-                    end
-
-                    groupIdxsReordered = groupIdxs(orderIdx);
-
-                    data(groupIdxs, :) = data(groupIdxsReordered, :);
-
-                    % Update the maps
-                    tmp = d2vMap(groupDataRowIdx);
-                    tmp(orderIdx) = tmp;
-                    d2vMap(groupDataRowIdx) = tmp;
-
-                    v2dMap(groupIdxs) = groupDataRowIdx(orderIdx);
-                end
-            end
-
-            for iGroupVar = 1:numel(sortByGroupVars)
-                if iGroupVar > 1
-                    warning("Multiple grouping not yet supported");
-                    continue
-                end
-
-                groupData = [this.GroupedVisibleData{this.GroupHeaderRowIdx, 1}];
-                [~, orderIdx] = sort(groupData, sortDirection);
-
-                groupIdxs = cell(1, numel(groupHeaderRowIdxs)-1);
-                groupSize = NaN(1, numel(groupHeaderRowIdxs)-1);
-                d2vMapGroup = cell(1, numel(groupHeaderRowIdxs)-1);
-                for iGroup = 1:(numel(groupHeaderRowIdxs)-1)
-
-                    % Indices of group, inc. header
-                    groupStartIdx = groupHeaderRowIdxs(iGroup);
-                    groupEndIdx = groupHeaderRowIdxs(iGroup+1) - 1;
-                    groupIdxs{iGroup} = groupStartIdx:groupEndIdx;
-
-                    groupSize(iGroup) = numel(groupIdxs{iGroup}) - 1;
-
-                    idx = ismember(d2vMap, groupIdxs{iGroup});
-                    tmp = d2vMap;
-                    tmp = tmp - sum(groupSize(1:iGroup-1)) - iGroup;
-                    d2vMapGroup{iGroup} = tmp .* idx;
-                end
-
-                % Re order the indices
-                groupSize = groupSize(orderIdx);
-                groupIdxs = groupIdxs(orderIdx);
-                groupIdxs = [groupIdxs{:}];
-                d2vMapGroup = d2vMapGroup(orderIdx);
-
-                data = data(groupIdxs, :);
-
-                % Update the mappings
-                v2dMap = v2dMap(groupIdxs);
-
-                d2vMap = 0*d2vMap;
-                cumSize = 1;
-                for i = 1:numel(d2vMapGroup)
-                    d2vMap = d2vMap + d2vMapGroup{i} + (d2vMapGroup{i} ~=0) * (cumSize);
-                    cumSize = cumSize + (groupSize(i) + 1);
-                end
-
-                % Update the row header markers
-                newGroupHeaderIdxs = [0, cumsum(groupSize)] + (1:(numel(groupSize)+1));
-                this.SortedGroupHeaderRowIdx = newGroupHeaderIdxs(1:end-1);
-
-                this.SortedGroupValues = this.SortedGroupValues(orderIdx);
-            end
-
-            this.SortedVisibleData = data;
-
-            this.SortedDataToVisibleMap = d2vMap;
-            this.SortedVisibleToDataMap = v2dMap;
-
+            this.SortedVisibleData = result.SortedVisibleData;
+            this.SortedDataToVisibleMap = result.SortedDataToVisibleMap;
+            this.SortedVisibleToDataMap = result.SortedVisibleToDataMap;
+            this.SortedGroupHeaderRowIdx = result.SortedGroupHeaderRowIdx;
+            this.SortedGroupValues = result.SortedGroupValues;
         end
 
         function toggleBridgeDiag(this, val)
@@ -1651,9 +1535,7 @@ classdef Table < gwidgets.internal.Reparentable
 
         function updateDisplayData(this)
 
-            vars = [...
-                "VisibleData" ...
-                ];
+            vars = "VisibleData";
 
             this.updateDisplayTable(vars);
 
@@ -1703,143 +1585,79 @@ classdef Table < gwidgets.internal.Reparentable
 
         % ---- Column-width store helpers ----------------------------------------
 
-        function setColumnWidthStores(this, val, mask)
-            % Parse a cell array of widths into the three backing stores.
-            %
-            % val  – cell array of widths for the columns selected by mask.
-            %        Each element is either a positive numeric (Pixel) or a
-            %        string "Nx" (Relative).  Empty cell resets all masked
-            %        columns to "1x" Relative.
-            % mask – logical row vector over all data columns.
-            nData = numel(this.DataColumnNames);
-            types = this.extendStore(this.DataColumnWidthTypes_, "Relative", nData);
-            px    = this.extendStore(this.PixelDataColumnWidths_, NaN,       nData);
-            rel   = this.extendStore(this.RelativeDataColumnWidths_, "1x",   nData);
-
-            maskIdxs = find(mask);
-            if isempty(val)
-                % Reset masked columns to "1x" Relative
-                types(mask) = "Relative";
-                px(mask)    = NaN;
-                rel(mask)   = "1x";
-            else
-                for k = 1:numel(val)
-                    i = maskIdxs(k);
-                    v = val{k};
-                    if isnumeric(v) && isscalar(v) && v > 0
-                        types(i) = "Pixel";
-                        px(i)    = v;
-                        rel(i)   = string(missing);  % resolved by bridge later
-                    else
-                        types(i) = "Relative";
-                        px(i)    = NaN;
-                        rel(i)   = string(v);  % e.g. "1x", "2x"
-                    end
-                end
-            end
-            this.DataColumnWidthTypes_     = types;
-            this.PixelDataColumnWidths_    = px;
-            this.RelativeDataColumnWidths_ = rel;
+        function stores = columnWidthStores(this)
+            stores = struct( ...
+                "Types", this.DataColumnWidthTypes_, ...
+                "Pixel", this.PixelDataColumnWidths_, ...
+                "Relative", this.RelativeDataColumnWidths_);
         end
+
+        function applyColumnWidthStores(this, stores)
+            this.DataColumnWidthTypes_ = stores.Types;
+            this.PixelDataColumnWidths_ = stores.Pixel;
+            this.RelativeDataColumnWidths_ = stores.Relative;
+        end
+
+        function setColumnWidthStores(this, val, mask)
+            nData = numel(this.DataColumnNames);
+            stores = gwidgets.internal.table.ColumnWidthController.setStores( ...
+                val, mask, nData, this.columnWidthStores());
+            this.applyColumnWidthStores(stores);
+            return
+        end
+
 
         function resetToDefaultWidths(this)
-            % Reset all columns to "1x" Relative (the "unset" state).
-            nData = numel(this.DataColumnNames);
-            this.DataColumnWidthTypes_     = repelem("Relative", 1, nData);
-            this.PixelDataColumnWidths_    = nan(1, nData);
-            this.RelativeDataColumnWidths_ = repelem("1x", 1, nData);
+            stores = gwidgets.internal.table.ColumnWidthController.defaultStores(numel(this.DataColumnNames));
+            this.applyColumnWidthStores(stores);
+            return
         end
+
 
         function changed = updateStoresFromBridgeWidths(this, pixelWidths)
-            % Process actual positive pixel widths from the bridge.
-            %
-            % Updates PixelDataColumnWidths_ for all visible columns, then
-            % recomputes RelativeDataColumnWidths_ for every column (including
-            % hidden) using the GCD of all finite pixel widths.
-            % DataColumnWidthTypes_ is never modified here.
-            % Returns true when any stored value changed.
-            nVisible = sum(this.ColumnVisible);
-            if numel(pixelWidths) ~= nVisible
+            nData = numel(this.DataColumnNames);
+            [stores, changed, countMatches] = gwidgets.internal.table.ColumnWidthController.updateFromBridge( ...
+                pixelWidths, this.ColumnVisible, nData, this.columnWidthStores());
+            if ~countMatches
                 this.onBridgeReattachNeeded();
-                changed = false;
                 return
             end
-
-            nData   = numel(this.DataColumnNames);
-            visIdxs = find(this.ColumnVisible);
-            px      = this.extendStore(this.PixelDataColumnWidths_, NaN,  nData);
-            rel     = this.extendStore(this.RelativeDataColumnWidths_, "1x", nData);
-
-            for k = 1:nVisible
-                px(visIdxs(k)) = pixelWidths(k);
-            end
-
-            % Recompute GCD-normalised relative weights for all columns that
-            % have a resolved pixel width (visible or hidden).
-            g = gwidgets.Table.gcdPixelWidths(px);
-            for i = 1:nData
-                if ~isnan(px(i)) && px(i) > 0
-                    rel(i) = string(round(px(i) / g)) + "x";
-                end
-            end
-
-            changed = ~isequaln(px,  this.PixelDataColumnWidths_) || ...
-                      ~isequaln(rel, this.RelativeDataColumnWidths_);
-            this.PixelDataColumnWidths_    = px;
-            this.RelativeDataColumnWidths_ = rel;
+            this.applyColumnWidthStores(stores);
         end
+
 
         function val = buildMixedWidthCell(this, mask)
-            % Build a cell array of column widths for the columns given by mask.
-            % "Pixel" columns → numeric pixel value.
-            % "Relative" columns → "Nx" string (or "1x" if not yet resolved).
-            nData   = numel(this.DataColumnNames);
-            nResult = sum(mask);
-            if nResult == 0
-                val = {};
-                return
-            end
-            types = this.extendStore(this.DataColumnWidthTypes_, "Relative", nData);
-            px    = this.extendStore(this.PixelDataColumnWidths_, NaN,       nData);
-            rel   = this.extendStore(this.RelativeDataColumnWidths_, "1x",   nData);
-            maskIdxs = find(mask);
-            val = cell(1, nResult);
-            for k = 1:nResult
-                i = maskIdxs(k);
-                if types(i) == "Pixel"
-                    val{k} = px(i);
-                else
-                    r = rel(i);
-                    if ismissing(r) || r == ""
-                        val{k} = "1x";
-                    else
-                        val{k} = r;
-                    end
-                end
-            end
+            val = gwidgets.internal.table.ColumnWidthController.buildMixedCell( ...
+                mask, numel(this.DataColumnNames), this.columnWidthStores());
+            return
         end
+
 
         function val = resolvedPixelWidths(this, mask)
-            nData   = numel(this.DataColumnNames);
-            px      = this.extendStore(this.PixelDataColumnWidths_, NaN, nData);
-            val     = px(mask);
+            val = gwidgets.internal.table.ColumnWidthController.resolvedPixel( ...
+                mask, numel(this.DataColumnNames), this.columnWidthStores());
+            return
         end
+
 
         function val = resolvedRelativeWidths(this, mask)
-            nData = numel(this.DataColumnNames);
-            rel   = this.extendStore(this.RelativeDataColumnWidths_, "1x", nData);
-            val   = rel(mask);
+            val = gwidgets.internal.table.ColumnWidthController.resolvedRelative( ...
+                mask, numel(this.DataColumnNames), this.columnWidthStores());
+            return
         end
 
+
         function val = resolvedTypes(this, mask)
-            nData = numel(this.DataColumnNames);
-            val   = this.extendStore(this.DataColumnWidthTypes_, "Relative", nData);
-            val   = val(mask);
+            val = gwidgets.internal.table.ColumnWidthController.resolvedTypes( ...
+                mask, numel(this.DataColumnNames), this.columnWidthStores());
+            return
         end
+
 
         function updateDisplayTable(this, vars)
 
-            toUpdate = {};
+            toUpdate = cell(1, 2*numel(vars));
+            nUpdates = 0;
             for i = 1:numel(vars)
 
                 % Allow variable mapping, e.g. DisplayData -> Data
@@ -1916,12 +1734,13 @@ classdef Table < gwidgets.internal.Reparentable
                 end
 
                 if ~isequal(currentVal, newVal)
-                    toUpdate = [toUpdate, {newVar, newVal}]; %#ok<AGROW>
+                    nUpdates = nUpdates + 2;
+                    toUpdate(nUpdates-1:nUpdates) = {newVar, newVal};
                 end
             end
 
-            if ~isempty(toUpdate)
-                set(this.DisplayTable, toUpdate{:});
+            if nUpdates > 0
+                set(this.DisplayTable, toUpdate{1:nUpdates});
             end
         end
 
@@ -2081,37 +1900,34 @@ classdef Table < gwidgets.internal.Reparentable
             % Simulate a CellHover notification from the bridge without
             % requiring a live DOM/figure. Returns the resolved tooltip
             % text (and resolved TooltipStyle) that would be displayed.
-            [text, style] = this.resolveTooltipTextAndStyle(displayRow, displayColumn);
+            controller = this.tooltipController();
+            [text, style] = controller.resolveTextAndStyle(this, displayRow, displayColumn);
             this.applyTooltipPayload(displayRow, displayColumn);
         end
 
         function blocks = simulateTooltipBlocks(this, displayRow, displayColumn)
             % Resolve a hovered cell to the same block payload that would
             % be sent to the HTML bridge.
-            blocks = this.resolveTooltipBlocks(displayRow, displayColumn);
+            controller = this.tooltipController();
+            blocks = controller.resolveBlocks(this, displayRow, displayColumn);
+        end
+
+        function tf = hasTooltipController(this)
+            tf = ~isempty(this.TooltipController_) && isvalid(this.TooltipController_);
+        end
+
+        function tf = hasGroupingController(this)
+            tf = ~isempty(this.GroupingController_) && isvalid(this.GroupingController_);
+        end
+
+        function tf = hasSortingController(this)
+            tf = ~isempty(this.SortingController_) && isvalid(this.SortingController_);
         end
 
         function changed = didBridgeWidthsChange(this, incomingPx)
-            % Return true when the incoming pixel widths differ from the stored
-            % PixelDataColumnWidths_ by more than 1 px (browser-rounding
-            % tolerance).  NaN in the store (Relative column not yet resolved)
-            % is always treated as changed so the first report is processed.
-            nData  = numel(this.DataColumnNames);
-            nVis   = sum(this.ColumnVisible);
-            if numel(incomingPx) ~= nVis
-                changed = false;   % count mismatch — updateStoresFromBridgeWidths handles it
-                return
-            end
-            visIdxs = find(this.ColumnVisible);
-            px = this.extendStore(this.PixelDataColumnWidths_, NaN, nData);
-            for k = 1:nVis
-                stored = px(visIdxs(k));
-                if isnan(stored) || abs(stored - incomingPx(k)) > 1
-                    changed = true;
-                    return
-                end
-            end
-            changed = false;
+            changed = gwidgets.internal.table.ColumnWidthController.didBridgeWidthsChange( ...
+                incomingPx, this.ColumnVisible, numel(this.DataColumnNames), this.columnWidthStores());
+            return
         end
 
     end
@@ -2119,13 +1935,20 @@ classdef Table < gwidgets.internal.Reparentable
     % Selection manipulation
     methods (Access = protected)
 
+        function state = selectionMapState(this)
+            state = struct( ...
+                "FoldedVisibleToDataMap", this.FoldedVisibleToDataMap, ...
+                "FoldedDataToVisibleMap", this.FoldedDataToVisibleMap, ...
+                "FilteredDataToVisibleMap", this.FilteredDataToVisibleMap, ...
+                "VisibleColumnNames", this.VisibleColumnNames, ...
+                "VisibleDataColumnNames", this.VisibleDataColumnNames, ...
+                "DataColumnNames", this.DataColumnNames, ...
+                "GroupingVariable", this.GroupingVariable, ...
+                "DataWidth", size(this.Data_, 2));
+        end
+
         function clearSelection(this)
-            switch this.SelectionType
-                case "cell"
-                    this.Selection_ = zeros(0,2);
-                otherwise
-                    this.Selection_ = zeros(1,0);
-            end
+            this.Selection_ = gwidgets.internal.table.SelectionController.emptySelection(this.SelectionType);
         end
 
         function dataIdxs =  displaySelectionToDataSelection(this, visibleIdxs, type)
@@ -2141,71 +1964,10 @@ classdef Table < gwidgets.internal.Reparentable
                 return
             end
 
-            switch type
-                case "cell"
-                    rowIdxs = visibleIdxs(:,1);
-                    colIdxs = visibleIdxs(:,2);
-                case "row"
-                    rowIdxs = visibleIdxs;
-                    colIdxs = zeros(size(rowIdxs));
-                case "column"
-                    colIdxs = visibleIdxs;
-                    rowIdxs = zeros(size(colIdxs));
-                otherwise
-                    error("Selection must be a matrix with two columns for cell selection, or a row vector for column/row selection")
-            end
-
-            % Map rows
-            if ~any(ismissing(rowIdxs)) && any(rowIdxs ~= 0)
-                rowIdxs = this.FoldedVisibleToDataMap(rowIdxs)';
-                noDataIdx = ismissing(rowIdxs);
-
-                rowIdxs(noDataIdx) = NaN;
-                colIdxs(noDataIdx) = NaN;
-            end
-
-            % Map columns
-            % Remove hidden and group columns, reorder if necessary
-            visibleCols = this.VisibleColumnNames;
-            visibleCols(ismember(visibleCols, this.GroupingVariable)) = [];
-            dataCols = this.DataColumnNames;
-
-            for i = 1:numel(colIdxs)
-                colIdx = colIdxs(i);
-                if ~ismissing(colIdx) && colIdx ~= 0
-                    thisCol = visibleCols(colIdx);
-                    idx = find(dataCols == thisCol, 1);
-                    if isempty(idx)
-                        idx = NaN;
-                    end
-                    colIdxs(i) = idx;
-                end
-            end
-
-            % Remove missing selection
-            colIdxs = reshape(colIdxs, [], 1);
-            rowIdxs = reshape(rowIdxs, [], 1);
-            idx = ismissing(rowIdxs) | ismissing(colIdxs);
-            rowIdxs(idx) = [];
-            colIdxs(idx) = [];
-
-            switch type
-                case "cell"
-                    rowIdxs = reshape(rowIdxs, [], 1);
-                    colIdxs = reshape(colIdxs, [], 1);
-                    dataIdxs = [rowIdxs, colIdxs];
-                    if isempty(dataIdxs)
-                        dataIdxs = zeros(0,2);
-                    end
-                case "row"
-                    dataIdxs = reshape(rowIdxs, 1, []);
-                    dataIdxs(dataIdxs==0) = [];
-                case "column"
-                    dataIdxs = reshape(colIdxs, 1, []);
-                    dataIdxs(dataIdxs==0) = [];
-            end
-
+            dataIdxs = gwidgets.internal.table.SelectionController.displayToData( ...
+                visibleIdxs, type, this.selectionMapState());
         end
+
 
         function visibleIdxs = dataSelectionToDisplaySelection(this, dataIdxs, type)
             % dataSelectionToDisplaySelection Maps data selection to
@@ -2221,102 +1983,10 @@ classdef Table < gwidgets.internal.Reparentable
                 return
             end
 
-            switch type
-                case "cell"
-                    rowIdxs = dataIdxs(:,1)';
-                    colIdxs = dataIdxs(:,2)';
-                case "row"
-                    assert(isvector(dataIdxs), "GraphicsWidgets:Table:IncorrectSelectionSize", ...
-                        "Selection must be a vector for row selection");
-                    rowIdxs = reshape(dataIdxs, 1, []);
-                    colIdxs = zeros(size(rowIdxs));
-                case "column"
-                    assert(isvector(dataIdxs), "GraphicsWidgets:Table:IncorrectSelectionSize", ...
-                        "Selection must be a vector for column selection");
-                    colIdxs = reshape(dataIdxs, 1, []);
-                    rowIdxs = zeros(size(colIdxs));
-            end
-
-            % Check for out of range indices
-            rowsInRange = all(rowIdxs >= 1 & rowIdxs <= numel(this.FilteredDataToVisibleMap));
-            colsInRange = all(colIdxs >= 1 & colIdxs <= size(this.Data_, 2));
-
-            checkRowsInRange = type ~= "column" && ~any(ismissing(rowIdxs));
-            checkColsInRange = type ~= "row" && ~any(ismissing(colIdxs));
-
-            if (checkRowsInRange && ~rowsInRange) ...
-                    || (checkColsInRange && ~colsInRange)
-                error("GraphicsWidgets:Table:SelectionOutOfRange", ...
-                    "Selection outside data range");
-            elseif isempty(this.FoldedDataToVisibleMap)
-                % Map not yet initialized - table not rendered yet
-                % Return empty with correct dimensions
-                switch type
-                    case "cell"
-                        visibleIdxs = zeros(0,2);
-                    case "row"
-                        visibleIdxs = zeros(1,0);
-                    case "column"
-                        % No change needed as columns not affected by
-                        % folding
-                        visibleIdxs = colIdxs;
-                end
-            else
-                % Map rows
-                if ~any(ismissing(rowIdxs)) && any(rowIdxs ~= 0)
-                    rowIdxs = this.FoldedDataToVisibleMap(rowIdxs);
-                    noDataIdxs = ismissing(rowIdxs);
-                    colIdxs(noDataIdxs) = [];
-                    rowIdxs(noDataIdxs) = [];
-                end
-
-                % Map columns
-                % Remove hidden and group columns, reorder if necessary
-                visibleCols = this.VisibleDataColumnNames;
-                visibleCols(ismember(visibleCols, this.GroupingVariable)) = [];
-                dataCols = this.DataColumnNames;
-                for i = 1:numel(colIdxs)
-                    colIdx = colIdxs(i);
-                    if ~ismissing(colIdx) && colIdx ~= 0
-                        thisCol = dataCols(colIdx);
-                        matchingColIdx = find(visibleCols == thisCol,1);
-                        if isempty(matchingColIdx)
-                            matchingColIdx = NaN;
-                        end
-                        colIdxs(i) = matchingColIdx;
-                    end
-                end
-
-                % Remove missing selection
-                idx = ismissing(rowIdxs) | ismissing(colIdxs);
-                rowIdxs(idx) = [];
-                colIdxs(idx) = [];
-
-                switch type
-                    case "cell"
-                        rowIdxs = reshape(rowIdxs, [], 1);
-                        colIdxs = reshape(colIdxs, [], 1);
-                        visibleIdxs = [rowIdxs, colIdxs];
-                        if isempty(visibleIdxs)
-                            visibleIdxs = zeros(0,2);
-                        end
-                    case "row"
-                        visibleIdxs = rowIdxs;
-                        visibleIdxs(visibleIdxs==0) = [];
-                        if isempty(visibleIdxs)
-                            visibleIdxs = zeros(1,0);
-                        end
-                    case "column"
-                        visibleIdxs = colIdxs;
-                        visibleIdxs(visibleIdxs==0) = [];
-                        if isempty(visibleIdxs)
-                            visibleIdxs = zeros(1,0);
-                        end
-                end
-
-            end
-
+            visibleIdxs = gwidgets.internal.table.SelectionController.dataToDisplay( ...
+                dataIdxs, type, this.selectionMapState());
         end
+
 
         function refreshVisibleSelection(this)
             % Only update DisplayTable if it exists and table is initialized
@@ -2397,75 +2067,39 @@ classdef Table < gwidgets.internal.Reparentable
         end
 
         function addContextMenu(this)
-
-            % Detach custom items before deleting the menu so they survive
-            % and can be reparented after the menu is rebuilt below.
-            if ~isempty(this.CustomContextMenuItems)
-                [this.CustomContextMenuItems.Parent] = deal([]);
-                [this.CustomContextMenuItems.Tag] = deal("graphicscomponentsTableContextMenu");
-            end
-
-            % Delete the existing context menu and remake it to all changes
-            % in state
-            if ~isempty(this.ContextMenu) && isvalid(this.ContextMenu)
-                delete(this.ContextMenu);
-            end
-
-            fh = ancestor(this.DisplayTable, "figure");
-            this.ContextMenu = uicontextmenu("Parent", fh, "Tag", "graphicscomponentsTableContextMenu");
-
-            if this.HasChangeGroupingVariable || this.HasToggleShowEmptyGroups
-                m = uimenu("Parent", this.ContextMenu, "Text", "Grouping", "Tag", "graphicscomponentsTableContextMenu");
-                if this.HasChangeGroupingVariable
-                    uimenu("Parent", m, "Text", "Group", "MenuSelectedFcn", @(s,e) this.onGroupByRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-                    uimenu("Parent", m, "Text", "Ungroup", "MenuSelectedFcn", @(s,e) this.onUngroupByRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-                end
-                if this.HasToggleShowEmptyGroups
-                    uimenu("Parent", m, "Text", "Show/hide empty groups", "MenuSelectedFcn", @(s,e) this.onToggleShowEmptyGroupsRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-                end
-            end
-
-            if this.HasColumnSorting && any(this.ColumnSortable)
-                m = uimenu("Parent", this.ContextMenu, "Text", "Sort", "Tag", "graphicscomponentsTableContextMenu");
-                uimenu("Parent", m, "Text", "Ascending", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "Ascend"), "Tag", "graphicscomponentsTableContextMenu");
-                uimenu("Parent", m, "Text", "Descending", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "Descend"), "Tag", "graphicscomponentsTableContextMenu");
-                uimenu("Parent", m, "Text", "None", "MenuSelectedFcn", @(s,e) this.onSortByRequest(s,e, "None"), "Tag", "graphicscomponentsTableContextMenu");
-            end
-
-            if numel(this.SupportedSelectionTypes) > 1
-                m = uimenu("Parent", this.ContextMenu, "Text", "Selection Mode", "Tag", "graphicscomponentsTableContextMenu");
-                if contains("cell", this.SupportedSelectionTypes)
-                    uimenu("Parent", m, "Text", "Cell", "MenuSelectedFcn", @(s,e) this.onCellSelectionRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-                end
-
-                if contains("row", this.SupportedSelectionTypes)
-                    uimenu("Parent", m, "Text", "Row", "MenuSelectedFcn", @(s,e) this.onRowSelectionRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-                end
-
-                if contains("column", this.SupportedSelectionTypes)
-                    uimenu("Parent", m, "Text", "Column", "MenuSelectedFcn", @(s,e) this.onColumnSelectionRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-                end
-            end
-
-            if this.HasToggleFilter
-                uimenu("Parent", this.ContextMenu, "Text", "Show/hide row filter", "MenuSelectedFcn", @(s,e) this.onToggleRowFilterRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-            end
-
-            if this.HasAutoResizeColumns
-                uimenu("Parent", this.ContextMenu, "Text", "Auto-resize columns", "MenuSelectedFcn", @(s,e) this.onAutoResizeColumnsRequest(s,e), "Tag", "graphicscomponentsTableContextMenu");
-            end
-
-            for i = 1:numel(this.CustomContextMenuItems)
-                this.CustomContextMenuItems(i).Parent = this.ContextMenu;
-            end
-
-            this.DisplayTable.ContextMenu = this.ContextMenu;
-
+            this.ContextMenu = gwidgets.internal.table.ContextMenuController.build( ...
+                this.DisplayTable, this.ContextMenu, this.CustomContextMenuItems, ...
+                this.contextMenuOptions(), this.contextMenuCallbacks());
         end
 
         function reparentContextMenu(this)
-            fh = ancestor(this, "figure");
-            this.ContextMenu.Parent = fh;
+            gwidgets.internal.table.ContextMenuController.reparent(this.ContextMenu, this);
+        end
+
+        function options = contextMenuOptions(this)
+            options = struct( ...
+                "HasChangeGroupingVariable", this.HasChangeGroupingVariable, ...
+                "HasToggleShowEmptyGroups", this.HasToggleShowEmptyGroups, ...
+                "HasColumnSorting", this.HasColumnSorting, ...
+                "ColumnSortable", this.ColumnSortable, ...
+                "SupportedSelectionTypes", this.SupportedSelectionTypes, ...
+                "HasToggleFilter", this.HasToggleFilter, ...
+                "HasAutoResizeColumns", this.HasAutoResizeColumns);
+        end
+
+        function callbacks = contextMenuCallbacks(this)
+            callbacks = struct( ...
+                "Group", @(s,e)this.onGroupByRequest(s,e), ...
+                "Ungroup", @(s,e)this.onUngroupByRequest(s,e), ...
+                "ToggleShowEmptyGroups", @(s,e)this.onToggleShowEmptyGroupsRequest(s,e), ...
+                "SortAscend", @(s,e)this.onSortByRequest(s,e, "Ascend"), ...
+                "SortDescend", @(s,e)this.onSortByRequest(s,e, "Descend"), ...
+                "SortNone", @(s,e)this.onSortByRequest(s,e, "None"), ...
+                "CellSelection", @(s,e)this.onCellSelectionRequest(s,e), ...
+                "RowSelection", @(s,e)this.onRowSelectionRequest(s,e), ...
+                "ColumnSelection", @(s,e)this.onColumnSelectionRequest(s,e), ...
+                "ToggleRowFilter", @(s,e)this.onToggleRowFilterRequest(s,e), ...
+                "AutoResizeColumns", @(s,e)this.onAutoResizeColumnsRequest(s,e));
         end
 
         function updateGroupLabel(this)
@@ -2548,220 +2182,53 @@ classdef Table < gwidgets.internal.Reparentable
 
                 this.GroupedDataToVisibleMap = this.FilteredDataToVisibleMap;
                 this.GroupedVisibleToDataMap = this.FilteredVisibleToDataMap;
-            else
-                g = this.GroupingVariable;
-                this.GroupColumnIdx = ismember(this.Data_.Properties.VariableNames, g);
-
-                if numel(g) > 1
-                    allGroupVars = arrayfun(@(x) this.Data_.(x), g, "UniformOutput", false);
-                    allGroupVars = cellfun(@(x) string(x), allGroupVars, 'UniformOutput', false);
-                    allGroupVars = join([allGroupVars{:}], "|", 2);
-                else
-                    % Use all data so filtered groups are known
-                    allGroupVars = this.Data_.(g);
-                end
-
-                if isempty(allGroupVars)
-                    groupIdxs = zeros(1,0);
-                    allGroups = allGroupVars;
-                else
-                    [groupIdxs, allGroups] = findgroups(allGroupVars);
-                end
-
-                this.Groups = allGroups;
-                this.GroupIdxs = groupIdxs;
-
-                % Drop any open/hidden group state that no longer corresponds
-                % to a current group (e.g. after switching GroupingVariable).
-                this.OpenGroups_ = this.OpenGroups_(ismember(this.OpenGroups_, this.Groups));
-                this.HiddenGroups_ = this.HiddenGroups_(ismember(this.HiddenGroups_, this.Groups));
-
-                if numel(g) > 1
-                    filteredGroupVars = arrayfun(@(x) this.FilteredData.(x), g, "UniformOutput", false);
-                    filteredGroupVars = cellfun(@(x) string(x), filteredGroupVars, 'UniformOutput', false);
-                    filteredGroupVars = join([filteredGroupVars{:}], "|", 2);
-                else
-                    filteredGroupVars = this.FilteredData.(g);
-                end
-
-                tmpData = this.FilteredData;
-
-                idx = ismember(tmpData.Properties.VariableNames, g);
-                groupedDataVariables = string(tmpData.Properties.VariableNames(~idx));
-                tmpData(:, idx) = []; % Remove the group column
-                tmpData = table2cell(tmpData); % Create cell so can manipulate fully
-
-                nGroups = numel(allGroups);
-                allGroupCount = accumarray(groupIdxs(:), 1, [nGroups 1], @sum, 0);
-                if isempty(filteredGroupVars)
-                    filteredToAllGroupIdx = zeros(0,1);
-                    groupFilteredCount = zeros(nGroups,1);
-                    filteredRowIdxByGroup = cell(nGroups,1);
-                    [filteredRowIdxByGroup{:}] = deal(zeros(1,0));
-                else
-                    [~, filteredToAllGroupIdx] = ismember(filteredGroupVars, allGroups);
-                    filteredToAllGroupIdx = filteredToAllGroupIdx(:);
-                    groupFilteredCount = accumarray(filteredToAllGroupIdx, 1, [nGroups 1], @sum, 0);
-                    filteredRowIdxByGroup = accumarray(filteredToAllGroupIdx, ...
-                        (1:height(tmpData)).', [nGroups 1], ...
-                        @(rows) {rows(:).'}, {zeros(1,0)});
-                end
-
-                groupedData = cell(1, 2*nGroups);
-                headerIdx = false(1, nGroups + (size(tmpData, 2) > 0) * height(tmpData));
-
-                data2visible = this.FilteredDataToVisibleMap;
-                d2v = find(~ismissing(data2visible));
-                visible2data = this.FilteredVisibleToDataMap;
-                updatedVisible2data = NaN(1, nGroups + height(tmpData));
-
-                nVisibleRows = 0;
-                headerPos = 1;
-
-                for i = 1:nGroups
-                    thisGroup = allGroups(i);
-                    rowIdxs = filteredRowIdxByGroup{i};
-                    nInGroup = groupFilteredCount(i);
-                    thisGroupDisp = tmpData(rowIdxs, :);
-
-                    % Mapping from data to visible rows
-                    nVisibleRows = nVisibleRows + 1; % Row header
-                    visibleRowIdxs = nVisibleRows + (1:nInGroup);
-                    data2visible(d2v(rowIdxs)) = visibleRowIdxs;
-
-                    % Mapping from visible to data rows
-                    updatedVisible2data((nVisibleRows+1):(nVisibleRows+nInGroup)) = visible2data(rowIdxs);
-                    nVisibleRows = nVisibleRows + nInGroup;
-
-                    % Add the "visible/total" to the group heading
-                    nAll = allGroupCount(i);
-
-                    thisGroupHeading = cell(1, size(thisGroupDisp, 2));
-                    thisGroupHeading{1} = string(thisGroup) + " (" + nInGroup + "/" + nAll + ")";
-                    thisGroupData = thisGroupDisp;
-
-                    % Keep track of the number of items in each group
-                    if size(thisGroupData, 2) == 0
-                        % No columns except group column so no rows to show
-                        nInGroup = 0;
-                    end
-
-                    % Add to a running total of all the groups + their
-                    % heading row
-                    groupedData{2*i-1} = thisGroupHeading;
-                    groupedData{2*i} = thisGroupData;
-
-                    headerIdx(headerPos) = true;
-                    headerPos = headerPos + 1 + nInGroup;
-                end
-
-                groupedData = vertcat(groupedData{:});
-
-                if isempty(groupedData)
-                    % Ensure the grouped data has the correct number of
-                    % columns
-                    groupedData = tmpData;
-                end
-
-                this.GroupedVisibleData = groupedData;
-                this.GroupedDataVariables = groupedDataVariables;
-
-                this.GroupHeaderRowIdx = find(headerIdx);
-                this.GroupFilteredCount = groupFilteredCount.';
-
-                this.GroupedDataToVisibleMap = data2visible;
-                this.GroupedVisibleToDataMap = updatedVisible2data;
-
+                return
             end
+
+            controller = this.groupingController();
+            result = controller.group(this.Data_, this.FilteredData, this.FilteredDataToVisibleMap, ...
+                this.FilteredVisibleToDataMap, this.GroupingVariable, this.OpenGroups_, this.HiddenGroups_);
+
+            this.GroupedVisibleData = result.GroupedVisibleData;
+            this.GroupedDataVariables = result.GroupedDataVariables;
+            this.Groups = result.Groups;
+            this.GroupHeaderRowIdx = result.GroupHeaderRowIdx;
+            this.GroupColumnIdx = result.GroupColumnIdx;
+            this.GroupFilteredCount = result.GroupFilteredCount;
+            this.GroupIdxs = result.GroupIdxs;
+            this.OpenGroups_ = result.OpenGroups;
+            this.HiddenGroups_ = result.HiddenGroups;
+            this.GroupedDataToVisibleMap = result.GroupedDataToVisibleMap;
+            this.GroupedVisibleToDataMap = result.GroupedVisibleToDataMap;
 
         end
 
         function updateFolding(this)
 
-            groupedData = this.SortedVisibleData;
-            idxsHeaderRow = this.SortedGroupHeaderRowIdx;
-            idxHeading = [this.SortedGroupHeaderRowIdx, height(groupedData)+1];
-
-            idxVisibleHeaderRowMask = false(1, size(groupedData, 1));
-            idxVisibleHeaderRowMask(idxsHeaderRow) = true;
-
-            visRowToRemove = false(1,height(groupedData));
-
-            displayGroups = this.SortedGroupValues;
-            this.DisplayGroups = displayGroups;
-
-            isHiddenGroup = ~this.ShowEmptyGroups & this.GroupFilteredCount == 0;
-            isOpenGroup = ismember(displayGroups, this.OpenGroups);
-            hiddenGroups = displayGroups(isHiddenGroup);
-            hiddenGroups = hiddenGroups(end:-1:1);
-            for i = numel(idxsHeaderRow):-1:1
-
-                thisGroup = displayGroups(i);
-                idxHeaderRow = idxsHeaderRow(i);
-                idxGroupData = (idxHeading(i) + 1):(idxHeading(i+1)-1);
-
-                if ~isHiddenGroup(i) && ~isOpenGroup(i)
-                    % Group is closed, so update the header to show it is
-                    % closed and removed the rows corresponding to the group
-                    groupedData{idxHeaderRow, 1} = "⮞ " + groupedData{idxHeaderRow, 1};
-                    visRowToRemove(idxGroupData) = true;
-
-                elseif ~isHiddenGroup(i)
-                    % Group is open, so update the header to show it is
-                    % open
-                    groupedData{idxHeaderRow, 1} = "⮟ " + groupedData{idxHeaderRow, 1};
-                else
-                    % Group is hidden, so remove it from the view
-                    visRowToRemove(idxGroupData) = true;
-                    visRowToRemove(idxHeaderRow) = true;
-                end
-
+            if isempty(this.GroupingVariable)
+                this.DisplayGroups = string.empty(1,0);
+                this.FoldedVisibleToDataMap = this.SortedVisibleToDataMap;
+                this.FoldedDataToVisibleMap = this.SortedDataToVisibleMap;
+                this.VisibleGroupHeaderRowIdx = zeros(1,0);
+                this.VisibleData = cell2table(this.SortedVisibleData, ...
+                    VariableNames=string(this.Data_.Properties.VariableNames));
+                this.updateGroupLabel();
+                return
             end
 
-            this.DisplayGroups(isHiddenGroup) = [];
+            controller = this.groupingController();
+            result = controller.fold(this.SortedVisibleData, this.SortedGroupHeaderRowIdx, ...
+                this.SortedGroupValues, this.SortedVisibleToDataMap, this.SortedDataToVisibleMap, ...
+                this.GroupFilteredCount, this.GroupingVariable_, this.Groups, this.OpenGroups, ...
+                this.ShowEmptyGroups, string(this.Data_.Properties.VariableNames));
 
-            groupedData(visRowToRemove, :) = [];
-            idxVisibleHeaderRowMask(visRowToRemove) = [];
-
-            % Update visible to data map
-            visibleToDataMap = this.SortedVisibleToDataMap;
-            visibleToDataMap(visRowToRemove) = [];
-            this.FoldedVisibleToDataMap = visibleToDataMap;
-
-            % Update data to visible map
-            dataToVisibleMap = this.SortedDataToVisibleMap;
-            validMapIdx = ~isnan(dataToVisibleMap);
-            if any(visRowToRemove) && any(validMapIdx)
-                visibleRowIdx = dataToVisibleMap(validMapIdx);
-                isRemovedRow = visRowToRemove(visibleRowIdx);
-                removedBeforeRow = cumsum(visRowToRemove);
-
-                visibleRowIdx(~isRemovedRow) = visibleRowIdx(~isRemovedRow) - removedBeforeRow(visibleRowIdx(~isRemovedRow));
-                visibleRowIdx(isRemovedRow) = NaN;
-                dataToVisibleMap(validMapIdx) = visibleRowIdx;
-            end
-
-            this.FoldedDataToVisibleMap = dataToVisibleMap;
-
-            vars = this.Data_.Properties.VariableNames;
-            vars(ismember(vars, this.GroupingVariable_)) = [];
-            if isempty(vars) && ~isempty(this.GroupingVariable)
-                % Only group column remains
-                vars = "Groups";
-                if size(groupedData, 2) == 0
-                    groupedData = num2cell(this.Groups)';
-                end
-
-            end
-
-            groupedData = cell2table(groupedData, VariableNames=vars);
-
-            this.VisibleData = groupedData;
-
+            this.VisibleData = result.VisibleData;
+            this.DisplayGroups = result.DisplayGroups;
             this.UpdateManager.addSuppression("HiddenGroups", Times=1);
-            this.HiddenGroups = hiddenGroups;
-
-            this.VisibleGroupHeaderRowIdx = find(idxVisibleHeaderRowMask);
+            this.HiddenGroups = result.HiddenGroups;
+            this.VisibleGroupHeaderRowIdx = result.VisibleGroupHeaderRowIdx;
+            this.FoldedVisibleToDataMap = result.FoldedVisibleToDataMap;
+            this.FoldedDataToVisibleMap = result.FoldedDataToVisibleMap;
 
             this.updateGroupLabel();
 
@@ -2773,23 +2240,9 @@ classdef Table < gwidgets.internal.Reparentable
     methods (Access = protected)
 
         function updateStyle(this)
-            this.DisplayTable.removeStyle();
-
-            styles = [this.Styles, this.GroupHeaderStyle];
-
-            for i = 1:numel(styles)
-                thisStyle = styles(i);
-
-                style = thisStyle.Style;
-                target = thisStyle.Target;
-
-                index = thisStyle.indices(this);
-                if thisStyle.SelectionMode == gwidgets.table.SelectionMode.Data
-                    index = this.dataSelectionToDisplaySelection(index, thisStyle.Target);
-                end
-                this.DisplayTable.addStyle(style, target, index);
-            end
-
+            gwidgets.internal.table.StyleController.apply( ...
+                this.DisplayTable, this, this.Styles, this.GroupHeaderStyle, ...
+                @(index, target)this.dataSelectionToDisplaySelection(index, target));
             this.forceRefresh();
         end
 
@@ -2797,59 +2250,6 @@ classdef Table < gwidgets.internal.Reparentable
 
     % Internal callbacks
     methods (Access = private)
-
-        function [typedSortColumns, canUseTypedSort] = buildTypedSortColumns(this, sortByDataVars)
-            arguments
-                this (1,1) gwidgets.Table
-                sortByDataVars (1,:) string
-            end
-
-            nFilteredRows = height(this.FilteredData);
-            typedSortColumns = cell(1, numel(sortByDataVars));
-            canUseTypedSort = true;
-
-            for i = 1:numel(sortByDataVars)
-                varData = this.FilteredData.(sortByDataVars(i));
-
-                if size(varData, 1) ~= nFilteredRows || size(varData, 2) ~= 1
-                    canUseTypedSort = false;
-                    typedSortColumns = {};
-                    return
-                end
-
-                if iscellstr(varData)
-                    typedSortColumns{i} = string(varData);
-                elseif isnumeric(varData) || islogical(varData) ...
-                        || isstring(varData) || iscategorical(varData) ...
-                        || isdatetime(varData) || isduration(varData) ...
-                        || iscalendarDuration(varData)
-                    typedSortColumns{i} = varData;
-                else
-                    canUseTypedSort = false;
-                    typedSortColumns = {};
-                    return
-                end
-            end
-        end
-
-        function orderIdx = orderRowsByTypedColumns(~, filteredRowIdx, typedSortColumns, sortDirection)
-            arguments
-                ~
-                filteredRowIdx (1,:) double
-                typedSortColumns (1,:) cell
-                sortDirection (1,1) string
-            end
-
-            orderIdx = 1:numel(filteredRowIdx);
-
-            % Apply the least-significant sort first so later passes
-            % preserve the requested precedence.
-            for iSort = numel(typedSortColumns):-1:1
-                values = typedSortColumns{iSort}(filteredRowIdx(orderIdx), :);
-                [~, idx] = sort(values, sortDirection);
-                orderIdx = orderIdx(idx);
-            end
-        end
 
         function onCellClicked_(this, displayIdx)
             arguments
@@ -2884,11 +2284,26 @@ classdef Table < gwidgets.internal.Reparentable
             end
         end
 
+        function controller = groupingController(this)
+            if isempty(this.GroupingController_) || ~isvalid(this.GroupingController_)
+                this.GroupingController_ = gwidgets.internal.table.GroupingController();
+            end
+            controller = this.GroupingController_;
+        end
+
+        function controller = sortingController(this)
+            if isempty(this.SortingController_) || ~isvalid(this.SortingController_)
+                this.SortingController_ = gwidgets.internal.table.SortingController();
+            end
+            controller = this.SortingController_;
+        end
+
         function applyTooltipPayload(this, displayRow, displayColumn)
             % Resolve the hovered cell to a list of styled blocks and send
             % them to the bridge. One block per unique resolved style;
             % within a block, lines are joined most-specific-first.
-            blocks = this.resolveTooltipBlocks(displayRow, displayColumn);
+            controller = this.tooltipController();
+            blocks = controller.resolveBlocks(this, displayRow, displayColumn);
             if isempty(this.TableBridge_) || ~isvalid(this.TableBridge_)
                 return
             end
@@ -2896,221 +2311,20 @@ classdef Table < gwidgets.internal.Reparentable
                 struct("blocks", {blocks}));
         end
 
-        function blocks = resolveTooltipBlocks(this, displayRow, displayColumn)
-            % Convert the internal groups to the JS payload shape:
-            %   cell array of
-            %     struct("containerCss", char,
-            %            "lines",        {cell of struct("text", char, "css", char)})
-            groups = this.resolveTooltipGroups(displayRow, displayColumn);
-            blocks = cell(1, numel(groups));
-            for k = 1:numel(groups)
-                g = groups(k);
-                lineCells = cell(1, numel(g.Lines));
-                for j = 1:numel(g.Lines)
-                    lineCells{j} = struct( ...
-                        "text", char(g.Lines(j).Text), ...
-                        "css",  char(g.Lines(j).LineStyle.lineCss()));
-                end
-                blocks{k} = struct( ...
-                    "containerCss", char(g.ContainerStyle.containerCss()), ...
-                    "lines",        {lineCells});
+        function controller = tooltipController(this)
+            if isempty(this.TooltipController_) || ~isvalid(this.TooltipController_)
+                this.TooltipController_ = gwidgets.internal.table.TooltipController( ...
+                    TooltipText=this.TableTooltipText_, ...
+                    DefaultTooltipStyle=this.DefaultTooltipStyle_);
             end
+            controller = this.TooltipController_;
         end
 
-        function groups = resolveTooltipGroups(this, displayRow, displayColumn)
-            % Resolve a hovered cell to a struct array of grouped matches.
-            % Each group is:
-            %   struct("ContainerStyle", TooltipStyle,
-            %          "Lines",          struct array of (Text, LineStyle))
-            % Two matches share a group when their resolved styles agree
-            % on every container property (background, padding, border,
-            % border-radius) — even if their line properties (font color,
-            % weight, size, family) differ. Within a group, lines are
-            % ordered most-specific-first (cell -> row -> column -> table;
-            % registration order preserved within a target). Group order
-            % is the order of first-appearance, which means the group
-            % containing the most-specific match comes first.
-            matches = this.collectTooltipMatches(displayRow, displayColumn);
-
-            groups = struct("ContainerStyle", {}, "Lines", {});
-
-            if isempty(matches)
-                text = this.TableTooltipText_;
-                if text == ""
-                    return
-                end
-                base = gwidgets.table.TooltipStyle.default();
-                base = base.merge(this.DefaultTooltipStyle_);
-                groups(1).ContainerStyle = base;
-                groups(1).Lines = struct("Text", text, "LineStyle", base);
-                return
-            end
-
-            for k = 1:numel(matches)
-                m = matches(k);
-                key = m.Style.containerKey();
-                gIdx = [];
-                for g = 1:numel(groups)
-                    if isequaln(groups(g).ContainerStyle.containerKey(), key)
-                        gIdx = g;
-                        break
-                    end
-                end
-                if isempty(gIdx)
-                    groups(end+1).ContainerStyle = m.Style; %#ok<AGROW>
-                    groups(end).Lines = struct("Text", m.Text, "LineStyle", m.Style);
-                else
-                    groups(gIdx).Lines(end+1).Text = m.Text;
-                    groups(gIdx).Lines(end).LineStyle = m.Style;
-                end
-            end
-        end
-
-        function [text, style] = resolveTooltipTextAndStyle(this, displayRow, displayColumn)
-            % Back-compat helper for tests: text = every line in every
-            % group, joined by newline; style = the first matching
-            % tooltip's full style (= the first line of the first group).
-            groups = this.resolveTooltipGroups(displayRow, displayColumn);
-            if isempty(groups)
-                text = "";
-                base = gwidgets.table.TooltipStyle.default();
-                style = base.merge(this.DefaultTooltipStyle_);
-                return
-            end
-            allLines = strings(0, 1);
-            for k = 1:numel(groups)
-                for j = 1:numel(groups(k).Lines)
-                    allLines(end+1, 1) = groups(k).Lines(j).Text; %#ok<AGROW>
-                end
-            end
-            text = strjoin(allLines, newline);
-            style = groups(1).Lines(1).LineStyle;
-        end
-
-        function matches = collectTooltipMatches(this, displayRow, displayColumn)
-            % Returns a struct array (fields Text, Style, Rank) of every
-            % tooltip that matches the hovered cell, ordered by Rank
-            % ascending with registration order preserved within rank.
-            % Rank: 1=cell, 2=row, 3=column, 4=table. Style is the fully
-            % resolved TooltipStyle (per-tooltip style layered on top of
-            % DefaultTooltipStyle layered on TooltipStyle.default()).
-            priorities = ["cell", "row", "column", "table"];
-            baseStyle = gwidgets.table.TooltipStyle.default();
-            baseStyle = baseStyle.merge(this.DefaultTooltipStyle_);
-            byRank = cell(1, numel(priorities));
-
-            for i = 1:numel(this.Tooltips)
-                tt = this.Tooltips(i);
-                try
-                    idx = tt.indices(this);
-                    if tt.Target ~= "table" && tt.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
-                        idx = this.dataSelectionToDisplaySelection(idx, tt.Target);
-                    end
-                catch
-                    continue
-                end
-                resolved = tt;
-                resolved.TargetIndices = idx;
-                if ~resolved.matches(displayRow, displayColumn)
-                    continue
-                end
-
-                rank = find(priorities == tt.Target, 1);
-                ctx = this.buildHoverContext(tt.Target, tt.ContextShape, displayRow, displayColumn);
-                try
-                    rendered = tt.textFor(ctx);
-                catch err
-                    rendered = "[tooltip error: " + string(err.message) + "]";
-                end
-                ttStyle = tt.styleFor(ctx);
-                if isempty(ttStyle)
-                    resolvedStyle = baseStyle;
-                else
-                    resolvedStyle = baseStyle.merge(ttStyle);
-                end
-
-                entry = struct("Text", rendered, "Style", resolvedStyle, "Rank", rank);
-                byRank{rank} = [byRank{rank}; entry];
-            end
-
-            matches = vertcat(byRank{:});
-            if isempty(matches)
-                matches = struct("Text", {}, "Style", {}, "Rank", {});
-            end
-        end
-
-        function val = cellValueForHover(this, displayRow, displayColumn)
-            % Return the value at the hovered display cell, or missing
-            % when (row, col) doesn't reference a body cell.
-            val = missing;
-            if displayRow < 1 || displayColumn < 1
-                return
-            end
-            data = this.DisplayData;
-            if displayRow > size(data, 1) || displayColumn > width(data)
-                return
-            end
-            val = data{displayRow, displayColumn};
-            if iscell(val) && isscalar(val)
-                val = val{1};
-            end
-        end
-
-        function ctx = buildHoverContext(this, target, shape, displayRow, displayColumn)
-            % Compose the single TooltipContext value passed to a
-            % tooltip's TextFunction / StyleFunction. All fields are
-            % populated regardless of target; ContextShape controls the
-            % shape of Row and Column.
-            data = this.Data;
-            ctx = gwidgets.table.TooltipContext;
-            ctx.Target = target;
-            ctx.Table  = data;
-            ctx.DisplayRow    = displayRow;
-            ctx.DisplayColumn = displayColumn;
-            ctx.Value         = this.cellValueForHover(displayRow, displayColumn);
-
-            dataRow = this.safeDisplayToDataIndex(displayRow, "row");
-            dataCol = this.safeDisplayToDataIndex(displayColumn, "column");
-            ctx.DataRow    = dataRow;
-            ctx.DataColumn = dataCol;
-
-            if ~isnan(dataRow) && dataRow >= 1 && dataRow <= height(data)
-                if shape == "Values"
-                    try
-                        ctx.Row = data{dataRow, :};
-                    catch
-                        ctx.Row = missing; % mixed-type row can't concatenate
-                    end
-                else
-                    ctx.Row = data(dataRow, :);
-                end
-            end
-
-            if ~isnan(dataCol) && dataCol >= 1 && dataCol <= width(data)
-                if shape == "Values"
-                    ctx.Column = data{:, dataCol};
-                else
-                    ctx.Column = data(:, dataCol);
-                end
-            end
-        end
-
-        function dataIdx = safeDisplayToDataIndex(this, displayIdx, type)
-            % displaySelectionToDataSelection asserts on inputs; wrap so a
-            % hover over a header row or out-of-range cell yields NaN
-            % instead of crashing the bridge callback.
-            if displayIdx < 1
-                dataIdx = NaN;
-                return
-            end
-            try
-                dataIdx = this.displaySelectionToDataSelection(displayIdx, type);
-            catch
-                dataIdx = NaN;
-                return
-            end
-            if isempty(dataIdx) || ~isscalar(dataIdx)
-                dataIdx = NaN;
+        function controller = tooltipControllerIfPresent(this)
+            controller = this.TooltipController_;
+            if ~isempty(controller) && ~isvalid(controller)
+                this.TooltipController_ = gwidgets.internal.table.TooltipController.empty(1,0);
+                controller = this.TooltipController_;
             end
         end
 
@@ -3476,11 +2690,11 @@ classdef Table < gwidgets.internal.Reparentable
                 val = {};
             end
 
-            for i = 1:numel(val)
-                v = val{i};
-                if isstring(v) && (v == "auto" || v == "fit")
-                    val{i} = "1x";
-                end
+            isAutoOrFit = cellfun( ...
+                @(v)isstring(v) && isscalar(v) && ismember(v, ["auto", "fit"]), ...
+                val);
+            if any(isAutoOrFit)
+                val(isAutoOrFit) = {"1x"};
             end
         end
 
