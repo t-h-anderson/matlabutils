@@ -49,6 +49,99 @@ classdef GroupController < gwidgets.internal.table.TableController
             this.Open = string.empty(1,0);
         end
 
+        function requestUngroup(this)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+            end
+
+            this.By = string.empty(1,0);
+        end
+
+        function requestToggleShowEmpty(this)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+            end
+
+            this.ShowEmpty = ~this.ShowEmpty;
+        end
+
+        function requestGroupBy(this, displayColumn)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                displayColumn (1,1) double
+            end
+
+            owner = this.owner();
+            columnIdx = this.groupingColumnFromContext(displayColumn);
+            groupingVariable = string(owner.DisplayTable.Data.Properties.VariableNames(columnIdx));
+            groupingVariable = owner.Column.aliasesToData(groupingVariable);
+            groupingVariable(~ismember(groupingVariable, owner.Column.DataNames)) = [];
+
+            if isempty(groupingVariable)
+                groupingVariable = string.empty(1,0);
+            end
+
+            owner.Selection.clear();
+            try
+                this.By = groupingVariable;
+            catch
+                this.By = string.empty(1,0);
+            end
+        end
+
+        function toggleOpenStateForRows(this, rowIdx, groupHeaderRowIdx)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                rowIdx (1,:) double
+                groupHeaderRowIdx (1,:) double
+            end
+
+            idxHeader = ismember(groupHeaderRowIdx, rowIdx);
+            if ~any(idxHeader)
+                return
+            end
+
+            groups = this.DisplayGroups(idxHeader);
+            for iGroup = 1:numel(groups)
+                group = groups(iGroup);
+                if ismember(group, this.Open)
+                    this.Open(this.Open == group) = [];
+                else
+                    this.Open = [this.Open, group];
+                end
+            end
+        end
+
+        function updateLabel(this, label, grid, columnController, dataController)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                label (1,1) matlab.ui.control.Label
+                grid (1,1) matlab.ui.container.GridLayout
+                columnController (1,1) gwidgets.internal.table.ColumnController
+                dataController (1,1) gwidgets.internal.table.DataController
+            end
+
+            nGroups = numel(this.Groups);
+            nGroupsVisible = numel(dataController.VisibleGroupHeaderRowIdx);
+
+            groupingVariableName = strjoin(columnController.dataToAliases(this.By), "|");
+            if isempty(groupingVariableName)
+                groupingVariableName = "";
+            end
+
+            if nGroups == nGroupsVisible
+                label.Text = "Group: " + groupingVariableName + " (" + nGroups + " groups)";
+            else
+                label.Text = "Group: " + groupingVariableName + " (" + nGroupsVisible + "/" + nGroups + " groups visible)";
+            end
+
+            if groupingVariableName == ""
+                grid.RowHeight{2} = 0;
+            else
+                grid.RowHeight{2} = "fit";
+            end
+        end
+
         function clearGroupingState(this)
             arguments
                 this (1,1) gwidgets.internal.table.GroupController
@@ -109,7 +202,7 @@ classdef GroupController < gwidgets.internal.table.TableController
             end
 
             this.By_ = val;
-            owner.clearGroupSelection();
+            owner.Selection.clear();
 
             if owner.doControllerUpdate("GroupingVariable")
                 owner.requestControllerUpdate(StartFrom="Grouping");
@@ -231,6 +324,32 @@ classdef GroupController < gwidgets.internal.table.TableController
             val = this.DisplayGroups_;
         end
 
+    end
+
+    methods (Access = private)
+        function columnIdx = groupingColumnFromContext(this, displayColumn)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                displayColumn (1,1) double
+            end
+
+            selection = this.owner().Selection;
+            if isempty(selection.DisplayValue)
+                columnIdx = displayColumn;
+                return
+            end
+
+            switch selection.Type
+                case "cell"
+                    columnIdx = unique(selection.DisplayValue(:, 2));
+                case "column"
+                    columnIdx = selection.DisplayValue;
+                case "row"
+                    columnIdx = displayColumn;
+                otherwise
+                    columnIdx = displayColumn;
+            end
+        end
     end
 end
 

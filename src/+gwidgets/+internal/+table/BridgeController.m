@@ -118,7 +118,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 displayColumn (1,1) double
             end
 
-            blocks = this.owner().bridgeTooltipBlocks(displayRow, displayColumn);
+            blocks = this.owner().Tooltip.resolveBlocks(displayRow, displayColumn);
             if isempty(this.Bridge) || ~isvalid(this.Bridge)
                 return
             end
@@ -140,7 +140,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 case "ColumnWidthChanged"
                     this.onColumnWidthChanged(d);
                 case "CellHover"
-                    if this.owner().bridgeHasTooltips()
+                    if this.hasTooltips()
                         this.applyTooltipPayload(double(d.row), double(d.col));
                     end
                 case "BridgeDiag"
@@ -154,7 +154,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
             this.send("Init", struct("tableTag", this.DisplayTableTag));
             this.send("Diag", this.DiagEnabled_);
             this.ready();
-            if this.owner().bridgeHasTooltips()
+            if this.hasTooltips()
                 this.enableHover();
             end
         end
@@ -165,12 +165,16 @@ classdef BridgeController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            if owner.bridgeDidWidthsChange(d.widths)
-                owner.bridgeUpdateWidthStores(d.widths);
-                owner.bridgeApplyColumnWidth();
+            if owner.Column.didBridgeWidthsChange(d.widths)
+                owner.Column.updateStoresFromBridgeWidths(d.widths);
+                owner.DisplayController_.applyColumnWidth();
             else
                 this.restore();
             end
+        end
+
+        function tf = hasTooltips(this)
+            tf = ~isempty(this.owner().Tooltip.Tooltips);
         end
 
         function send(this, eventName, payload)

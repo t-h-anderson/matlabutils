@@ -1,4 +1,4 @@
-classdef TableController < handle
+classdef TableController < gwidgets.internal.WithWeakListeners
     % TableController stores a weak reference to a gwidgets.UITable owner.
 
     properties (Access = protected)

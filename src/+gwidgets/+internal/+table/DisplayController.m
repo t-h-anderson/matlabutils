@@ -27,7 +27,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
             vars = ["ColumnEditable", "ColumnSortable", "SelectionType"];
             this.update(vars);
             this.applyColumnWidth();
-            this.owner().refreshVisibleSelection();
+            this.owner().Selection.refresh();
         end
 
         function applyColumnWidth(this)
@@ -36,19 +36,19 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            displayTable = owner.displayTableForController();
+            displayTable = owner.DisplayTable;
 
-            owner.suppressDisplayBridge();
-            visWidths = owner.displayColumnWidths();
+            owner.BridgeController_.suppress();
+            visWidths = owner.Column.Width;
             if ~isequal(displayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
                 displayTable.ColumnWidth = {"Auto"};
-                owner.refreshDisplayNow();
+                owner.forceRefresh();
                 displayTable.ColumnWidth = visWidths;
             end
-            owner.restoreDisplayBridge();
+            owner.BridgeController_.restore();
         end
 
         function update(this, vars)
@@ -58,17 +58,17 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            displayTable = owner.displayTableForController();
+            displayTable = owner.DisplayTable;
             toUpdate = cell(1, 2*numel(vars));
             nUpdates = 0;
             for iVar = 1:numel(vars)
                 currentVar = vars(iVar);
-                newVal = owner.displayPropertyValue(currentVar);
+                newVal = this.propertyValue(owner, currentVar);
 
                 if currentVar == "VisibleData"
                     currentVal = displayTable.DisplayData;
                     newVal = gwidgets.internal.table.DisplayController.visibleDataForTable( ...
-                        newVal, owner.displayUpdateState());
+                        newVal, this.updateState(owner));
                     newVar = "Data";
                 else
                     currentVal = displayTable.(currentVar);
@@ -84,6 +84,44 @@ classdef DisplayController < gwidgets.internal.table.TableController
             if nUpdates > 0
                 set(displayTable, toUpdate{1:nUpdates});
             end
+        end
+    end
+
+    methods (Access = private)
+        function value = propertyValue(this, owner, propertyName)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController %#ok<INUSA>
+                owner (1,1) gwidgets.UITable
+                propertyName (1,1) string
+            end
+
+            switch propertyName
+                case "VisibleData"
+                    value = owner.Data.Visible;
+                case "ColumnEditable"
+                    value = owner.Column.Editable;
+                case "ColumnSortable"
+                    value = owner.Column.Sortable;
+                case "SelectionType"
+                    value = owner.Selection.Type;
+                otherwise
+                    error("GraphicsWidgets:UITable:DisplayProperty", ...
+                        "Unsupported display property: %s", propertyName);
+            end
+        end
+
+        function state = updateState(this, owner)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController %#ok<INUSA>
+                owner (1,1) gwidgets.UITable
+            end
+
+            state = struct( ...
+                "VisibleDataColumnNames", owner.Column.VisibleDataNames, ...
+                "GroupingVariable", owner.Group.By, ...
+                "VisibleGroupHeaderRowIdx", owner.Data.VisibleGroupHeaderRowIdx, ...
+                "DataColumnNames", owner.Column.DataNames, ...
+                "ColumnNames", owner.Column.Names);
         end
     end
 

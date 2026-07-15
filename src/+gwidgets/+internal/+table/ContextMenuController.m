@@ -43,17 +43,35 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             this.CustomItems = [this.CustomItems_, menuItems];
         end
 
-        function contextMenu = buildForTable(this, displayTable, contextMenu, columnSortable, callbacks)
+        function refresh(this)
+            arguments
+                this (1,1) gwidgets.internal.table.ContextMenuController
+            end
+
+            owner = this.owner();
+            owner.ContextMenu = this.buildForTable( ...
+                owner.DisplayTable, owner.ContextMenu, owner.Column.Sortable);
+        end
+
+        function reparentToOwner(this)
+            arguments
+                this (1,1) gwidgets.internal.table.ContextMenuController
+            end
+
+            owner = this.owner();
+            gwidgets.internal.table.ContextMenuController.reparent(owner.ContextMenu, owner);
+        end
+
+        function contextMenu = buildForTable(this, displayTable, contextMenu, columnSortable)
             arguments
                 this (1,1) gwidgets.internal.table.ContextMenuController
                 displayTable (1,:) matlab.ui.control.Table
                 contextMenu
                 columnSortable (1,:) logical
-                callbacks (1,1) struct
             end
 
             contextMenu = gwidgets.internal.table.ContextMenuController.build( ...
-                displayTable, contextMenu, this.CustomItems_, this.options(columnSortable), callbacks);
+                displayTable, contextMenu, this.CustomItems_, this.options(columnSortable), this.callbacks());
         end
 
         function val = get.CustomItems(this)
@@ -67,7 +85,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             end
 
             this.CustomItems_ = val;
-            this.owner().refreshContextMenu();
+            this.refresh();
         end
 
         function val = get.SupportedSelectionTypes(this)
@@ -83,12 +101,12 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             this.SupportedSelectionTypes_ = val;
 
             owner = this.owner();
-            if ~ismember(owner.contextSelectionType(), val)
-                owner.clearContextSelection();
-                owner.setContextSelectionType(val(1));
+            if ~ismember(owner.Selection.Type, val)
+                owner.Selection.clear();
+                owner.Selection.Type = val(1);
             end
 
-            owner.refreshContextMenu();
+            this.refresh();
         end
 
         function val = get.HasToggleFilter(this)
@@ -97,7 +115,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
         function set.HasToggleFilter(this, val)
             this.HasToggleFilter_ = val;
-            this.owner().refreshContextMenu();
+            this.refresh();
         end
 
         function val = get.HasChangeGroupingVariable(this)
@@ -106,7 +124,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
         function set.HasChangeGroupingVariable(this, val)
             this.HasChangeGroupingVariable_ = val;
-            this.owner().refreshContextMenu();
+            this.refresh();
         end
 
         function val = get.HasToggleShowEmptyGroups(this)
@@ -115,7 +133,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
         function set.HasToggleShowEmptyGroups(this, val)
             this.HasToggleShowEmptyGroups_ = val;
-            this.owner().refreshContextMenu();
+            this.refresh();
         end
 
         function val = get.HasColumnSorting(this)
@@ -124,7 +142,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
         function set.HasColumnSorting(this, val)
             this.HasColumnSorting_ = val;
-            this.owner().refreshContextMenu();
+            this.refresh();
         end
 
         function val = get.HasAutoResizeColumns(this)
@@ -133,7 +151,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
         function set.HasAutoResizeColumns(this, val)
             this.HasAutoResizeColumns_ = val;
-            this.owner().refreshContextMenu();
+            this.refresh();
         end
     end
 
@@ -152,6 +170,30 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
                 "SupportedSelectionTypes", this.SupportedSelectionTypes_, ...
                 "HasToggleFilter", this.HasToggleFilter_, ...
                 "HasAutoResizeColumns", this.HasAutoResizeColumns_);
+        end
+
+        function callbacks = callbacks(this)
+            owner = this.owner();
+            callbacks = struct( ...
+                "Group", @(~,e)owner.Group.requestGroupBy(e.InteractionInformation.DisplayColumn), ...
+                "Ungroup", @(~,~)owner.Group.requestUngroup(), ...
+                "ToggleShowEmptyGroups", @(~,~)owner.Group.requestToggleShowEmpty(), ...
+                "SortAscend", @(~,e)owner.Sort.requestSortByContext( ...
+                    e.InteractionInformation.DisplayRow, e.InteractionInformation.DisplayColumn, "Ascend"), ...
+                "SortDescend", @(~,e)owner.Sort.requestSortByContext( ...
+                    e.InteractionInformation.DisplayRow, e.InteractionInformation.DisplayColumn, "Descend"), ...
+                "SortNone", @(~,e)owner.Sort.requestSortByContext( ...
+                    e.InteractionInformation.DisplayRow, e.InteractionInformation.DisplayColumn, "None"), ...
+                "CellSelection", @(~,~)owner.Selection.requestCellSelection(), ...
+                "RowSelection", @(~,~)owner.Selection.requestRowSelection(), ...
+                "ColumnSelection", @(~,~)owner.Selection.requestColumnSelection(), ...
+                "ToggleRowFilter", @(~,~)this.toggleRowFilter(), ...
+                "AutoResizeColumns", @(~,~)owner.Column.requestAutoResize());
+        end
+
+        function toggleRowFilter(this)
+            owner = this.owner();
+            owner.ShowRowFilter = ~owner.ShowRowFilter;
         end
     end
 

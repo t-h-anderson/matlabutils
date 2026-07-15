@@ -278,7 +278,7 @@ classdef ColumnController < gwidgets.internal.table.TableController
 
         function val = get.DataNames(this)
             owner = this.owner();
-            val = string(owner.Data.Properties.VariableNames);
+            val = string(owner.Data.Table.Properties.VariableNames);
         end
 
         function val = get.VisibleNames(this)
@@ -332,10 +332,28 @@ classdef ColumnController < gwidgets.internal.table.TableController
             [stores, ~, countMatches] = gwidgets.internal.table.ColumnWidthController.updateFromBridge( ...
                 pixelWidths, this.Visible, nData, this.widthStores());
             if ~countMatches
-                this.owner().onColumnBridgeReattachNeeded();
+                this.owner().BridgeController_.reattach();
                 return
             end
             this.applyWidthStores(stores);
+        end
+
+        function applyBridgeWidths(this, pixelWidths)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                pixelWidths (1,:) double
+            end
+
+            this.updateStoresFromBridgeWidths(pixelWidths);
+            this.owner().DisplayController_.applyColumnWidth();
+        end
+
+        function requestAutoResize(this)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+            end
+
+            this.Width = {};
         end
 
         function changed = didBridgeWidthsChange(this, incomingPx)

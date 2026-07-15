@@ -10,8 +10,9 @@ classdef tControllerFacade < matlab.unittest.TestCase
             testCase.verifyTrue(ismember("Group", propNames))
             testCase.verifyTrue(ismember("Sort", propNames))
             testCase.verifyTrue(ismember("Style", propNames))
+            testCase.verifyTrue(ismember("Menu", propNames))
             testCase.verifyTrue(ismember("Callback", propNames))
-            testCase.verifyTrue(ismember("SelectionControl", propNames))
+            testCase.verifyFalse(ismember("SelectionControl", propNames))
             testCase.verifyFalse(ismember("ColumnWidth", propNames))
             testCase.verifyFalse(ismember("GroupingVariable", propNames))
             testCase.verifyFalse(ismember("SortByColumn", propNames))
@@ -76,19 +77,19 @@ classdef tControllerFacade < matlab.unittest.TestCase
             testCase.verifyEqual(height(t.Style.Configurations), nBaseStyles)
         end
 
-        function tSelectionControlDelegates(testCase)
+        function tUITableSelectionControllerDelegates(testCase)
             t = test.unit.gwidgets.Table.tControllerFacade.createTable();
 
-            t.SelectionControl.Type = "row";
-            t.SelectionControl.Value = 2;
+            t.UITable.Selection.Type = "row";
+            t.UITable.Selection.Value = 2;
 
-            testCase.verifyEqual(t.SelectionControl.Type, 'row')
-            testCase.verifyEqual(t.SelectionControl.Value, 2)
+            testCase.verifyEqual(t.UITable.Selection.Type, 'row')
+            testCase.verifyEqual(t.UITable.Selection.Value, 2)
             testCase.verifyEqual(t.Selection, 2)
 
-            t.SelectionControl.DisplayValue = 3;
+            t.UITable.Selection.DisplayValue = 3;
 
-            testCase.verifyEqual(t.SelectionControl.DisplayValue, 3)
+            testCase.verifyEqual(t.UITable.Selection.DisplayValue, 3)
             testCase.verifyEqual(t.DisplaySelection, 3)
         end
 
@@ -102,6 +103,29 @@ classdef tControllerFacade < matlab.unittest.TestCase
 
             t.CellEditCallback = edited;
             testCase.verifyEqual(t.Callback.CellEdit, edited)
+        end
+
+        function tDataFacadeSplitsUITableAndLegacyTable(testCase)
+            data = table((1:3).', ["a"; "b"; "c"], VariableNames=["Value", "Name"]);
+
+            uiTable = gwidgets.UITable(Data=data);
+            testCase.verifyInstanceOf(uiTable.Data, "gwidgets.internal.table.DataController")
+            testCase.verifyEqual(uiTable.Data.Table, data)
+
+            legacyTable = gwidgets.Table(Data=data);
+            testCase.verifyInstanceOf(legacyTable.Data, "table")
+            testCase.verifyEqual(legacyTable.Data, data)
+            testCase.verifyEqual(legacyTable.UITable.Data.Table, data)
+        end
+
+        function tUITableControllerSurface(testCase)
+            uiTable = gwidgets.UITable();
+            propNames = string(properties(uiTable));
+
+            testCase.verifyTrue(ismember("Filter", propNames))
+            testCase.verifyFalse(ismember("Bridge", propNames))
+            testCase.verifyFalse(ismember("Display", propNames))
+            testCase.verifyInstanceOf(uiTable.Filter, "gwidgets.internal.FilterController")
         end
     end
 

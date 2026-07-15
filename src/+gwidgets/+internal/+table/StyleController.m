@@ -9,7 +9,7 @@ classdef StyleController < gwidgets.internal.table.TableController
     properties (Access = private)
         Styles_ (1,:) gwidgets.internal.table.TableStyle
         GroupHeaderStyle_ (1,:) gwidgets.internal.table.TableStyle {mustBeScalarOrEmpty} = ...
-            gwidgets.UITable.defaultGroupHeaderStyle()
+            gwidgets.internal.table.StyleController.defaultGroupHeaderStyle()
     end
 
     methods
@@ -53,11 +53,11 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function val = get.Configurations(this)
-            val = this.owner().styleConfigurations();
+            val = this.owner().DisplayTable.StyleConfigurations;
         end
 
         function set.Configurations(this, val)
-            this.owner().setStyleConfigurations(val);
+            this.owner().DisplayTable.StyleConfigurations = val;
         end
 
         function val = get.GroupHeaderStyle(this)
@@ -72,7 +72,7 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function applyToDisplay(this)
-            displayTable = this.owner().styleDisplayTable();
+            displayTable = this.owner().DisplayTable;
             displayTable.removeStyle();
             styles = [this.Styles_, this.GroupHeaderStyle_];
 
@@ -82,12 +82,12 @@ classdef StyleController < gwidgets.internal.table.TableController
                 target = thisStyle.Target;
                 index = thisStyle.indices(this.owner());
                 if thisStyle.SelectionMode == gwidgets.table.SelectionMode.Data
-                    index = this.owner().SelectionControl.dataToDisplay(index, target);
+                    index = this.owner().Selection.dataToDisplay(index, target);
                 end
                 displayTable.addStyle(style, target, index);
             end
 
-            this.owner().refreshStyleDisplay();
+            this.owner().forceRefresh();
         end
     end
 
@@ -120,6 +120,19 @@ classdef StyleController < gwidgets.internal.table.TableController
                 error("GraphicsWidgets:Table:StyleTarget", ...
                     "Style target must be an index array, string query, or function that takes the table object.");
             end
+        end
+
+        function style = defaultGroupHeaderStyle(style)
+            arguments
+                style (1,1) matlab.ui.style.Style = matlab.ui.style.Style( ...
+                    "BackgroundColor", [0.1 0.1 0.8], ...
+                    "FontColor", [0.9 0.9 0.9])
+            end
+
+            style = gwidgets.internal.table.TableStyle( ...
+                style, "row", ...
+                SelectionMode="Display", ...
+                TargetFunction=@(this)this.Data.VisibleGroupHeaderRowIdx);
         end
 
         function styles = removeStyle(styles, orderNum)

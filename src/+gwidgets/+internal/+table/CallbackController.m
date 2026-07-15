@@ -26,6 +26,105 @@ classdef CallbackController < gwidgets.internal.table.TableController
             this@gwidgets.internal.table.TableController(owner);
         end
 
+        function onCellClicked(this, source, eventData)
+            arguments
+                this (1,1) gwidgets.internal.table.CallbackController
+                source
+                eventData
+            end
+
+            gwidgets.internal.table.CallbackController.ignoreCallbackSource(source);
+            owner = this.owner();
+            displayIdx = this.interactionDisplayIndex(eventData);
+            if ~isempty(displayIdx)
+                rowIdxs = unique(displayIdx(:,1));
+                owner.Group.toggleOpenStateForRows(rowIdxs, owner.Data.VisibleGroupHeaderRowIdx);
+            end
+
+            if isempty(this.CellClicked)
+                return
+            end
+
+            dataIdx = owner.Selection.displayToData(displayIdx);
+            callbackData = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+            this.CellClicked(owner, callbackData);
+        end
+
+        function onCellDoubleClicked(this, source, eventData)
+            arguments
+                this (1,1) gwidgets.internal.table.CallbackController
+                source
+                eventData
+            end
+
+            gwidgets.internal.table.CallbackController.ignoreCallbackSource(source);
+            if isempty(this.CellDoubleClick)
+                return
+            end
+
+            owner = this.owner();
+            displayIdx = this.interactionDisplayIndex(eventData);
+            dataIdx = owner.Selection.displayToData(displayIdx);
+            callbackData = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+            this.CellDoubleClick(owner, callbackData);
+        end
+
+        function onSelection(this, source, eventData)
+            arguments
+                this (1,1) gwidgets.internal.table.CallbackController
+                source
+                eventData
+            end
+
+            owner = this.owner();
+            displayIdx = eventData.Indices;
+            [displayIdx, shouldContinue] = owner.Selection.handleDisplaySelection(displayIdx, source.SelectionType);
+            if ~shouldContinue || isempty(this.CellSelection)
+                return
+            end
+
+            dataIdx = owner.Selection.displayToData(displayIdx, "cell");
+            callbackData = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
+            this.CellSelection(owner, callbackData);
+        end
+
+        function onCellEdit(this, source, eventData)
+            arguments
+                this (1,1) gwidgets.internal.table.CallbackController
+                source
+                eventData
+            end
+
+            gwidgets.internal.table.CallbackController.ignoreCallbackSource(source);
+            owner = this.owner();
+            displayIdx = eventData.Indices;
+            owner.Data.editDisplayCell(displayIdx, eventData.NewData, owner.Selection);
+
+            if isempty(this.CellEdit)
+                return
+            end
+
+            dataIdx = owner.Selection.displayToData(displayIdx, "cell");
+            callbackData = gwidgets.internal.table.CellEditData(eventData, dataIdx);
+            this.CellEdit(owner, callbackData);
+        end
+
+        function onDisplayDataChanged(this, source, eventData)
+            arguments
+                this (1,1) gwidgets.internal.table.CallbackController
+                source
+                eventData
+            end
+
+            if eventData.Interaction == "sort"
+                this.applyDisplaySort(eventData);
+            end
+
+            if ~isempty(this.DisplayDataChanged)
+                this.DisplayDataChanged(source, eventData);
+            end
+        end
+
         function val = get.CellSelectionCallback(this)
             val = this.CellSelection;
         end
@@ -64,6 +163,52 @@ classdef CallbackController < gwidgets.internal.table.TableController
 
         function set.DisplayDataChangedCallback(this, val)
             this.DisplayDataChanged = val;
+        end
+    end
+
+    methods (Access = private)
+        function applyDisplaySort(this, eventData)
+            arguments
+                this (1,1) gwidgets.internal.table.CallbackController
+                eventData
+            end
+
+            owner = this.owner();
+            newSortColumn = eventData.InteractionVariable;
+            currentSortColumn = owner.Sort.By;
+
+            owner.addControllerUpdateSuppression("SortDirection", Times=1);
+            if newSortColumn == currentSortColumn
+                if owner.Sort.Direction == "None"
+                    owner.Sort.Direction = "Ascend";
+                elseif owner.Sort.Direction == "Ascend"
+                    owner.Sort.Direction = "Descend";
+                else
+                    owner.Sort.Direction = "None";
+                end
+            else
+                owner.Sort.Direction = "Ascend";
+            end
+
+            owner.Sort.By = eventData.InteractionVariable;
+        end
+    end
+
+    methods (Static, Access = private)
+        function displayIdx = interactionDisplayIndex(eventData)
+            rowIdx = eventData.InteractionInformation.DisplayRow';
+            colIdx = eventData.InteractionInformation.DisplayColumn';
+
+            if isempty(rowIdx)
+                displayIdx = zeros(0,2);
+                return
+            end
+
+            displayIdx = [rowIdx, colIdx];
+        end
+
+        function ignoreCallbackSource(~)
+            % UI callback source is intentionally not forwarded for these legacy callbacks.
         end
     end
 end

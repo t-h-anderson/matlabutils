@@ -101,6 +101,48 @@ classdef SortController < gwidgets.internal.table.TableController
                 this.owner().requestControllerUpdate(StartFrom="Sorting");
             end
         end
+
+        function requestSortByContext(this, displayRow, displayColumn, direction)
+            arguments
+                this (1,1) gwidgets.internal.table.SortController
+                displayRow (1,1) double
+                displayColumn (1,1) double
+                direction (1,1) string {mustBeMember(direction, ["Ascend", "Descend", "None"])}
+            end
+
+            owner = this.owner();
+            owner.addControllerUpdateSuppression("SortDirection", Times=1);
+            this.Direction = direction;
+
+            if ismember(displayRow, owner.Data.VisibleGroupHeaderRowIdx)
+                vars = owner.Group.By;
+            else
+                vars = owner.Data.GroupedVariables(this.sortColumnFromContext(displayColumn));
+            end
+
+            this.By = vars;
+        end
+    end
+
+    methods (Access = private)
+        function colIdx = sortColumnFromContext(this, displayColumn)
+            arguments
+                this (1,1) gwidgets.internal.table.SortController
+                displayColumn (1,1) double
+            end
+
+            selection = this.owner().Selection;
+            switch selection.Type
+                case "cell"
+                    colIdx = unique(selection.DisplayValue(:,2));
+                case "column"
+                    colIdx = unique(selection.DisplayValue);
+                case "row"
+                    colIdx = displayColumn;
+                otherwise
+                    colIdx = displayColumn;
+            end
+        end
     end
 
     methods (Static, Access = private)

@@ -3,17 +3,17 @@ classdef tGrouping < test.WithExampleTables
 
     methods (Test)
 
-        function tGroupingControllerCreatedOnFirstGrouping(testCase)
+        function tGroupingControllerApiAvailable(testCase)
             data = testCase.stringData();
             t = gwidgets.Table(Data=data);
 
-            testCase.verifyFalse(t.hasGroupingController())
+            testCase.verifyInstanceOf(t.Group, "gwidgets.internal.table.GroupController")
 
             t.ShowEmptyGroups = true;
-            testCase.verifyFalse(t.hasGroupingController())
+            testCase.verifyTrue(t.Group.ShowEmpty)
 
             t.GroupingVariable = "Var2";
-            testCase.verifyTrue(t.hasGroupingController())
+            testCase.verifyEqual(t.Group.By, "Var2")
         end
 
         function tUngroupedTable(testCase)

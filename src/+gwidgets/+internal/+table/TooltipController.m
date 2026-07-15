@@ -53,7 +53,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
             if tableTarget ~= "table"
                 idx = newTooltip.indices(owner);
                 if newTooltip.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
-                    owner.SelectionControl.dataToDisplay(idx, tableTarget);
+                    owner.Selection.dataToDisplay(idx, tableTarget);
                 end
             end
 
@@ -61,7 +61,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
             this.Tooltips(end+1) = newTooltip;
             didEnableHover = wasEmpty;
             if didEnableHover
-                owner.enableTooltipHover();
+                owner.BridgeController_.enableHover();
             end
         end
 
@@ -80,7 +80,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
             end
             didDisableHover = wasNotEmpty && isempty(this.Tooltips);
             if didDisableHover && ~isempty(owner)
-                owner.disableTooltipHover();
+                owner.BridgeController_.disableHover();
             end
         end
 
@@ -240,7 +240,9 @@ classdef TooltipController < gwidgets.internal.table.TableController
             this.Text_ = val;
             owner = this.owner();
             if ~isempty(owner)
-                owner.applyTooltipText(val);
+                if ~isempty(owner.DisplayTable)
+                    owner.DisplayTable.Tooltip = val;
+                end
             end
         end
 
@@ -339,10 +341,10 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 try
                     idx = tt.indices(owner);
                     if tt.Target ~= "table" && tt.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
-                        idx = owner.SelectionControl.dataToDisplay(idx, tt.Target);
+                        idx = owner.Selection.dataToDisplay(idx, tt.Target);
                     end
                 catch ME
-                    if owner.bridgeDiagnosticsEnabled()
+                    if owner.BridgeController_.DiagEnabled
                         warning("GraphicsWidgets:Table:TooltipTargetError", ...
                             "Tooltip target resolution failed: %s", ME.message);
                     end
@@ -407,7 +409,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 return
             end
 
-            data = owner.DisplayData;
+            data = owner.Data.Display;
             if displayRow > size(data, 1) || displayColumn > width(data)
                 return
             end
@@ -428,7 +430,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 displayColumn (1,1) double
             end
 
-            data = owner.Data;
+            data = owner.Data.Table;
             ctx = gwidgets.table.TooltipContext;
             ctx.Target = target;
             ctx.Table = data;
@@ -476,9 +478,9 @@ classdef TooltipController < gwidgets.internal.table.TableController
             end
 
             try
-                dataIndex = owner.SelectionControl.displayToData(displayIndex, target);
+                dataIndex = owner.Selection.displayToData(displayIndex, target);
             catch ME
-                if owner.bridgeDiagnosticsEnabled()
+                if owner.BridgeController_.DiagEnabled
                     warning("GraphicsWidgets:Table:SelectionMapError", ...
                         "Display selection could not be mapped to data selection: %s", ME.message);
                 end

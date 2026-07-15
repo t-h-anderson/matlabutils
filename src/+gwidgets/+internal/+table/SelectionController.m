@@ -32,7 +32,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
 
         function set.Value(this, val)
             val = this.validateShape(val);
-            this.validateDimensions(val, this.owner().selectionDataSize());
+            this.validateDimensions(val, size(this.owner().Data.Table));
             this.Value_ = val;
             this.Mode = "Data";
             this.refreshVisibleSelection();
@@ -47,18 +47,18 @@ classdef SelectionController < gwidgets.internal.table.TableController
 
         function set.DisplayValue(this, val)
             val = this.validateShape(val);
-            this.validateDimensions(val, this.owner().selectionVisibleDataSize());
+            this.validateDimensions(val, size(this.owner().Data.Visible));
             this.Value_ = val;
             this.Mode = "Display";
             this.refreshVisibleSelection();
         end
 
         function val = get.Type(this)
-            val = this.owner().displaySelectionType();
+            val = this.owner().DisplayTable.SelectionType;
         end
 
         function set.Type(this, val)
-            this.owner().setDisplaySelectionType(val);
+            this.owner().DisplayTable.SelectionType = val;
             this.clear();
 
             if this.owner().doControllerUpdate("SelectionType")
@@ -67,17 +67,41 @@ classdef SelectionController < gwidgets.internal.table.TableController
         end
 
         function val = get.Multiselect(this)
-            val = this.owner().displayMultiselect();
+            val = this.owner().DisplayTable.Multiselect;
         end
 
         function set.Multiselect(this, val)
-            this.owner().setDisplayMultiselect(val);
+            this.owner().DisplayTable.Multiselect = val;
             this.clear();
         end
 
         function clear(this)
             this.Value_ = gwidgets.internal.table.SelectionController.emptySelection(this.Type);
             this.Mode = "Data";
+        end
+
+        function requestCellSelection(this)
+            arguments
+                this (1,1) gwidgets.internal.table.SelectionController
+            end
+
+            this.Type = "cell";
+        end
+
+        function requestRowSelection(this)
+            arguments
+                this (1,1) gwidgets.internal.table.SelectionController
+            end
+
+            this.Type = "row";
+        end
+
+        function requestColumnSelection(this)
+            arguments
+                this (1,1) gwidgets.internal.table.SelectionController
+            end
+
+            this.Type = "column";
         end
 
         function dataIdxs = displayToData(this, visibleIdxs, type)
@@ -93,7 +117,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
             end
 
             dataIdxs = gwidgets.internal.table.SelectionController.displayToDataStatic( ...
-                visibleIdxs, type, this.owner().selectionMapState());
+                visibleIdxs, type, this.mapState());
         end
 
         function visibleIdxs = dataToDisplay(this, dataIdxs, type)
@@ -109,7 +133,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
             end
 
             visibleIdxs = gwidgets.internal.table.SelectionController.dataToDisplayStatic( ...
-                dataIdxs, type, this.owner().selectionMapState());
+                dataIdxs, type, this.mapState());
         end
 
         function [displayIdx, shouldContinue] = onDisplaySelection(this, displayIdx, selectionType)
@@ -143,6 +167,19 @@ classdef SelectionController < gwidgets.internal.table.TableController
             this.Mode = "Display";
             this.refreshVisibleSelection();
             shouldContinue = true;
+        end
+
+        function [displayIdx, shouldContinue] = handleDisplaySelection(this, displayIdx, selectionType)
+            arguments
+                this (1,1) gwidgets.internal.table.SelectionController
+                displayIdx (:,2)
+                selectionType (1,1) string = this.Type
+            end
+
+            [displayIdx, shouldContinue] = this.onDisplaySelection(displayIdx, selectionType);
+            if shouldContinue
+                this.updateCategoricalFilterVariables(displayIdx, selectionType);
+            end
         end
 
         function refresh(this)
@@ -426,7 +463,8 @@ classdef SelectionController < gwidgets.internal.table.TableController
         end
 
         function refreshVisibleSelection(this)
-            if ~this.owner().canApplyDisplaySelection()
+            owner = this.owner();
+            if isempty(owner.DisplayTable) || isempty(owner.Data.FoldedDataToVisibleMap)
                 return
             end
 
@@ -437,13 +475,66 @@ classdef SelectionController < gwidgets.internal.table.TableController
 
             this.IsSettingProgrammatically = true;
             cleanupObj = onCleanup(@()this.clearProgrammaticFlag());
-            this.owner().applyDisplaySelection(selection);
+            try
+                owner.DisplayTable.Selection = selection;
+            catch
+                owner.DisplayTable.Selection = [];
+            end
             delete(cleanupObj);
-            this.owner().refreshDisplayNow();
+            owner.forceRefresh();
         end
 
         function clearProgrammaticFlag(this)
             this.IsSettingProgrammatically = false;
+        end
+
+        function updateCategoricalFilterVariables(this, displayIdx, selectionType)
+            arguments
+                this (1,1) gwidgets.internal.table.SelectionController
+                displayIdx (:,2)
+                selectionType (1,1) string
+            end
+
+            if isempty(displayIdx)
+                this.owner().Filter.CategoricalVariables = [];
+                return
+            end
+
+            switch selectionType
+                case "cell"
+                    colIdx = unique(displayIdx(:, 2));
+                case "column"
+                    colIdx = displayIdx;
+                case "row"
+                    colIdx = [];
+                otherwise
+                    colIdx = [];
+            end
+
+            if ~isscalar(colIdx)
+                this.owner().Filter.CategoricalVariables = [];
+                return
+            end
+
+            values = this.owner().DisplayTable.Data{:, colIdx};
+            if iscategorical(values)
+                this.owner().Filter.CategoricalVariables = categories(values);
+            else
+                this.owner().Filter.CategoricalVariables = [];
+            end
+        end
+
+        function state = mapState(this)
+            owner = this.owner();
+            state = struct( ...
+                "FoldedVisibleToDataMap", owner.Data.FoldedVisibleToDataMap, ...
+                "FoldedDataToVisibleMap", owner.Data.FoldedDataToVisibleMap, ...
+                "FilteredDataToVisibleMap", owner.Data.FilteredDataToVisibleMap, ...
+                "VisibleColumnNames", owner.Column.VisibleNames, ...
+                "VisibleDataColumnNames", owner.Column.VisibleDataNames, ...
+                "DataColumnNames", owner.Column.DataNames, ...
+                "GroupingVariable", owner.Group.By, ...
+                "DataWidth", size(owner.Data.Table, 2));
         end
     end
 

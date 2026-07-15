@@ -10,8 +10,8 @@ classdef Table < matlab.mixin.SetGet
         Group (1,1) gwidgets.internal.table.GroupController
         Sort (1,1) gwidgets.internal.table.SortController
         Style (1,1) gwidgets.internal.table.StyleController
+        Menu (1,1) gwidgets.internal.table.ContextMenuController
         Callback (1,1) gwidgets.internal.table.CallbackController
-        SelectionControl (1,1) gwidgets.internal.table.SelectionController
     end
 
     properties (Dependent)
@@ -167,6 +167,15 @@ classdef Table < matlab.mixin.SetGet
 
             result = this.UITable_.find(str, target);
         end
+
+        function expandFilterController(this, value)
+            arguments
+                this (1,1) gwidgets.Table
+                value (1,1) logical = true
+            end
+
+            this.UITable_.expandFilter(value);
+        end
     end
 
     methods
@@ -190,32 +199,33 @@ classdef Table < matlab.mixin.SetGet
             val = this.UITable_.Style;
         end
 
+        function val = get.Menu(this)
+            val = this.UITable_.Menu;
+        end
+
         function val = get.Callback(this)
             val = this.UITable_.Callback;
         end
 
-        function val = get.SelectionControl(this)
-            val = this.UITable_.SelectionControl;
-        end
-
         function val = get.Data(this)
-            val = this.UITable_.Data;
+            val = this.UITable_.Data.Table;
         end
 
         function set.Data(this, val)
-            this.UITable_.Data = val;
+            this.UITable_.Data.Table = val;
         end
 
         function val = get.DisplayData(this)
-            val = this.UITable_.DisplayData;
+            val = this.UITable_.Data.Display;
         end
 
         function val = get.Filter(this)
-            val = this.UITable_.Filter;
+            val = this.UITable_.Filter.FilterValue;
         end
 
         function set.Filter(this, val)
-            this.UITable_.Filter = val;
+            this.UITable_.Filter.FilterValue = val;
+            this.UITable_.runFilterUpdate();
         end
 
         function val = get.ShowRowFilter(this)
@@ -227,23 +237,23 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.Tooltip(this)
-            val = this.UITable_.legacyTooltipText();
+            val = this.UITable_.Tooltip.Text;
         end
 
         function set.Tooltip(this, val)
-            this.UITable_.setLegacyTooltipText(val);
+            this.UITable_.Tooltip.Text = val;
         end
 
         function val = get.DefaultTooltipStyle(this)
-            val = this.UITable_.legacyTooltipDefaultStyle();
+            val = this.UITable_.Tooltip.DefaultStyle;
         end
 
         function set.DefaultTooltipStyle(this, val)
-            this.UITable_.setLegacyTooltipDefaultStyle(val);
+            this.UITable_.Tooltip.DefaultStyle = val;
         end
 
         function val = get.Tooltips(this)
-            val = this.UITable_.legacyTooltips();
+            val = this.UITable_.Tooltip.Tooltips;
         end
 
         function val = get.Parent(this)
@@ -283,51 +293,51 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.CellSelectionCallback(this)
-            val = this.UITable_.CellSelectionCallback;
+            val = this.UITable_.Callback.CellSelection;
         end
 
         function set.CellSelectionCallback(this, val)
-            this.UITable_.CellSelectionCallback = val;
+            this.UITable_.Callback.CellSelection = val;
         end
 
         function val = get.CellClickedCallback(this)
-            val = this.UITable_.CellClickedCallback;
+            val = this.UITable_.Callback.CellClicked;
         end
 
         function set.CellClickedCallback(this, val)
-            this.UITable_.CellClickedCallback = val;
+            this.UITable_.Callback.CellClicked = val;
         end
 
         function val = get.CellDoubleClickCallback(this)
-            val = this.UITable_.CellDoubleClickCallback;
+            val = this.UITable_.Callback.CellDoubleClick;
         end
 
         function set.CellDoubleClickCallback(this, val)
-            this.UITable_.CellDoubleClickCallback = val;
+            this.UITable_.Callback.CellDoubleClick = val;
         end
 
         function val = get.CellEditCallback(this)
-            val = this.UITable_.CellEditCallback;
+            val = this.UITable_.Callback.CellEdit;
         end
 
         function set.CellEditCallback(this, val)
-            this.UITable_.CellEditCallback = val;
+            this.UITable_.Callback.CellEdit = val;
         end
 
         function val = get.DisplayDataChangedCallback(this)
-            val = this.UITable_.DisplayDataChangedCallback;
+            val = this.UITable_.Callback.DisplayDataChanged;
         end
 
         function set.DisplayDataChangedCallback(this, val)
-            this.UITable_.DisplayDataChangedCallback = val;
+            this.UITable_.Callback.DisplayDataChanged = val;
         end
 
         function val = get.RowFilterIndices(this)
-            val = this.UITable_.RowFilterIndices;
+            val = this.UITable_.Data.RowFilterIndices;
         end
 
         function val = get.VisibleData(this)
-            val = this.UITable_.VisibleData;
+            val = this.UITable_.Data.Visible;
         end
     end
 
@@ -337,7 +347,7 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.FilterController(this)
-            val = this.UITable_.FilterController;
+            val = this.UITable_.Filter;
         end
 
         function val = get.Grid(this)
@@ -357,19 +367,19 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.SortedVisibleData(this)
-            val = this.UITable_.SortedVisibleData;
+            val = this.UITable_.Data.SortedVisible;
         end
 
         function val = get.SortedGroupHeaderRowIdx(this)
-            val = this.UITable_.SortedGroupHeaderRowIdx;
+            val = this.UITable_.Data.SortedGroupHeaderRowIdx;
         end
 
         function val = get.SortedVisibleToDataMap(this)
-            val = this.UITable_.SortedVisibleToDataMap;
+            val = this.UITable_.Data.SortedVisibleToDataMap;
         end
 
         function val = get.SortedDataToVisibleMap(this)
-            val = this.UITable_.SortedDataToVisibleMap;
+            val = this.UITable_.Data.SortedDataToVisibleMap;
         end
     end
 
@@ -507,35 +517,35 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.Multiselect(this)
-            val = this.SelectionControl.Multiselect;
+            val = this.UITable_.Selection.Multiselect;
         end
 
         function set.Multiselect(this, val)
-            this.SelectionControl.Multiselect = val;
+            this.UITable_.Selection.Multiselect = val;
         end
 
         function val = get.Selection(this)
-            val = this.SelectionControl.Value;
+            val = this.UITable_.Selection.Value;
         end
 
         function set.Selection(this, selection)
-            this.SelectionControl.Value = selection;
+            this.UITable_.Selection.Value = selection;
         end
 
         function val = get.SelectionType(this)
-            val = this.SelectionControl.Type;
+            val = this.UITable_.Selection.Type;
         end
 
         function set.SelectionType(this, selectionType)
-            this.SelectionControl.Type = selectionType;
+            this.UITable_.Selection.Type = selectionType;
         end
 
         function val = get.DisplaySelection(this)
-            val = this.SelectionControl.DisplayValue;
+            val = this.UITable_.Selection.DisplayValue;
         end
 
         function set.DisplaySelection(this, selection)
-            this.SelectionControl.DisplayValue = selection;
+            this.UITable_.Selection.DisplayValue = selection;
         end
     end
 
@@ -553,7 +563,7 @@ classdef Table < matlab.mixin.SetGet
                 nvp.Style = []
             end
 
-            this.UITable_.addLegacyTooltip(text, tableTarget, targetIndicesOrFunction, ...
+            this.UITable_.Tooltip.add(text, tableTarget, targetIndicesOrFunction, ...
                 SelectionMode=nvp.SelectionMode, ...
                 ContextShape=nvp.ContextShape, ...
                 Style=nvp.Style);
@@ -565,7 +575,7 @@ classdef Table < matlab.mixin.SetGet
                 orderNum (1,:) double = []
             end
 
-            this.UITable_.removeLegacyTooltip(orderNum);
+            this.UITable_.Tooltip.remove(orderNum);
         end
     end
 
@@ -597,7 +607,7 @@ classdef Table < matlab.mixin.SetGet
                 menuItems (1,:) matlab.ui.container.Menu
             end
 
-            this.UITable_.legacyContextMenuController().addItem(menuItems);
+            this.Menu.addItem(menuItems);
         end
 
         function openAllGroups(this)
@@ -627,57 +637,47 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.HasToggleFilter(this)
-            controller = this.UITable_.legacyContextMenuControllerIfPresent();
-            val = ~isempty(controller) && controller.HasToggleFilter;
+            val = this.Menu.HasToggleFilter;
         end
 
         function set.HasToggleFilter(this, val)
-            this.UITable_.legacyContextMenuController().HasToggleFilter = val;
+            this.Menu.HasToggleFilter = val;
         end
 
         function val = get.HasChangeGroupingVariable(this)
-            controller = this.UITable_.legacyContextMenuControllerIfPresent();
-            val = ~isempty(controller) && controller.HasChangeGroupingVariable;
+            val = this.Menu.HasChangeGroupingVariable;
         end
 
         function set.HasChangeGroupingVariable(this, val)
-            this.UITable_.legacyContextMenuController().HasChangeGroupingVariable = val;
+            this.Menu.HasChangeGroupingVariable = val;
         end
 
         function val = get.HasToggleShowEmptyGroups(this)
-            controller = this.UITable_.legacyContextMenuControllerIfPresent();
-            val = ~isempty(controller) && controller.HasToggleShowEmptyGroups;
+            val = this.Menu.HasToggleShowEmptyGroups;
         end
 
         function set.HasToggleShowEmptyGroups(this, val)
-            this.UITable_.legacyContextMenuController().HasToggleShowEmptyGroups = val;
+            this.Menu.HasToggleShowEmptyGroups = val;
         end
 
         function val = get.HasColumnSorting(this)
-            controller = this.UITable_.legacyContextMenuControllerIfPresent();
-            val = ~isempty(controller) && controller.HasColumnSorting;
+            val = this.Menu.HasColumnSorting;
         end
 
         function set.HasColumnSorting(this, val)
-            this.UITable_.legacyContextMenuController().HasColumnSorting = val;
+            this.Menu.HasColumnSorting = val;
         end
 
         function val = get.HasAutoResizeColumns(this)
-            controller = this.UITable_.legacyContextMenuControllerIfPresent();
-            val = ~isempty(controller) && controller.HasAutoResizeColumns;
+            val = this.Menu.HasAutoResizeColumns;
         end
 
         function set.HasAutoResizeColumns(this, val)
-            this.UITable_.legacyContextMenuController().HasAutoResizeColumns = val;
+            this.Menu.HasAutoResizeColumns = val;
         end
 
         function val = get.SupportedSelectionTypes(this)
-            controller = this.UITable_.legacyContextMenuControllerIfPresent();
-            if isempty(controller)
-                val = "cell";
-            else
-                val = controller.SupportedSelectionTypes;
-            end
+            val = this.Menu.SupportedSelectionTypes;
         end
 
         function set.SupportedSelectionTypes(this, val)
@@ -686,20 +686,15 @@ classdef Table < matlab.mixin.SetGet
                 val (1,:) string {mustBeMember(val, ["cell", "row", "column"]), mustBeNonempty} = "cell"
             end
 
-            this.UITable_.legacyContextMenuController().SupportedSelectionTypes = val;
+            this.Menu.SupportedSelectionTypes = val;
         end
 
         function val = get.CustomContextMenuItems(this)
-            controller = this.UITable_.legacyContextMenuControllerIfPresent();
-            if isempty(controller)
-                val = matlab.ui.container.Menu.empty(1,0);
-            else
-                val = controller.CustomItems;
-            end
+            val = this.Menu.CustomItems;
         end
 
         function set.CustomContextMenuItems(this, val)
-            this.UITable_.legacyContextMenuController().CustomItems = val;
+            this.Menu.CustomItems = val;
         end
     end
 
@@ -785,42 +780,32 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.BridgeDiagEnabled(this)
-            val = this.UITable_.getBridgeDiagEnabled();
+            val = this.UITable_.BridgeController_.DiagEnabled;
         end
 
         function set.BridgeDiagEnabled(this, val)
-            this.UITable_.setBridgeDiagEnabled(val);
+            this.UITable_.BridgeController_.DiagEnabled = val;
         end
     end
 
     methods (Access = ?matlab.unittest.TestCase)
         function simulateBridgeDrag(this, pixelWidths)
-            this.UITable_.simulateBridgeDrag(pixelWidths);
+            this.UITable_.Column.applyBridgeWidths(pixelWidths);
         end
 
         function [text, style] = simulateBridgeHover(this, displayRow, displayColumn)
-            [text, style] = this.UITable_.simulateBridgeHover(displayRow, displayColumn);
+            [text, style] = this.UITable_.Tooltip.resolveTextAndStyle(displayRow, displayColumn);
+            this.UITable_.BridgeController_.applyTooltipPayload(displayRow, displayColumn);
         end
 
         function blocks = simulateTooltipBlocks(this, displayRow, displayColumn)
-            blocks = this.UITable_.simulateTooltipBlocks(displayRow, displayColumn);
-        end
-
-        function tf = hasTooltipController(this)
-            tf = this.UITable_.hasTooltipController();
-        end
-
-        function tf = hasGroupingController(this)
-            tf = this.UITable_.hasGroupingController();
-        end
-
-        function tf = hasSortingController(this)
-            tf = this.UITable_.hasSortingController();
+            blocks = this.UITable_.Tooltip.resolveBlocks(displayRow, displayColumn);
         end
 
         function changed = didBridgeWidthsChange(this, incomingPx)
-            changed = this.UITable_.didBridgeWidthsChange(incomingPx);
+            changed = this.UITable_.Column.didBridgeWidthsChange(incomingPx);
         end
+
     end
 
     methods (Static)
@@ -831,7 +816,7 @@ classdef Table < matlab.mixin.SetGet
                     "FontColor", [0.9 0.9 0.9])
             end
 
-            style = gwidgets.UITable.defaultGroupHeaderStyle(style);
+            style = gwidgets.internal.table.StyleController.defaultGroupHeaderStyle(style);
         end
     end
 
