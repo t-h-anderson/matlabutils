@@ -10,6 +10,7 @@ classdef tControllerFacade < matlab.unittest.TestCase
             testCase.verifyTrue(ismember("Group", propNames))
             testCase.verifyTrue(ismember("Sort", propNames))
             testCase.verifyTrue(ismember("Style", propNames))
+            testCase.verifyTrue(ismember("Callback", propNames))
             testCase.verifyTrue(ismember("SelectionControl", propNames))
             testCase.verifyFalse(ismember("ColumnWidth", propNames))
             testCase.verifyFalse(ismember("GroupingVariable", propNames))
@@ -89,6 +90,18 @@ classdef tControllerFacade < matlab.unittest.TestCase
 
             testCase.verifyEqual(t.SelectionControl.DisplayValue, 3)
             testCase.verifyEqual(t.DisplaySelection, 3)
+        end
+
+        function tCallbackFacadeDelegates(testCase)
+            t = test.unit.gwidgets.Table.tControllerFacade.createTable();
+            clicked = @(src, evt)disp(evt);
+            edited = @(src, evt)disp(src);
+
+            t.Callback.CellClicked = clicked;
+            testCase.verifyEqual(t.CellClickedCallback, clicked)
+
+            t.CellEditCallback = edited;
+            testCase.verifyEqual(t.Callback.CellEdit, edited)
         end
     end
 

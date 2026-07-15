@@ -8,6 +8,9 @@ classdef UITable < gwidgets.internal.Reparentable
         Group (1,1) gwidgets.internal.table.GroupController
         Sort (1,1) gwidgets.internal.table.SortController
         Style (1,1) gwidgets.internal.table.StyleController
+        Tooltip (1,1) gwidgets.internal.table.TooltipController
+        Callback (1,1) gwidgets.internal.table.CallbackController
+        Selection (1,1) gwidgets.internal.table.SelectionController
         SelectionControl (1,1) gwidgets.internal.table.SelectionController
     end
 
@@ -30,20 +33,24 @@ classdef UITable < gwidgets.internal.Reparentable
         GroupApi_ (1,:) gwidgets.internal.table.GroupController {mustBeScalarOrEmpty}
         SortApi_ (1,:) gwidgets.internal.table.SortController {mustBeScalarOrEmpty}
         StyleApi_ (1,:) gwidgets.internal.table.StyleController {mustBeScalarOrEmpty}
+        TooltipController_ (1,:) gwidgets.internal.table.TooltipController {mustBeScalarOrEmpty}
+        CallbackApi_ (1,:) gwidgets.internal.table.CallbackController {mustBeScalarOrEmpty}
         SelectionApi_ (1,:) gwidgets.internal.table.SelectionController {mustBeScalarOrEmpty}
         ContextMenuController_ (1,:) gwidgets.internal.table.ContextMenuController {mustBeScalarOrEmpty}
         DisplayController_ (1,:) gwidgets.internal.table.DisplayController {mustBeScalarOrEmpty}
         BridgeController_ (1,:) gwidgets.internal.table.BridgeController {mustBeScalarOrEmpty}
 
+        TooltipText_ (1,1) string = ""
+        DefaultTooltipStyle_ (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
+
     end
 
-    % Custom table callbacks
-    properties
-        CellSelectionCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
-        CellClickedCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
-        CellDoubleClickCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
-        CellEditCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
-        DisplayDataChangedCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
+    properties (Dependent)
+        CellSelectionCallback function_handle {mustBeScalarOrEmpty}
+        CellClickedCallback function_handle {mustBeScalarOrEmpty}
+        CellDoubleClickCallback function_handle {mustBeScalarOrEmpty}
+        CellEditCallback function_handle {mustBeScalarOrEmpty}
+        DisplayDataChangedCallback function_handle {mustBeScalarOrEmpty}
     end
 
     methods
@@ -60,7 +67,7 @@ classdef UITable < gwidgets.internal.Reparentable
 
             set(this, namedArgs);
 
-            this.SelectionControl.Value = []; % Enforces correct inital selection shape
+            this.Selection.Value = []; % Enforces correct inital selection shape
 
             % Support creation with filtering and grouping set
             this.doUpdateSequence();
@@ -76,6 +83,8 @@ classdef UITable < gwidgets.internal.Reparentable
             delete(this.GroupApi_);
             delete(this.SortApi_);
             delete(this.StyleApi_);
+            delete(this.TooltipController_);
+            delete(this.CallbackApi_);
             delete(this.SelectionApi_);
             delete(this.ContextMenuController_);
             delete(this.DisplayController_);
@@ -159,11 +168,23 @@ classdef UITable < gwidgets.internal.Reparentable
             val = this.StyleApi_;
         end
 
-        function val = get.SelectionControl(this)
+        function val = get.Tooltip(this)
+            val = this.tooltipController();
+        end
+
+        function val = get.Callback(this)
+            val = this.callbackController();
+        end
+
+        function val = get.Selection(this)
             if isempty(this.SelectionApi_) || ~isvalid(this.SelectionApi_)
                 this.SelectionApi_ = gwidgets.internal.table.SelectionController(this);
             end
             val = this.SelectionApi_;
+        end
+
+        function val = get.SelectionControl(this)
+            val = this.Selection;
         end
 
         function value = get.Data(this)
@@ -194,6 +215,71 @@ classdef UITable < gwidgets.internal.Reparentable
 
         function val = get.DisplayData(this)
             val = this.DisplayTable.Data;
+        end
+
+        function val = get.CellSelectionCallback(this)
+            controller = this.callbackControllerIfPresent();
+            if isempty(controller)
+                val = function_handle.empty(1,0);
+            else
+                val = controller.CellSelection;
+            end
+        end
+
+        function set.CellSelectionCallback(this, val)
+            this.Callback.CellSelection = val;
+        end
+
+        function val = get.CellClickedCallback(this)
+            controller = this.callbackControllerIfPresent();
+            if isempty(controller)
+                val = function_handle.empty(1,0);
+            else
+                val = controller.CellClicked;
+            end
+        end
+
+        function set.CellClickedCallback(this, val)
+            this.Callback.CellClicked = val;
+        end
+
+        function val = get.CellDoubleClickCallback(this)
+            controller = this.callbackControllerIfPresent();
+            if isempty(controller)
+                val = function_handle.empty(1,0);
+            else
+                val = controller.CellDoubleClick;
+            end
+        end
+
+        function set.CellDoubleClickCallback(this, val)
+            this.Callback.CellDoubleClick = val;
+        end
+
+        function val = get.CellEditCallback(this)
+            controller = this.callbackControllerIfPresent();
+            if isempty(controller)
+                val = function_handle.empty(1,0);
+            else
+                val = controller.CellEdit;
+            end
+        end
+
+        function set.CellEditCallback(this, val)
+            this.Callback.CellEdit = val;
+        end
+
+        function val = get.DisplayDataChangedCallback(this)
+            controller = this.callbackControllerIfPresent();
+            if isempty(controller)
+                val = function_handle.empty(1,0);
+            else
+                val = controller.DisplayDataChanged;
+            end
+        end
+
+        function set.DisplayDataChangedCallback(this, val)
+            this.Callback.DisplayDataChanged = val;
         end
     end
 
@@ -286,7 +372,7 @@ classdef UITable < gwidgets.internal.Reparentable
         end
 
         function refreshVisibleSelection(this)
-            this.SelectionControl.refresh();
+            this.Selection.refresh();
         end
 
         function displayTable = styleDisplayTable(this)
@@ -314,11 +400,11 @@ classdef UITable < gwidgets.internal.Reparentable
         end
 
         function selectionType = contextSelectionType(this)
-            selectionType = this.SelectionControl.Type;
+            selectionType = this.Selection.Type;
         end
 
         function setContextSelectionType(this, selectionType)
-            this.SelectionControl.Type = selectionType;
+            this.Selection.Type = selectionType;
         end
 
         function clearContextSelection(this)
@@ -343,7 +429,7 @@ classdef UITable < gwidgets.internal.Reparentable
                 case "ColumnSortable"
                     value = this.Column.Sortable;
                 case "SelectionType"
-                    value = this.SelectionControl.Type;
+                    value = this.Selection.Type;
                 otherwise
                     error("GraphicsWidgets:UITable:DisplayProperty", ...
                         "Unsupported display property: %s", propertyName);
@@ -382,7 +468,8 @@ classdef UITable < gwidgets.internal.Reparentable
         end
 
         function tf = bridgeHasTooltips(this)
-            tf = ~isempty(this.Tooltips);
+            controller = this.tooltipControllerIfPresent();
+            tf = ~isempty(controller) && ~isempty(controller.Tooltips);
         end
 
         function changed = bridgeDidWidthsChange(this, incomingPx)
@@ -399,7 +486,7 @@ classdef UITable < gwidgets.internal.Reparentable
 
         function blocks = bridgeTooltipBlocks(this, displayRow, displayColumn)
             controller = this.tooltipController();
-            blocks = controller.resolveBlocks(this, displayRow, displayColumn);
+            blocks = controller.resolveBlocks(displayRow, displayColumn);
         end
     end
 
@@ -416,43 +503,77 @@ classdef UITable < gwidgets.internal.Reparentable
     end
 
     %% Tooltips
-    properties (Dependent)
-        Tooltip (1,1) string % Table-wide tooltip; pass-through to uitable.Tooltip
-        DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle % Widget-wide fallback style
-    end
+    methods (Access = {?gwidgets.internal.table.TooltipController, ?gwidgets.Table})
+        function tf = bridgeDiagnosticsEnabled(this)
+            controller = this.bridgeControllerIfPresent();
+            tf = ~isempty(controller) && controller.DiagEnabled;
+        end
 
-    properties (Dependent, GetAccess = ?matlab.unittest.TestCase, SetAccess = protected)
-        Tooltips (1,:) gwidgets.internal.table.TableTooltip
-    end
-
-    properties (Access = protected)
-        TooltipController_ (1,:) gwidgets.internal.table.TooltipController {mustBeScalarOrEmpty}
-        TableTooltipText_ (1,1) string = ""
-        DefaultTooltipStyle_ (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
-    end
-
-    methods
-        function addTooltip(this, text, tableTarget, targetIndicesOrFunction, nvp)
-            % addTooltip registers a hover-tooltip configuration. Mirrors addStyle.
-            %   addTooltip(t, "Click to open", "table")
-            %   addTooltip(t, "Patient height (cm)", "column", 4)
-            %   addTooltip(t, "Outlier", "cell", [3 2; 5 7])
-            %   addTooltip(t, @(ctx) "Value: " + ctx.Value, "column", [2 3])
-            %     ^ function form: receives a gwidgets.table.TooltipContext
-            %       with fields Value, Row, Column, Table, DisplayRow,
-            %       DisplayColumn, DataRow, DataColumn, Target. Row and
-            %       Column slices come from the underlying Data table
-            %       (hidden columns / filtered-out rows reachable).
-            %
-            %   Pass ContextShape to control the shape of ctx.Row and
-            %   ctx.Column:
-            %     "Values" -> vectors
-            %     "Table"  -> 1xN / Mx1 tables
-            %   Per-target defaults: column=Values, row=Table,
-            %   table=Table, cell=Values.
+        function applyTooltipText(this, text)
             arguments
                 this (1,1) gwidgets.UITable
-                text % string scalar OR function_handle (cellValue) -> string
+                text (1,1) string
+            end
+
+            this.TooltipText_ = text;
+            if ~isempty(this.DisplayTable)
+                this.DisplayTable.Tooltip = text;
+            end
+        end
+
+        function enableTooltipHover(this)
+            controller = this.bridgeControllerIfPresent();
+            if ~isempty(controller)
+                controller.enableHover();
+            end
+        end
+
+        function disableTooltipHover(this)
+            controller = this.bridgeControllerIfPresent();
+            if ~isempty(controller)
+                controller.disableHover();
+            end
+        end
+
+        function setLegacyTooltipText(this, text)
+            this.TooltipText_ = text;
+            controller = this.tooltipControllerIfPresent();
+            if ~isempty(controller)
+                controller.Text = text;
+            elseif ~isempty(this.DisplayTable)
+                this.DisplayTable.Tooltip = text;
+            end
+        end
+
+        function text = legacyTooltipText(this)
+            text = this.TooltipText_;
+        end
+
+        function setLegacyTooltipDefaultStyle(this, style)
+            this.DefaultTooltipStyle_ = style;
+            controller = this.tooltipControllerIfPresent();
+            if ~isempty(controller)
+                controller.DefaultStyle = style;
+            end
+        end
+
+        function style = legacyTooltipDefaultStyle(this)
+            style = this.DefaultTooltipStyle_;
+        end
+
+        function tooltips = legacyTooltips(this)
+            controller = this.tooltipControllerIfPresent();
+            if isempty(controller)
+                tooltips = gwidgets.internal.table.TableTooltip.empty(1,0);
+            else
+                tooltips = controller.Tooltips;
+            end
+        end
+
+        function addLegacyTooltip(this, text, tableTarget, targetIndicesOrFunction, nvp)
+            arguments
+                this (1,1) gwidgets.UITable
+                text
                 tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
                 targetIndicesOrFunction (:,:) = []
                 nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
@@ -461,82 +582,22 @@ classdef UITable < gwidgets.internal.Reparentable
                 nvp.Style = []
             end
 
-            controller = this.tooltipController();
-            didEnableHover = controller.addTooltip( ...
-                this, text, tableTarget, targetIndicesOrFunction, ...
+            this.Tooltip.add(text, tableTarget, targetIndicesOrFunction, ...
                 SelectionMode=nvp.SelectionMode, ...
                 ContextShape=nvp.ContextShape, ...
                 Style=nvp.Style);
-            if didEnableHover
-                bridgeController = this.bridgeControllerIfPresent();
-                if ~isempty(bridgeController)
-                    bridgeController.enableHover();
-                end
-            end
         end
 
-        function removeTooltip(this, orderNum)
+        function removeLegacyTooltip(this, orderNum)
             arguments
-                this
+                this (1,1) gwidgets.UITable
                 orderNum (1,:) double = []
             end
 
             controller = this.tooltipControllerIfPresent();
-            didDisableHover = false;
             if ~isempty(controller)
-                didDisableHover = controller.removeTooltip(orderNum);
+                controller.remove(orderNum);
             end
-            if didDisableHover
-                bridgeController = this.bridgeControllerIfPresent();
-                if ~isempty(bridgeController)
-                    bridgeController.disableHover();
-                end
-            end
-        end
-    end
-
-    methods % Get/Set Tooltip
-        function val = get.Tooltip(this)
-            val = this.TableTooltipText_;
-        end
-
-        function set.Tooltip(this, val)
-            this.TableTooltipText_ = val;
-            controller = this.tooltipControllerIfPresent();
-            if ~isempty(controller)
-                controller.setTooltipText(val);
-            end
-            if ~isempty(this.DisplayTable)
-                this.DisplayTable.Tooltip = val;
-            end
-        end
-
-        function val = get.DefaultTooltipStyle(this)
-            val = this.DefaultTooltipStyle_;
-        end
-
-        function set.DefaultTooltipStyle(this, val)
-            this.DefaultTooltipStyle_ = val;
-            controller = this.tooltipControllerIfPresent();
-            if ~isempty(controller)
-                controller.setDefaultTooltipStyle(val);
-            end
-        end
-
-        function val = get.Tooltips(this)
-            controller = this.tooltipControllerIfPresent();
-            if isempty(controller)
-                val = gwidgets.internal.table.TableTooltip.empty(1,0);
-            else
-                val = controller.Tooltips;
-            end
-        end
-    end
-
-    methods (Access = ?gwidgets.internal.table.TooltipController)
-        function tf = bridgeDiagnosticsEnabled(this)
-            controller = this.bridgeControllerIfPresent();
-            tf = ~isempty(controller) && controller.DiagEnabled;
         end
     end
 
@@ -648,7 +709,7 @@ classdef UITable < gwidgets.internal.Reparentable
     end
 
     %% Sorting
-    properties (GetAccess = ?matlab.unittest.TestCase, SetAccess = private)
+    properties (GetAccess = {?matlab.unittest.TestCase, ?gwidgets.Table}, SetAccess = private)
         SortedVisibleData (:,:) cell % Headers and data after sorting
         SortedGroupHeaderRowIdx (1,:) double % (1,nGroups) Indices of group header rows after sorting
 
@@ -731,7 +792,7 @@ classdef UITable < gwidgets.internal.Reparentable
     end
 
     %% Graphics components
-    properties (GetAccess = ?matlab.unittest.TestCase, ...
+    properties (GetAccess = {?matlab.unittest.TestCase, ?gwidgets.Table}, ...
             SetAccess = private)
         Grid (1,:) matlab.ui.container.GridLayout {mustBeScalarOrEmpty}
         FilterController (1,:) gwidgets.internal.FilterController {mustBeScalarOrEmpty}
@@ -791,7 +852,7 @@ classdef UITable < gwidgets.internal.Reparentable
 
             % Apply any tooltip state that was configured before setup ran.
             % The bridge will enable hover reports once it signals BridgeReady,
-            this.DisplayTable.Tooltip = this.TableTooltipText_;
+            this.DisplayTable.Tooltip = this.TooltipText_;
         end
 
         function updateDisplayData(this)
@@ -836,7 +897,7 @@ classdef UITable < gwidgets.internal.Reparentable
     end
 
     % Test hooks — accessible to matlab.unittest.TestCase but not public API
-    methods (Access = ?matlab.unittest.TestCase)
+    methods (Access = {?matlab.unittest.TestCase, ?gwidgets.Table})
 
         function simulateBridgeDrag(this, pixelWidths)
             % Simulate a ColumnWidthChanged notification from the bridge
@@ -851,7 +912,7 @@ classdef UITable < gwidgets.internal.Reparentable
             % requiring a live DOM/figure. Returns the resolved tooltip
             % text (and resolved TooltipStyle) that would be displayed.
             controller = this.tooltipController();
-            [text, style] = controller.resolveTextAndStyle(this, displayRow, displayColumn);
+            [text, style] = controller.resolveTextAndStyle(displayRow, displayColumn);
             this.applyTooltipPayload(displayRow, displayColumn);
         end
 
@@ -859,7 +920,7 @@ classdef UITable < gwidgets.internal.Reparentable
             % Resolve a hovered cell to the same block payload that would
             % be sent to the HTML bridge.
             controller = this.tooltipController();
-            blocks = controller.resolveBlocks(this, displayRow, displayColumn);
+            blocks = controller.resolveBlocks(displayRow, displayColumn);
         end
 
         function tf = hasTooltipController(this)
@@ -884,7 +945,7 @@ classdef UITable < gwidgets.internal.Reparentable
     methods (Access = protected)
 
         function clearSelection(this)
-            this.SelectionControl.clear();
+            this.Selection.clear();
         end
 
         function dataIdxs = displaySelectionToDataSelection(this, visibleIdxs, type)
@@ -893,14 +954,14 @@ classdef UITable < gwidgets.internal.Reparentable
             arguments
                 this
                 visibleIdxs
-                type (1,1) string {mustBeMember(type, ["cell", "row", "column"])} = this.SelectionControl.Type
+                type (1,1) string {mustBeMember(type, ["cell", "row", "column"])} = this.Selection.Type
             end
             if isempty(visibleIdxs)
                 dataIdxs = visibleIdxs;
                 return
             end
 
-            dataIdxs = this.SelectionControl.displayToData(visibleIdxs, type);
+            dataIdxs = this.Selection.displayToData(visibleIdxs, type);
         end
 
         function visibleIdxs = dataSelectionToDisplaySelection(this, dataIdxs, type)
@@ -909,7 +970,7 @@ classdef UITable < gwidgets.internal.Reparentable
             arguments
                 this
                 dataIdxs
-                type (1,1) string {mustBeMember(type, ["cell", "row", "column", "table"])} = this.SelectionControl.Type
+                type (1,1) string {mustBeMember(type, ["cell", "row", "column", "table"])} = this.Selection.Type
             end
 
             if isempty(dataIdxs)
@@ -917,7 +978,7 @@ classdef UITable < gwidgets.internal.Reparentable
                 return
             end
 
-            visibleIdxs = this.SelectionControl.dataToDisplay(dataIdxs, type);
+            visibleIdxs = this.Selection.dataToDisplay(dataIdxs, type);
         end
 
     end
@@ -1234,8 +1295,9 @@ classdef UITable < gwidgets.internal.Reparentable
         function controller = tooltipController(this)
             if isempty(this.TooltipController_) || ~isvalid(this.TooltipController_)
                 this.TooltipController_ = gwidgets.internal.table.TooltipController( ...
-                    TooltipText=this.TableTooltipText_, ...
-                    DefaultTooltipStyle=this.DefaultTooltipStyle_);
+                    this, ...
+                    Text=this.TooltipText_, ...
+                    DefaultStyle=this.DefaultTooltipStyle_);
             end
             controller = this.TooltipController_;
         end
@@ -1248,14 +1310,29 @@ classdef UITable < gwidgets.internal.Reparentable
             end
         end
 
+        function controller = callbackController(this)
+            if isempty(this.CallbackApi_) || ~isvalid(this.CallbackApi_)
+                this.CallbackApi_ = gwidgets.internal.table.CallbackController(this);
+            end
+            controller = this.CallbackApi_;
+        end
+
+        function controller = callbackControllerIfPresent(this)
+            controller = this.CallbackApi_;
+            if ~isempty(controller) && ~isvalid(controller)
+                this.CallbackApi_ = gwidgets.internal.table.CallbackController.empty(1,0);
+                controller = this.CallbackApi_;
+            end
+        end
+
         function onSelection_(this, displayIdx, selectionType)
             arguments
                 this (1,1)
                 displayIdx (:,2) % onSelection always sends row/col
-                selectionType (1,1) string = this.SelectionControl.Type
+                selectionType (1,1) string = this.Selection.Type
             end
 
-            [displayIdx, shouldContinue] = this.SelectionControl.onDisplaySelection(displayIdx, selectionType);
+            [displayIdx, shouldContinue] = this.Selection.onDisplaySelection(displayIdx, selectionType);
             if ~shouldContinue
                 return
             end
@@ -1309,7 +1386,7 @@ classdef UITable < gwidgets.internal.Reparentable
 
     end
 
-    methods (Access = protected)
+    methods (Access = {?gwidgets.UITable, ?gwidgets.Table})
         function setConstructionRefreshSuppressed(this, state)
             this.SuppressForceRefresh_ = state;
         end
@@ -1328,6 +1405,16 @@ classdef UITable < gwidgets.internal.Reparentable
 
         function val = getBridgeDiagEnabled(this)
             val = this.bridgeController().DiagEnabled;
+        end
+
+        function runConstructionUpdate(this)
+            this.doUpdateSequence();
+        end
+
+        function refreshAfterConstruction(this)
+            if ~isempty(this.Parent)
+                this.forceRefresh();
+            end
         end
     end
 
@@ -1364,11 +1451,12 @@ classdef UITable < gwidgets.internal.Reparentable
             end
 
             % Forward to user specified cell clicked function
-            if ~isempty(this.CellClickedCallback)
+            callbacks = this.callbackControllerIfPresent();
+            if ~isempty(callbacks) && ~isempty(callbacks.CellClicked)
                 dataIdx = this.displaySelectionToDataSelection(displayIdx);
                 e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
                 s = this;
-                this.CellClickedCallback(s, e);
+                callbacks.CellClicked(s, e);
             end
 
         end
@@ -1387,11 +1475,12 @@ classdef UITable < gwidgets.internal.Reparentable
             end
 
             % Forward to user specified cell clicked function
-            if ~isempty(this.CellDoubleClickCallback)
+            callbacks = this.callbackControllerIfPresent();
+            if ~isempty(callbacks) && ~isempty(callbacks.CellDoubleClick)
                 dataIdx = this.displaySelectionToDataSelection(displayIdx);
                 e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
                 s = this;
-                this.CellDoubleClickCallback(s, e);
+                callbacks.CellDoubleClick(s, e);
             end
 
         end
@@ -1402,11 +1491,12 @@ classdef UITable < gwidgets.internal.Reparentable
             this.onSelection_(displayIdx, s.SelectionType);
 
             % Forward to custom selection callback
-            if ~isempty(this.CellSelectionCallback)
+            callbacks = this.callbackControllerIfPresent();
+            if ~isempty(callbacks) && ~isempty(callbacks.CellSelection)
                 dataIdx = this.displaySelectionToDataSelection(displayIdx, "cell"); % Cell interaction always expectes two columns
                 e = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
                 s = this;
-                this.CellSelectionCallback(s, e);
+                callbacks.CellSelection(s, e);
             end
 
         end
@@ -1418,11 +1508,12 @@ classdef UITable < gwidgets.internal.Reparentable
             this.onCellEdit_(displayIdx, e.NewData);
 
             % Forward to custom cell edit callback
-            if ~isempty(this.CellEditCallback)
+            callbacks = this.callbackControllerIfPresent();
+            if ~isempty(callbacks) && ~isempty(callbacks.CellEdit)
                 dataIdx = this.displaySelectionToDataSelection(displayIdx, "cell");
                 editData = gwidgets.internal.table.CellEditData(e, dataIdx);
                 s = this;
-                this.CellEditCallback(s, editData);
+                callbacks.CellEdit(s, editData);
             end
 
         end
@@ -1450,9 +1541,10 @@ classdef UITable < gwidgets.internal.Reparentable
                 this.Sort.By = e.InteractionVariable;
             end
 
-            % Forward to custom cell edit callback
-            if ~isempty(this.DisplayDataChangedCallback)
-                this.DisplayDataChangedCallback(s, e);
+            % Forward to custom display-data callback
+            callbacks = this.callbackControllerIfPresent();
+            if ~isempty(callbacks) && ~isempty(callbacks.DisplayDataChanged)
+                callbacks.DisplayDataChanged(s, e);
             end
 
         end
@@ -1464,11 +1556,11 @@ classdef UITable < gwidgets.internal.Reparentable
 
         function onGroupByRequest(this, ~, e)
 
-            if ~isempty(this.SelectionControl.DisplayValue)
-                if this.SelectionControl.Type == "cell"
-                    columnIdx = unique(this.SelectionControl.DisplayValue(:, 2));
-                elseif this.SelectionControl.Type == "column"
-                    columnIdx = this.SelectionControl.DisplayValue;
+            if ~isempty(this.Selection.DisplayValue)
+                if this.Selection.Type == "cell"
+                    columnIdx = unique(this.Selection.DisplayValue(:, 2));
+                elseif this.Selection.Type == "column"
+                    columnIdx = this.Selection.DisplayValue;
                 else
                     columnIdx = e.InteractionInformation.DisplayColumn;
                 end
@@ -1500,17 +1592,17 @@ classdef UITable < gwidgets.internal.Reparentable
     methods (Access = private)
 
         function onCellSelectionRequest(this, ~, ~)
-            this.SelectionControl.Type = "cell";
+            this.Selection.Type = "cell";
             this.clearSelection();
         end
 
         function onRowSelectionRequest(this, ~, ~)
-            this.SelectionControl.Type = "row";
+            this.Selection.Type = "row";
             this.clearSelection();
         end
 
         function onColumnSelectionRequest(this, ~, ~)
-            this.SelectionControl.Type = "column";
+            this.Selection.Type = "column";
             this.clearSelection();
         end
 
@@ -1538,10 +1630,10 @@ classdef UITable < gwidgets.internal.Reparentable
                 vars = this.Group.By;
             else
 
-                if this.SelectionControl.Type == "cell"
-                    colIdx = unique(this.SelectionControl.DisplayValue(:,2));
-                elseif this.SelectionControl.Type == "column"
-                    colIdx = unique(this.SelectionControl.DisplayValue);
+                if this.Selection.Type == "cell"
+                    colIdx = unique(this.Selection.DisplayValue(:,2));
+                elseif this.Selection.Type == "column"
+                    colIdx = unique(this.Selection.DisplayValue);
                 else
                     % Allow sorting by at least one column when using row
                     % selection

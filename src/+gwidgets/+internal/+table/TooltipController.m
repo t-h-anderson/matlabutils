@@ -1,27 +1,38 @@
-classdef TooltipController < handle
+classdef TooltipController < gwidgets.internal.table.TableController
     % TooltipController owns tooltip registration and hover resolution.
+
+    properties (Dependent)
+        Text (1,1) string
+        DefaultStyle (1,1) gwidgets.table.TooltipStyle
+        TooltipText (1,1) string
+        DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle
+    end
 
     properties (SetAccess = private)
         Tooltips (1,:) gwidgets.internal.table.TableTooltip = gwidgets.internal.table.TableTooltip.empty(1,0)
-        TooltipText (1,1) string = ""
-        DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
+    end
+
+    properties (Access = private)
+        Text_ (1,1) string = ""
+        DefaultStyle_ (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
     end
 
     methods
-        function this = TooltipController(nvp)
+        function this = TooltipController(owner, nvp)
             arguments
-                nvp.TooltipText (1,1) string = ""
-                nvp.DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
+                owner (1,:) gwidgets.UITable = gwidgets.UITable.empty(1,0)
+                nvp.Text (1,1) string = ""
+                nvp.DefaultStyle (1,1) gwidgets.table.TooltipStyle = gwidgets.table.TooltipStyle.default()
             end
 
-            this.TooltipText = nvp.TooltipText;
-            this.DefaultTooltipStyle = nvp.DefaultTooltipStyle;
+            this@gwidgets.internal.table.TableController(owner);
+            this.Text_ = nvp.Text;
+            this.DefaultStyle_ = nvp.DefaultStyle;
         end
 
-        function didEnableHover = addTooltip(this, owner, text, tableTarget, targetIndicesOrFunction, nvp)
+        function didEnableHover = add(this, text, tableTarget, targetIndicesOrFunction, nvp)
             arguments
                 this (1,1) gwidgets.internal.table.TooltipController
-                owner (1,1) gwidgets.UITable
                 text
                 tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
                 targetIndicesOrFunction (:,:) = []
@@ -31,6 +42,7 @@ classdef TooltipController < handle
                 nvp.Style = []
             end
 
+            owner = this.requireOwner();
             newTooltip = this.createTooltip(text, tableTarget, targetIndicesOrFunction, ...
                 SelectionMode=nvp.SelectionMode, ...
                 ContextShape=nvp.ContextShape, ...
@@ -48,6 +60,46 @@ classdef TooltipController < handle
             wasEmpty = isempty(this.Tooltips);
             this.Tooltips(end+1) = newTooltip;
             didEnableHover = wasEmpty;
+            if didEnableHover
+                owner.enableTooltipHover();
+            end
+        end
+
+        function didDisableHover = remove(this, orderNum)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController
+                orderNum (1,:) double = []
+            end
+
+            owner = this.owner();
+            wasNotEmpty = ~isempty(this.Tooltips);
+            if isempty(orderNum)
+                this.Tooltips(:) = [];
+            else
+                this.Tooltips(orderNum) = [];
+            end
+            didDisableHover = wasNotEmpty && isempty(this.Tooltips);
+            if didDisableHover && ~isempty(owner)
+                owner.disableTooltipHover();
+            end
+        end
+
+        function didEnableHover = addTooltip(this, text, tableTarget, targetIndicesOrFunction, nvp)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController
+                text
+                tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
+                targetIndicesOrFunction (:,:) = []
+                nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
+                nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = ...
+                    gwidgets.internal.table.TableTooltip.defaultContextShape(tableTarget)
+                nvp.Style = []
+            end
+
+            didEnableHover = this.add(text, tableTarget, targetIndicesOrFunction, ...
+                SelectionMode=nvp.SelectionMode, ...
+                ContextShape=nvp.ContextShape, ...
+                Style=nvp.Style);
         end
 
         function didDisableHover = removeTooltip(this, orderNum)
@@ -56,13 +108,7 @@ classdef TooltipController < handle
                 orderNum (1,:) double = []
             end
 
-            wasNotEmpty = ~isempty(this.Tooltips);
-            if isempty(orderNum)
-                this.Tooltips(:) = [];
-            else
-                this.Tooltips(orderNum) = [];
-            end
-            didDisableHover = wasNotEmpty && isempty(this.Tooltips);
+            didDisableHover = this.remove(orderNum);
         end
 
         function setTooltipText(this, text)
@@ -70,7 +116,8 @@ classdef TooltipController < handle
                 this (1,1) gwidgets.internal.table.TooltipController
                 text (1,1) string
             end
-            this.TooltipText = text;
+
+            this.Text = text;
         end
 
         function setDefaultTooltipStyle(this, style)
@@ -78,18 +125,18 @@ classdef TooltipController < handle
                 this (1,1) gwidgets.internal.table.TooltipController
                 style (1,1) gwidgets.table.TooltipStyle
             end
-            this.DefaultTooltipStyle = style;
+
+            this.DefaultStyle = style;
         end
 
-        function blocks = resolveBlocks(this, owner, displayRow, displayColumn)
+        function blocks = resolveBlocks(this, displayRow, displayColumn)
             arguments
                 this (1,1) gwidgets.internal.table.TooltipController
-                owner (1,1) gwidgets.UITable
                 displayRow (1,1) double
                 displayColumn (1,1) double
             end
 
-            groups = this.resolveGroups(owner, displayRow, displayColumn);
+            groups = this.resolveGroups(displayRow, displayColumn);
             blocks = cell(1, numel(groups));
             for k = 1:numel(groups)
                 group = groups(k);
@@ -105,23 +152,23 @@ classdef TooltipController < handle
             end
         end
 
-        function groups = resolveGroups(this, owner, displayRow, displayColumn)
+        function groups = resolveGroups(this, displayRow, displayColumn)
             arguments
                 this (1,1) gwidgets.internal.table.TooltipController
-                owner (1,1) gwidgets.UITable
                 displayRow (1,1) double
                 displayColumn (1,1) double
             end
 
+            owner = this.requireOwner();
             matches = this.collectMatches(owner, displayRow, displayColumn);
             if isempty(matches)
                 groups = struct("ContainerStyle", {}, "Lines", {});
-                if this.TooltipText == ""
+                if this.Text_ == ""
                     return
                 end
                 base = this.defaultStyle();
                 groups(1).ContainerStyle = base;
-                groups(1).Lines = struct("Text", this.TooltipText, "LineStyle", base);
+                groups(1).Lines = struct("Text", this.Text_, "LineStyle", base);
                 return
             end
 
@@ -158,15 +205,14 @@ classdef TooltipController < handle
             end
         end
 
-        function [text, style] = resolveTextAndStyle(this, owner, displayRow, displayColumn)
+        function [text, style] = resolveTextAndStyle(this, displayRow, displayColumn)
             arguments
                 this (1,1) gwidgets.internal.table.TooltipController
-                owner (1,1) gwidgets.UITable
                 displayRow (1,1) double
                 displayColumn (1,1) double
             end
 
-            groups = this.resolveGroups(owner, displayRow, displayColumn);
+            groups = this.resolveGroups(displayRow, displayColumn);
             if isempty(groups)
                 text = "";
                 style = this.defaultStyle();
@@ -185,9 +231,53 @@ classdef TooltipController < handle
             text = strjoin(allLines, newline);
             style = groups(1).Lines(1).LineStyle;
         end
+
+        function val = get.Text(this)
+            val = this.Text_;
+        end
+
+        function set.Text(this, val)
+            this.Text_ = val;
+            owner = this.owner();
+            if ~isempty(owner)
+                owner.applyTooltipText(val);
+            end
+        end
+
+        function val = get.DefaultStyle(this)
+            val = this.DefaultStyle_;
+        end
+
+        function set.DefaultStyle(this, val)
+            this.DefaultStyle_ = val;
+        end
+
+        function val = get.TooltipText(this)
+            val = this.Text;
+        end
+
+        function set.TooltipText(this, val)
+            this.Text = val;
+        end
+
+        function val = get.DefaultTooltipStyle(this)
+            val = this.DefaultStyle;
+        end
+
+        function set.DefaultTooltipStyle(this, val)
+            this.DefaultStyle = val;
+        end
     end
 
     methods (Access = private)
+        function owner = requireOwner(this)
+            owner = this.owner();
+            if isempty(owner)
+                error("GraphicsWidgets:Table:TooltipOwner", ...
+                    "Tooltip controller is no longer attached to a valid table.");
+            end
+        end
+
         function newTooltip = createTooltip(this, text, tableTarget, targetIndicesOrFunction, nvp)
             arguments
                 this (1,1) gwidgets.internal.table.TooltipController %#ok<INUSA>
@@ -228,7 +318,7 @@ classdef TooltipController < handle
 
         function style = defaultStyle(this)
             style = gwidgets.table.TooltipStyle.default();
-            style = style.merge(this.DefaultTooltipStyle);
+            style = style.merge(this.DefaultStyle_);
         end
 
         function matches = collectMatches(this, owner, displayRow, displayColumn)
@@ -403,4 +493,3 @@ classdef TooltipController < handle
     end
 
 end
-

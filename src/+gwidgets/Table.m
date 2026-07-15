@@ -1,5 +1,55 @@
-classdef Table < gwidgets.UITable
+classdef Table < matlab.mixin.SetGet
     %TABLE Legacy-compatible wrapper around gwidgets.UITable.
+
+    properties (Access = private)
+        UITable_ (1,:) gwidgets.UITable {mustBeScalarOrEmpty}
+    end
+
+    properties (Dependent, SetAccess = private)
+        Column (1,1) gwidgets.internal.table.ColumnController
+        Group (1,1) gwidgets.internal.table.GroupController
+        Sort (1,1) gwidgets.internal.table.SortController
+        Style (1,1) gwidgets.internal.table.StyleController
+        Callback (1,1) gwidgets.internal.table.CallbackController
+        SelectionControl (1,1) gwidgets.internal.table.SelectionController
+    end
+
+    properties (Dependent)
+        Data (:,:) table
+        Filter
+        ShowRowFilter (1,1) logical
+        Tooltip (1,1) string
+        DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle
+        Parent
+        Position
+        Units
+        Visible
+        CellSelectionCallback function_handle {mustBeScalarOrEmpty}
+        CellClickedCallback function_handle {mustBeScalarOrEmpty}
+        CellDoubleClickCallback function_handle {mustBeScalarOrEmpty}
+        CellEditCallback function_handle {mustBeScalarOrEmpty}
+        DisplayDataChangedCallback function_handle {mustBeScalarOrEmpty}
+    end
+
+    properties (Dependent, SetAccess = private)
+        DisplayData (1,1) table
+        Layout
+        RowFilterIndices (1,:) logical
+        VisibleData (:,:) table
+    end
+
+    properties (Dependent, Hidden, SetAccess = private)
+        DisplayTable (1,:) matlab.ui.control.Table
+        FilterController (1,:) gwidgets.internal.FilterController
+        Grid (1,:) matlab.ui.container.GridLayout
+        GroupLabel (1,:) matlab.ui.control.Label
+        HelpPanel (1,:) matlab.ui.container.Panel
+        ContextMenu
+        SortedVisibleData (:,:) cell
+        SortedGroupHeaderRowIdx (1,:) double
+        SortedVisibleToDataMap (1,:) double
+        SortedDataToVisibleMap (1,:) double
+    end
 
     properties (Dependent, Hidden)
         ColumnEditable (1,:) logical
@@ -59,6 +109,14 @@ classdef Table < gwidgets.UITable
         SortDirection (1,1) string
     end
 
+    properties (Dependent, Hidden, SetAccess = private)
+        Tooltips (1,:) gwidgets.internal.table.TableTooltip
+    end
+
+    properties (Dependent, Hidden, SetAccess = private)
+        UITable (1,:) gwidgets.UITable
+    end
+
     methods
         function this = Table(namedArgs)
             arguments (Input)
@@ -67,9 +125,9 @@ classdef Table < gwidgets.UITable
                 namedArgs.GroupHeaderStyle = gwidgets.Table.defaultGroupHeaderStyle
             end
 
-            this@gwidgets.UITable();
-            this.setConstructionRefreshSuppressed(true);
-            cleanupObj = onCleanup(@()this.setConstructionRefreshSuppressed(false));
+            this.UITable_ = gwidgets.UITable();
+            this.UITable_.setConstructionRefreshSuppressed(true);
+            cleanupObj = onCleanup(@()this.UITable_.setConstructionRefreshSuppressed(false));
 
             if isfield(namedArgs, "Parent")
                 parent = namedArgs.Parent;
@@ -87,11 +145,231 @@ classdef Table < gwidgets.UITable
                 set(this, namedArgs);
             end
             this.Selection = [];
-            this.doUpdateSequence();
+            this.UITable_.runConstructionUpdate();
             delete(cleanupObj);
-            if ~isempty(this.Parent)
-                this.forceRefresh();
+            this.UITable_.refreshAfterConstruction();
+        end
+
+        function delete(this)
+            delete(this.UITable_);
+        end
+
+        function reset(this)
+            this.UITable_.reset();
+        end
+
+        function result = find(this, str, target)
+            arguments
+                this (1,1) gwidgets.Table
+                str (1,1) string
+                target (1,1) string {mustBeMember(target, ["table", "row", "column", "cell"])} = "table"
             end
+
+            result = this.UITable_.find(str, target);
+        end
+    end
+
+    methods
+        function val = get.UITable(this)
+            val = this.UITable_;
+        end
+
+        function val = get.Column(this)
+            val = this.UITable_.Column;
+        end
+
+        function val = get.Group(this)
+            val = this.UITable_.Group;
+        end
+
+        function val = get.Sort(this)
+            val = this.UITable_.Sort;
+        end
+
+        function val = get.Style(this)
+            val = this.UITable_.Style;
+        end
+
+        function val = get.Callback(this)
+            val = this.UITable_.Callback;
+        end
+
+        function val = get.SelectionControl(this)
+            val = this.UITable_.SelectionControl;
+        end
+
+        function val = get.Data(this)
+            val = this.UITable_.Data;
+        end
+
+        function set.Data(this, val)
+            this.UITable_.Data = val;
+        end
+
+        function val = get.DisplayData(this)
+            val = this.UITable_.DisplayData;
+        end
+
+        function val = get.Filter(this)
+            val = this.UITable_.Filter;
+        end
+
+        function set.Filter(this, val)
+            this.UITable_.Filter = val;
+        end
+
+        function val = get.ShowRowFilter(this)
+            val = this.UITable_.ShowRowFilter;
+        end
+
+        function set.ShowRowFilter(this, val)
+            this.UITable_.ShowRowFilter = val;
+        end
+
+        function val = get.Tooltip(this)
+            val = this.UITable_.legacyTooltipText();
+        end
+
+        function set.Tooltip(this, val)
+            this.UITable_.setLegacyTooltipText(val);
+        end
+
+        function val = get.DefaultTooltipStyle(this)
+            val = this.UITable_.legacyTooltipDefaultStyle();
+        end
+
+        function set.DefaultTooltipStyle(this, val)
+            this.UITable_.setLegacyTooltipDefaultStyle(val);
+        end
+
+        function val = get.Tooltips(this)
+            val = this.UITable_.legacyTooltips();
+        end
+
+        function val = get.Parent(this)
+            val = this.UITable_.Parent;
+        end
+
+        function set.Parent(this, val)
+            this.UITable_.Parent = val;
+        end
+
+        function val = get.Layout(this)
+            val = this.UITable_.Layout;
+        end
+
+        function val = get.Position(this)
+            val = this.UITable_.Position;
+        end
+
+        function set.Position(this, val)
+            this.UITable_.Position = val;
+        end
+
+        function val = get.Units(this)
+            val = this.UITable_.Units;
+        end
+
+        function set.Units(this, val)
+            this.UITable_.Units = val;
+        end
+
+        function val = get.Visible(this)
+            val = this.UITable_.Visible;
+        end
+
+        function set.Visible(this, val)
+            this.UITable_.Visible = val;
+        end
+
+        function val = get.CellSelectionCallback(this)
+            val = this.UITable_.CellSelectionCallback;
+        end
+
+        function set.CellSelectionCallback(this, val)
+            this.UITable_.CellSelectionCallback = val;
+        end
+
+        function val = get.CellClickedCallback(this)
+            val = this.UITable_.CellClickedCallback;
+        end
+
+        function set.CellClickedCallback(this, val)
+            this.UITable_.CellClickedCallback = val;
+        end
+
+        function val = get.CellDoubleClickCallback(this)
+            val = this.UITable_.CellDoubleClickCallback;
+        end
+
+        function set.CellDoubleClickCallback(this, val)
+            this.UITable_.CellDoubleClickCallback = val;
+        end
+
+        function val = get.CellEditCallback(this)
+            val = this.UITable_.CellEditCallback;
+        end
+
+        function set.CellEditCallback(this, val)
+            this.UITable_.CellEditCallback = val;
+        end
+
+        function val = get.DisplayDataChangedCallback(this)
+            val = this.UITable_.DisplayDataChangedCallback;
+        end
+
+        function set.DisplayDataChangedCallback(this, val)
+            this.UITable_.DisplayDataChangedCallback = val;
+        end
+
+        function val = get.RowFilterIndices(this)
+            val = this.UITable_.RowFilterIndices;
+        end
+
+        function val = get.VisibleData(this)
+            val = this.UITable_.VisibleData;
+        end
+    end
+
+    methods
+        function val = get.DisplayTable(this)
+            val = this.UITable_.DisplayTable;
+        end
+
+        function val = get.FilterController(this)
+            val = this.UITable_.FilterController;
+        end
+
+        function val = get.Grid(this)
+            val = this.UITable_.Grid;
+        end
+
+        function val = get.GroupLabel(this)
+            val = this.UITable_.GroupLabel;
+        end
+
+        function val = get.HelpPanel(this)
+            val = this.UITable_.HelpPanel;
+        end
+
+        function val = get.ContextMenu(this)
+            val = this.UITable_.ContextMenu;
+        end
+
+        function val = get.SortedVisibleData(this)
+            val = this.UITable_.SortedVisibleData;
+        end
+
+        function val = get.SortedGroupHeaderRowIdx(this)
+            val = this.UITable_.SortedGroupHeaderRowIdx;
+        end
+
+        function val = get.SortedVisibleToDataMap(this)
+            val = this.UITable_.SortedVisibleToDataMap;
+        end
+
+        function val = get.SortedDataToVisibleMap(this)
+            val = this.UITable_.SortedDataToVisibleMap;
         end
     end
 
@@ -261,6 +539,36 @@ classdef Table < gwidgets.UITable
         end
     end
 
+    methods
+        function addTooltip(this, text, tableTarget, targetIndicesOrFunction, nvp)
+            % addTooltip registers a hover-tooltip configuration. Mirrors addStyle.
+            arguments
+                this (1,1) gwidgets.Table
+                text
+                tableTarget (1,1) string {mustBeMember(tableTarget, ["table", "row", "column", "cell"])} = "table"
+                targetIndicesOrFunction (:,:) = []
+                nvp.SelectionMode (1,1) gwidgets.table.SelectionMode = gwidgets.table.SelectionMode.Data
+                nvp.ContextShape (1,1) string {mustBeMember(nvp.ContextShape, ["Values", "Table"])} = ...
+                    gwidgets.internal.table.TableTooltip.defaultContextShape(tableTarget)
+                nvp.Style = []
+            end
+
+            this.UITable_.addLegacyTooltip(text, tableTarget, targetIndicesOrFunction, ...
+                SelectionMode=nvp.SelectionMode, ...
+                ContextShape=nvp.ContextShape, ...
+                Style=nvp.Style);
+        end
+
+        function removeTooltip(this, orderNum)
+            arguments
+                this (1,1) gwidgets.Table
+                orderNum (1,:) double = []
+            end
+
+            this.UITable_.removeLegacyTooltip(orderNum);
+        end
+    end
+
     methods (Hidden)
         function addStyle(this, style, tableTarget, targetIndicesOrFunction, nvp)
             arguments
@@ -289,7 +597,7 @@ classdef Table < gwidgets.UITable
                 menuItems (1,:) matlab.ui.container.Menu
             end
 
-            this.legacyContextMenuController().addItem(menuItems);
+            this.UITable_.legacyContextMenuController().addItem(menuItems);
         end
 
         function openAllGroups(this)
@@ -319,52 +627,52 @@ classdef Table < gwidgets.UITable
         end
 
         function val = get.HasToggleFilter(this)
-            controller = this.legacyContextMenuControllerIfPresent();
+            controller = this.UITable_.legacyContextMenuControllerIfPresent();
             val = ~isempty(controller) && controller.HasToggleFilter;
         end
 
         function set.HasToggleFilter(this, val)
-            this.legacyContextMenuController().HasToggleFilter = val;
+            this.UITable_.legacyContextMenuController().HasToggleFilter = val;
         end
 
         function val = get.HasChangeGroupingVariable(this)
-            controller = this.legacyContextMenuControllerIfPresent();
+            controller = this.UITable_.legacyContextMenuControllerIfPresent();
             val = ~isempty(controller) && controller.HasChangeGroupingVariable;
         end
 
         function set.HasChangeGroupingVariable(this, val)
-            this.legacyContextMenuController().HasChangeGroupingVariable = val;
+            this.UITable_.legacyContextMenuController().HasChangeGroupingVariable = val;
         end
 
         function val = get.HasToggleShowEmptyGroups(this)
-            controller = this.legacyContextMenuControllerIfPresent();
+            controller = this.UITable_.legacyContextMenuControllerIfPresent();
             val = ~isempty(controller) && controller.HasToggleShowEmptyGroups;
         end
 
         function set.HasToggleShowEmptyGroups(this, val)
-            this.legacyContextMenuController().HasToggleShowEmptyGroups = val;
+            this.UITable_.legacyContextMenuController().HasToggleShowEmptyGroups = val;
         end
 
         function val = get.HasColumnSorting(this)
-            controller = this.legacyContextMenuControllerIfPresent();
+            controller = this.UITable_.legacyContextMenuControllerIfPresent();
             val = ~isempty(controller) && controller.HasColumnSorting;
         end
 
         function set.HasColumnSorting(this, val)
-            this.legacyContextMenuController().HasColumnSorting = val;
+            this.UITable_.legacyContextMenuController().HasColumnSorting = val;
         end
 
         function val = get.HasAutoResizeColumns(this)
-            controller = this.legacyContextMenuControllerIfPresent();
+            controller = this.UITable_.legacyContextMenuControllerIfPresent();
             val = ~isempty(controller) && controller.HasAutoResizeColumns;
         end
 
         function set.HasAutoResizeColumns(this, val)
-            this.legacyContextMenuController().HasAutoResizeColumns = val;
+            this.UITable_.legacyContextMenuController().HasAutoResizeColumns = val;
         end
 
         function val = get.SupportedSelectionTypes(this)
-            controller = this.legacyContextMenuControllerIfPresent();
+            controller = this.UITable_.legacyContextMenuControllerIfPresent();
             if isempty(controller)
                 val = "cell";
             else
@@ -378,11 +686,11 @@ classdef Table < gwidgets.UITable
                 val (1,:) string {mustBeMember(val, ["cell", "row", "column"]), mustBeNonempty} = "cell"
             end
 
-            this.legacyContextMenuController().SupportedSelectionTypes = val;
+            this.UITable_.legacyContextMenuController().SupportedSelectionTypes = val;
         end
 
         function val = get.CustomContextMenuItems(this)
-            controller = this.legacyContextMenuControllerIfPresent();
+            controller = this.UITable_.legacyContextMenuControllerIfPresent();
             if isempty(controller)
                 val = matlab.ui.container.Menu.empty(1,0);
             else
@@ -391,7 +699,7 @@ classdef Table < gwidgets.UITable
         end
 
         function set.CustomContextMenuItems(this, val)
-            this.legacyContextMenuController().CustomItems = val;
+            this.UITable_.legacyContextMenuController().CustomItems = val;
         end
     end
 
@@ -477,11 +785,41 @@ classdef Table < gwidgets.UITable
         end
 
         function val = get.BridgeDiagEnabled(this)
-            val = this.getBridgeDiagEnabled();
+            val = this.UITable_.getBridgeDiagEnabled();
         end
 
         function set.BridgeDiagEnabled(this, val)
-            this.setBridgeDiagEnabled(val);
+            this.UITable_.setBridgeDiagEnabled(val);
+        end
+    end
+
+    methods (Access = ?matlab.unittest.TestCase)
+        function simulateBridgeDrag(this, pixelWidths)
+            this.UITable_.simulateBridgeDrag(pixelWidths);
+        end
+
+        function [text, style] = simulateBridgeHover(this, displayRow, displayColumn)
+            [text, style] = this.UITable_.simulateBridgeHover(displayRow, displayColumn);
+        end
+
+        function blocks = simulateTooltipBlocks(this, displayRow, displayColumn)
+            blocks = this.UITable_.simulateTooltipBlocks(displayRow, displayColumn);
+        end
+
+        function tf = hasTooltipController(this)
+            tf = this.UITable_.hasTooltipController();
+        end
+
+        function tf = hasGroupingController(this)
+            tf = this.UITable_.hasGroupingController();
+        end
+
+        function tf = hasSortingController(this)
+            tf = this.UITable_.hasSortingController();
+        end
+
+        function changed = didBridgeWidthsChange(this, incomingPx)
+            changed = this.UITable_.didBridgeWidthsChange(incomingPx);
         end
     end
 
