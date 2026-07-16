@@ -33,7 +33,7 @@ end
 end
 
 function testTask(~)
-%TESTTASK Run unit tests with project source on the path.
+%TESTTASK Run tests with project source on the path.
 
 originalPath = path();
 cleanupObj = onCleanup(@() path(originalPath));
@@ -41,9 +41,14 @@ cleanupObj = onCleanup(@() path(originalPath));
 addpath(genpath("src"));
 addpath("tests");
 
-results = runtests("tests/+test/+unit", IncludeSubfolders=true);
+testSuites = ["tests/+test/+unit", "tests/+test/+integration", "tests/+test/+system"];
+suiteResults = cell(1, numel(testSuites));
+for iSuite = 1:numel(testSuites)
+    suiteResults{iSuite} = runtests(testSuites(iSuite), IncludeSubfolders=true);
+end
+results = [suiteResults{:}];
 if any([results.Failed]) || any([results.Incomplete])
-    error("MLUT:build:testFailure", "Unit test suite failed.");
+    error("MLUT:build:testFailure", "Test suite failed.");
 end
 
 end

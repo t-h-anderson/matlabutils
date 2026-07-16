@@ -488,8 +488,18 @@ classdef DragLinker < handle
             g = groot();
             cursorPos = g.PointerLocation;
             allFigs = findall(groot, "Type", "figure", "Visible", "on");
+            if isempty(allFigs) || isa(allFigs, "matlab.graphics.GraphicsPlaceholder")
+                figs = matlab.ui.Figure.empty(0,1);
+                return
+            end
 
             isNormal = strcmp({allFigs.WindowStyle}, "normal");
+            allFigs = allFigs(isNormal);
+            if isempty(allFigs)
+                figs = matlab.ui.Figure.empty(0,1);
+                return
+            end
+
             positions = vertcat(allFigs.Position);
 
             inX = cursorPos(1) >= positions(:,1) & ...
@@ -497,7 +507,7 @@ classdef DragLinker < handle
             inY = cursorPos(2) >= positions(:,2) & ...
                   cursorPos(2) <= positions(:,2) + positions(:,4);
 
-            figs = allFigs(isNormal(:) & inX & inY);
+            figs = allFigs(inX & inY);
         end
 
         function pos = cursorPositionForFigure(fig)

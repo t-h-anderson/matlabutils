@@ -30,7 +30,7 @@ run("doc/TableDemo.m")
 
 The project uses class-based `matlab.unittest` tests under `tests/+test`.
 
-Run the unit suite through the build tool:
+Run the full suite through the build tool:
 
 ```matlab
 buildtool test
@@ -41,7 +41,11 @@ Or run it directly:
 ```matlab
 addpath(genpath("src"))
 addpath("tests")
-results = runtests("tests/+test/+unit", IncludeSubfolders=true);
+results = [
+    runtests("tests/+test/+unit", IncludeSubfolders=true), ...
+    runtests("tests/+test/+integration", IncludeSubfolders=true), ...
+    runtests("tests/+test/+system", IncludeSubfolders=true)
+];
 ```
 
 ## Build Tasks
@@ -49,7 +53,7 @@ results = runtests("tests/+test/+unit", IncludeSubfolders=true);
 `buildfile.m` defines these tasks:
 
 - `check`: run MATLAB Code Analyzer over `src` and print reported issues.
-- `test`: run the unit test suite with `src` and `tests` on the path.
+- `test`: run the unit, integration, and system test suites with `src` and `tests` on the path.
 - `package`: package the toolbox from `MLUT.prj`.
 
 ## License

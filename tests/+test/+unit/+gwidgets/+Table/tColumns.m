@@ -72,6 +72,30 @@ classdef tColumns < test.WithExampleTables
             testCase.verifyError(fcn, "GraphicsWidgets:Table:InvalidColumnVisibility")
         end
 
+        function tInvalidVisibleColumnNames(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+
+            fcn = @() t.set("VisibleColumnNames", "NonExistentColumn");
+
+            testCase.verifyError(fcn, "GraphicsWidgets:Table:NonexistentColumnName")
+        end
+
+        function tInvalidVisibleDataColumnNames(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+
+            fcn = @() t.set("VisibleDataColumnNames", "NonExistentColumn");
+
+            testCase.verifyError(fcn, "GraphicsWidgets:Table:NonexistentColumnName")
+        end
+
+        function tInvalidHiddenDataColumnNames(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+
+            fcn = @() t.set("HiddenDataColumnNames", "NonExistentColumn");
+
+            testCase.verifyError(fcn, "GraphicsWidgets:Table:NonexistentColumnName")
+        end
+
         function tInvalidColumnVisible(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             fcn = @() t.set("ColumnVisible", [true false]);

@@ -237,7 +237,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
                 colIdxs(noDataIdx) = NaN;
             end
 
-            visibleCols = state.VisibleColumnNames;
+            visibleCols = state.VisibleDataColumnNames;
             visibleCols(ismember(visibleCols, state.GroupingVariable)) = [];
             dataCols = state.DataColumnNames;
             for iCol = 1:numel(colIdxs)

@@ -29,6 +29,16 @@ classdef tSelection < test.WithExampleTables
             testCase.verifyEqual(t.DisplaySelection, [2 2])
         end
 
+        function tDisplaySelectionMapsThroughAliases(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.ColumnNames = ["Number", "Category", "Boolean", "Text"];
+
+            t.DisplaySelection = [2 3];
+
+            testCase.verifyEqual(t.Selection, [2 3])
+            testCase.verifyEqual(t.DisplaySelection, [2 3])
+        end
+
         function tSelectSingleRow(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.SelectionType = "row";

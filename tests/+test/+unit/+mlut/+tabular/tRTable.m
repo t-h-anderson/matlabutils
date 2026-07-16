@@ -67,6 +67,37 @@ classdef tRTable < matlab.unittest.TestCase
             testCase.verifyEqual(r.DataTable.x(4), 99)
         end
 
+        function tVertcatPadsTypedMissingColumns(testCase)
+            left = table((1:2)', ...
+                datetime(2020, 1, (1:2)'), ...
+                categorical(["x"; "y"]), ...
+                [true; false], ...
+                'VariableNames', ["A", "D", "C", "L"]);
+            right = table((3:4)', 'VariableNames', "A");
+
+            result = [mlut.tabular.RTable(left); mlut.tabular.RTable(right)];
+            tbl = result.value();
+
+            testCase.verifyClass(tbl.D, "datetime")
+            testCase.verifyClass(tbl.C, "categorical")
+            testCase.verifyClass(tbl.L, "logical")
+            testCase.verifyTrue(all(isnat(tbl.D(3:4))))
+            testCase.verifyTrue(all(isundefined(tbl.C(3:4))))
+            testCase.verifyEqual(tbl.L(3:4), [false; false])
+        end
+
+        function tVertcatAlignsColumnOrderByName(testCase)
+            left = table((1:2)', 'VariableNames', "B");
+            right = table((3:4)', 'VariableNames', "A");
+
+            result = [mlut.tabular.RTable(left); mlut.tabular.RTable(right)];
+            tbl = result.value();
+
+            testCase.verifyEqual(string(tbl.Properties.VariableNames), ["B", "A"])
+            testCase.verifyEqual(tbl.B, [1; 2; NaN; NaN])
+            testCase.verifyEqual(tbl.A, [NaN; NaN; 3; 4])
+        end
+
     end
 
 end

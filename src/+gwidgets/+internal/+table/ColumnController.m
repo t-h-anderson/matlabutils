@@ -286,6 +286,7 @@ classdef ColumnController < gwidgets.internal.table.TableController
         end
 
         function set.VisibleNames(this, val)
+            this.validateColumnNames(val, this.Names, "GraphicsWidgets:Table:NonexistentColumnName");
             idx = ismember(this.Names, val);
             this.Visible = idx;
         end
@@ -295,6 +296,7 @@ classdef ColumnController < gwidgets.internal.table.TableController
         end
 
         function set.VisibleDataNames(this, val)
+            this.validateColumnNames(val, this.DataNames, "GraphicsWidgets:Table:NonexistentColumnName");
             idx = ismember(this.DataNames, val);
             this.Visible = idx;
         end
@@ -318,6 +320,7 @@ classdef ColumnController < gwidgets.internal.table.TableController
         end
 
         function set.HiddenDataNames(this, val)
+            this.validateColumnNames(val, this.DataNames, "GraphicsWidgets:Table:NonexistentColumnName");
             idx = ismember(this.DataNames, val);
             this.Visible = ~idx;
         end
@@ -494,6 +497,20 @@ classdef ColumnController < gwidgets.internal.table.TableController
         function val = resolvedTypes(this, mask)
             val = gwidgets.internal.table.ColumnWidthController.resolvedTypes( ...
                 mask, this.nData(), this.widthStores());
+        end
+
+        function validateColumnNames(this, values, validNames, errorId)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController %#ok<INUSA>
+                values (1,:) string
+                validNames (1,:) string
+                errorId (1,1) string
+            end
+
+            unknown = values(~ismember(values, validNames));
+            if ~isempty(unknown)
+                error(errorId, "Columns not found: " + strjoin(unknown, ", "));
+            end
         end
     end
 end

@@ -6,7 +6,7 @@ classdef FilterController < gwidgets.internal.Reparentable
         HelpParent (1,:) {mustBeScalarOrEmpty}
     end
 
-    properties (GetAccess = ?matlab.unittest.TestCase, ...
+    properties (GetAccess = {?matlab.unittest.TestCase, ?gwidgets.internal.table.FilterController}, ...
             SetAccess = private)
         Grid (1,:) matlab.ui.container.GridLayout {mustBeScalarOrEmpty}
         FilterLabel (1,:) matlab.ui.control.Label {mustBeScalarOrEmpty}

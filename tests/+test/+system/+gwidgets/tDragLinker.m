@@ -243,6 +243,22 @@ classdef tDragLinker < matlab.unittest.TestCase
             testCase.TestFigure.Visible = "off";
         end
 
+        function testFigureAtCursorWithoutVisibleFigures(testCase)
+            allFigs = findall(groot, "Type", "figure");
+            for iFig = 1:numel(allFigs)
+                if isvalid(allFigs(iFig))
+                    oldVisible = allFigs(iFig).Visible;
+                    testCase.addTeardown(@()set(allFigs(iFig), "Visible", oldVisible));
+                    allFigs(iFig).Visible = "off";
+                end
+            end
+
+            figs = gwidgets.DragLinker.figureAtCursor();
+
+            testCase.verifyEmpty(figs)
+            testCase.verifyClass(figs, "matlab.ui.Figure")
+        end
+
         function testCursorPositionForFigure(testCase)
             % Test cursor position calculation
             testCase.TestFigure.Visible = "on";
