@@ -91,20 +91,20 @@ classdef DataController < gwidgets.internal.table.TableController
             this.FilteringChangedListener = this.weaklistener(filterController, "FilterChanged");
         end
 
-        function updateFiltering(this, filterController, filterValue, columnController)
+        function updateFiltering(this)
             arguments
                 this (1,1) gwidgets.internal.table.DataController
-                filterController (1,1) gwidgets.internal.table.FilterController
-                filterValue
-                columnController (1,1) gwidgets.internal.table.ColumnController
             end
 
+            owner = this.owner();
+            filterController = owner.Filter;
+            columnController = owner.Column;
             data = this.Table;
 
             if ~isempty(columnController.Names)
                 data.Properties.VariableNames = columnController.Names;
             end
-            [data, idx] = filterController.applyFilter(data, filterValue);
+            [data, idx] = filterController.applyFilter(data, filterController.FilterValue);
 
             data.Properties.VariableNames = columnController.DataNames;
 
@@ -117,13 +117,13 @@ classdef DataController < gwidgets.internal.table.TableController
             this.RowFilterIndices = idx;
         end
 
-        function updateGrouping(this, groupingController, groupController)
+        function updateGrouping(this)
             arguments
                 this (1,1) gwidgets.internal.table.DataController
-                groupingController (1,:) gwidgets.internal.table.GroupingController {mustBeScalarOrEmpty}
-                groupController (1,1) gwidgets.internal.table.GroupController
             end
 
+            owner = this.owner();
+            groupController = owner.Group;
             if isempty(groupController.By)
                 this.GroupedVisible = table2cell(this.Filtered);
                 this.GroupedVariables = string(this.Filtered.Properties.VariableNames);
@@ -138,13 +138,7 @@ classdef DataController < gwidgets.internal.table.TableController
                 return
             end
 
-            if isempty(groupingController)
-                error("GraphicsWidgets:Table:GroupingController", ...
-                    "Grouping controller is required when grouping is active.");
-            end
-
-            result = groupingController.group(this.Table, this.Filtered, this.FilteredDataToVisibleMap, ...
-                this.FilteredVisibleToDataMap, groupController.By, groupController.RawOpen, groupController.Hidden);
+            result = groupController.groupData(this);
 
             this.GroupedVisible = result.GroupedVisibleData;
             this.GroupedVariables = result.GroupedDataVariables;
@@ -157,15 +151,14 @@ classdef DataController < gwidgets.internal.table.TableController
             this.GroupedVisibleToDataMap = result.GroupedVisibleToDataMap;
         end
 
-        function updateSorting(this, sortingController, sortController, groupController, columnController)
+        function updateSorting(this)
             arguments
                 this (1,1) gwidgets.internal.table.DataController
-                sortingController (1,:) gwidgets.internal.table.SortingController {mustBeScalarOrEmpty}
-                sortController (1,1) gwidgets.internal.table.SortController
-                groupController (1,1) gwidgets.internal.table.GroupController
-                columnController (1,1) gwidgets.internal.table.ColumnController
             end
 
+            owner = this.owner();
+            sortController = owner.Sort;
+            groupController = owner.Group;
             this.SortedVisible = this.GroupedVisible;
             this.SortedDataToVisibleMap = this.GroupedDataToVisibleMap;
             this.SortedVisibleToDataMap = this.GroupedVisibleToDataMap;
@@ -176,15 +169,7 @@ classdef DataController < gwidgets.internal.table.TableController
                 return
             end
 
-            if isempty(sortingController)
-                error("GraphicsWidgets:Table:SortingController", ...
-                    "Sorting controller is required when sorting is active.");
-            end
-
-            result = sortingController.sort(this.Filtered, this.Table, this.GroupedVisible, ...
-                this.GroupedVariables, groupController.By, groupController.Groups, this.GroupHeaderRowIdx, ...
-                this.GroupedVisibleToDataMap, this.GroupedDataToVisibleMap, columnController.DataSortable, ...
-                sortController.ByData, sortController.Direction);
+            result = sortController.sortData(this);
 
             this.SortedVisible = result.SortedVisibleData;
             this.SortedDataToVisibleMap = result.SortedDataToVisibleMap;
@@ -193,13 +178,13 @@ classdef DataController < gwidgets.internal.table.TableController
             this.SortedGroupValues = result.SortedGroupValues;
         end
 
-        function updateFolding(this, groupingController, groupController)
+        function updateFolding(this)
             arguments
                 this (1,1) gwidgets.internal.table.DataController
-                groupingController (1,:) gwidgets.internal.table.GroupingController {mustBeScalarOrEmpty}
-                groupController (1,1) gwidgets.internal.table.GroupController
             end
 
+            owner = this.owner();
+            groupController = owner.Group;
             if isempty(groupController.By)
                 groupController.clearDisplayGroups();
                 this.FoldedVisibleToDataMap = this.SortedVisibleToDataMap;
@@ -210,18 +195,9 @@ classdef DataController < gwidgets.internal.table.TableController
                 return
             end
 
-            if isempty(groupingController)
-                error("GraphicsWidgets:Table:GroupingController", ...
-                    "Grouping controller is required when folding grouped data.");
-            end
-
-            result = groupingController.fold(this.SortedVisible, this.SortedGroupHeaderRowIdx, ...
-                this.SortedGroupValues, this.SortedVisibleToDataMap, this.SortedDataToVisibleMap, ...
-                this.GroupFilteredCount, groupController.By, groupController.Groups, groupController.Open, ...
-                groupController.ShowEmpty, string(this.Table.Properties.VariableNames));
+            result = groupController.foldData(this);
 
             this.Visible = result.VisibleData;
-            owner = this.owner();
             owner.addControllerUpdateSuppression("HiddenGroups", Times=1);
             groupController.applyFoldingResult(result);
             this.VisibleGroupHeaderRowIdx = result.VisibleGroupHeaderRowIdx;

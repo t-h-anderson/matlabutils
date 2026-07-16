@@ -10,6 +10,7 @@ classdef SortController < gwidgets.internal.table.TableController
     properties (Access = private)
         ByColumnIdxs_ (1,:) double = double.empty(1,0)
         Direction_ (1,1) string {mustBeMember(Direction_, ["Ascend", "Descend", "None"])} = "None"
+        SortingEngine (1,:) gwidgets.internal.table.SortingController {mustBeScalarOrEmpty}
     end
 
     methods
@@ -19,6 +20,11 @@ classdef SortController < gwidgets.internal.table.TableController
             end
 
             this@gwidgets.internal.table.TableController(owner);
+            this.SortingEngine = gwidgets.internal.table.SortingController();
+        end
+
+        function delete(this)
+            delete(this.SortingEngine);
         end
 
         function val = get.By(this)
@@ -121,6 +127,28 @@ classdef SortController < gwidgets.internal.table.TableController
             end
 
             this.By = vars;
+        end
+
+        function result = sortData(this, dataController)
+            arguments
+                this (1,1) gwidgets.internal.table.SortController
+                dataController (1,1) gwidgets.internal.table.DataController
+            end
+
+            owner = this.owner();
+            result = this.SortingEngine.sort( ...
+                dataController.Filtered, ...
+                dataController.Table, ...
+                dataController.GroupedVisible, ...
+                dataController.GroupedVariables, ...
+                owner.Group.By, ...
+                owner.Group.Groups, ...
+                dataController.GroupHeaderRowIdx, ...
+                dataController.GroupedVisibleToDataMap, ...
+                dataController.GroupedDataToVisibleMap, ...
+                owner.Column.DataSortable, ...
+                this.ByData, ...
+                this.Direction);
         end
     end
 

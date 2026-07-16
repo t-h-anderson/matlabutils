@@ -3,8 +3,6 @@ classdef UpdateController < gwidgets.internal.table.TableController
 
     properties (Access = private)
         UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager()
-        GroupingController (1,:) gwidgets.internal.table.GroupingController {mustBeScalarOrEmpty}
-        SortingController (1,:) gwidgets.internal.table.SortingController {mustBeScalarOrEmpty}
     end
 
     methods
@@ -15,13 +13,6 @@ classdef UpdateController < gwidgets.internal.table.TableController
 
             this@gwidgets.internal.table.TableController(owner);
             this.UpdateManager = gwidgets.internal.UpdateManager();
-            this.GroupingController = gwidgets.internal.table.GroupingController();
-            this.SortingController = gwidgets.internal.table.SortingController();
-        end
-
-        function delete(this)
-            delete(this.GroupingController);
-            delete(this.SortingController);
         end
 
         function addSuppression(this, propertyName, nvp)
@@ -61,25 +52,27 @@ classdef UpdateController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
+            % Keep this controller as the phase sequencer. Phase-specific
+            % implementation should move behind the owning controllers.
             updating = false;
             if nvp.StartFrom == "Filtering" || updating
-                owner.Data.updateFiltering(owner.Filter, owner.Filter.FilterValue, owner.Column);
+                owner.Data.updateFiltering();
                 updating = true;
             end
 
             if nvp.StartFrom == "Grouping" || updating
-                owner.Data.updateGrouping(this.GroupingController, owner.Group);
+                owner.Data.updateGrouping();
                 updating = true;
             end
 
             if nvp.StartFrom == "Sorting" || updating
-                owner.Data.updateSorting(this.SortingController, owner.Sort, owner.Group, owner.Column);
+                owner.Data.updateSorting();
                 updating = true;
             end
 
             if nvp.StartFrom == "Folding" || updating
-                owner.Data.updateFolding(this.GroupingController, owner.Group);
-                owner.Group.updateLabel(owner.Graphics.GroupLabel, owner.Graphics.Grid, owner.Column, owner.Data);
+                owner.Data.updateFolding();
+                owner.Group.updateLabel();
                 updating = true;
             end
 

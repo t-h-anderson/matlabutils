@@ -26,6 +26,8 @@ classdef TableController < gwidgets.internal.WithWeakListeners
             end
 
             this.OwnerRef = matlab.lang.WeakReference(owner);
+            % Registration is immediate; owner initialization runs only after
+            % all concrete controller constructors have finished.
             owner.registerController(this);
         end
 

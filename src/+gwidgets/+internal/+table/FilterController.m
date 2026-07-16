@@ -22,6 +22,7 @@ classdef FilterController < gwidgets.internal.table.TableController
 
     methods
         function this = FilterController(owner, component)
+            %FILTERCONTROLLER Adapt a reusable filter component to UITable events.
             arguments
                 owner (1,:) gwidgets.UITable = gwidgets.UITable.empty(1,0)
                 component (1,:) gwidgets.internal.FilterController = gwidgets.internal.FilterController.empty(1,0)

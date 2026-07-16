@@ -50,6 +50,8 @@ classdef GraphicsController < gwidgets.internal.table.TableController
             this.HelpPanel.Layout.Row = [1 3];
 
             helpParent = uigridlayout(this.HelpPanel, [1,1], Padding=0);
+            % The reusable filter component owns its internal graphics; this
+            % controller only places it inside the table layout.
             this.FilterComponent = gwidgets.internal.FilterController( ...
                 Parent=this.Grid, ...
                 HelpParent=helpParent);

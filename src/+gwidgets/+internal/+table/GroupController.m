@@ -22,6 +22,7 @@ classdef GroupController < gwidgets.internal.table.TableController
         Open_ (1,:) string = string.empty(1,0)
         Hidden_ (1,:) string = string.empty(1,0)
         ShowEmpty_ (1,1) logical = false
+        GroupingEngine (1,:) gwidgets.internal.table.GroupingController {mustBeScalarOrEmpty}
     end
 
     methods
@@ -31,6 +32,11 @@ classdef GroupController < gwidgets.internal.table.TableController
             end
 
             this@gwidgets.internal.table.TableController(owner);
+            this.GroupingEngine = gwidgets.internal.table.GroupingController();
+        end
+
+        function delete(this)
+            delete(this.GroupingEngine);
         end
 
         function openAll(this)
@@ -112,34 +118,68 @@ classdef GroupController < gwidgets.internal.table.TableController
             end
         end
 
-        function updateLabel(this, label, grid, columnController, dataController)
+        function updateLabel(this)
             arguments
                 this (1,1) gwidgets.internal.table.GroupController
-                label (1,1) matlab.ui.control.Label
-                grid (1,1) matlab.ui.container.GridLayout
-                columnController (1,1) gwidgets.internal.table.ColumnController
-                dataController (1,1) gwidgets.internal.table.DataController
             end
 
+            owner = this.owner();
             nGroups = numel(this.Groups);
-            nGroupsVisible = numel(dataController.VisibleGroupHeaderRowIdx);
+            nGroupsVisible = numel(owner.Data.VisibleGroupHeaderRowIdx);
 
-            groupingVariableName = strjoin(columnController.dataToAliases(this.By), "|");
+            groupingVariableName = strjoin(owner.Column.dataToAliases(this.By), "|");
             if isempty(groupingVariableName)
                 groupingVariableName = "";
             end
 
             if nGroups == nGroupsVisible
-                label.Text = "Group: " + groupingVariableName + " (" + nGroups + " groups)";
+                owner.Graphics.GroupLabel.Text = "Group: " + groupingVariableName + " (" + nGroups + " groups)";
             else
-                label.Text = "Group: " + groupingVariableName + " (" + nGroupsVisible + "/" + nGroups + " groups visible)";
+                owner.Graphics.GroupLabel.Text = "Group: " + groupingVariableName + " (" ...
+                    + nGroupsVisible + "/" + nGroups + " groups visible)";
             end
 
             if groupingVariableName == ""
-                grid.RowHeight{2} = 0;
+                owner.Graphics.Grid.RowHeight{2} = 0;
             else
-                grid.RowHeight{2} = "fit";
+                owner.Graphics.Grid.RowHeight{2} = "fit";
             end
+        end
+
+        function result = groupData(this, dataController)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                dataController (1,1) gwidgets.internal.table.DataController
+            end
+
+            result = this.GroupingEngine.group( ...
+                dataController.Table, ...
+                dataController.Filtered, ...
+                dataController.FilteredDataToVisibleMap, ...
+                dataController.FilteredVisibleToDataMap, ...
+                this.By, ...
+                this.RawOpen, ...
+                this.Hidden);
+        end
+
+        function result = foldData(this, dataController)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                dataController (1,1) gwidgets.internal.table.DataController
+            end
+
+            result = this.GroupingEngine.fold( ...
+                dataController.SortedVisible, ...
+                dataController.SortedGroupHeaderRowIdx, ...
+                dataController.SortedGroupValues, ...
+                dataController.SortedVisibleToDataMap, ...
+                dataController.SortedDataToVisibleMap, ...
+                dataController.GroupFilteredCount, ...
+                this.By, ...
+                this.Groups, ...
+                this.Open, ...
+                this.ShowEmpty, ...
+                string(dataController.Table.Properties.VariableNames));
         end
 
         function clearGroupingState(this)
