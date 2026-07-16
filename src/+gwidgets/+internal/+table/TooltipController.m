@@ -61,7 +61,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
             this.Tooltips(end+1) = newTooltip;
             didEnableHover = wasEmpty;
             if didEnableHover
-                owner.BridgeController_.enableHover();
+                owner.Bridge.enableHover();
             end
         end
 
@@ -80,7 +80,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
             end
             didDisableHover = wasNotEmpty && isempty(this.Tooltips);
             if didDisableHover && ~isempty(owner)
-                owner.BridgeController_.disableHover();
+                owner.Bridge.disableHover();
             end
         end
 
@@ -127,6 +127,14 @@ classdef TooltipController < gwidgets.internal.table.TableController
             end
 
             this.DefaultStyle = style;
+        end
+
+        function initialize(this)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController
+            end
+
+            this.applyTextToDisplay();
         end
 
         function blocks = resolveBlocks(this, displayRow, displayColumn)
@@ -238,12 +246,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
 
         function set.Text(this, val)
             this.Text_ = val;
-            owner = this.owner();
-            if ~isempty(owner)
-                if ~isempty(owner.DisplayTable)
-                    owner.DisplayTable.Tooltip = val;
-                end
-            end
+            this.applyTextToDisplay();
         end
 
         function val = get.DefaultStyle(this)
@@ -272,6 +275,15 @@ classdef TooltipController < gwidgets.internal.table.TableController
     end
 
     methods (Access = private)
+        function applyTextToDisplay(this)
+            owner = this.owner();
+            if isempty(owner) || isempty(owner.Graphics.DisplayTable)
+                return
+            end
+
+            owner.Graphics.DisplayTable.Tooltip = this.Text_;
+        end
+
         function owner = requireOwner(this)
             owner = this.owner();
             if isempty(owner)
@@ -344,7 +356,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
                         idx = owner.Selection.dataToDisplay(idx, tt.Target);
                     end
                 catch ME
-                    if owner.BridgeController_.DiagEnabled
+                    if owner.Bridge.DiagEnabled
                         warning("GraphicsWidgets:Table:TooltipTargetError", ...
                             "Tooltip target resolution failed: %s", ME.message);
                     end
@@ -480,7 +492,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
             try
                 dataIndex = owner.Selection.displayToData(displayIndex, target);
             catch ME
-                if owner.BridgeController_.DiagEnabled
+                if owner.Bridge.DiagEnabled
                     warning("GraphicsWidgets:Table:SelectionMapError", ...
                         "Display selection could not be mapped to data selection: %s", ME.message);
                 end

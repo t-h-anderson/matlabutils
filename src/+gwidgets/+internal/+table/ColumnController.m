@@ -332,7 +332,7 @@ classdef ColumnController < gwidgets.internal.table.TableController
             [stores, ~, countMatches] = gwidgets.internal.table.ColumnWidthController.updateFromBridge( ...
                 pixelWidths, this.Visible, nData, this.widthStores());
             if ~countMatches
-                this.owner().BridgeController_.reattach();
+                this.owner().Bridge.reattach();
                 return
             end
             this.applyWidthStores(stores);
@@ -345,7 +345,7 @@ classdef ColumnController < gwidgets.internal.table.TableController
             end
 
             this.updateStoresFromBridgeWidths(pixelWidths);
-            this.owner().DisplayController_.applyColumnWidth();
+            this.owner().Display.applyColumnWidth();
         end
 
         function requestAutoResize(this)

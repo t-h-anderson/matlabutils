@@ -24,11 +24,28 @@ classdef BridgeController < gwidgets.internal.table.TableController
             delete(this.Bridge);
         end
 
+        function initialize(this)
+            arguments
+                this (1,1) gwidgets.internal.table.BridgeController
+            end
+
+            owner = this.owner();
+            if isempty(owner)
+                return
+            end
+
+            this.setup(owner.Graphics.Grid, owner.Graphics.DisplayTable);
+        end
+
         function setup(this, grid, displayTable)
             arguments
                 this (1,1) gwidgets.internal.table.BridgeController
                 grid (1,1) matlab.ui.container.GridLayout
                 displayTable (1,1) matlab.ui.control.Table
+            end
+
+            if ~isempty(this.Bridge) && isvalid(this.Bridge)
+                return
             end
 
             this.DisplayTableTag = "graphicscomponentsTable_" + mlut.uniqueID();
@@ -167,7 +184,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
             owner = this.owner();
             if owner.Column.didBridgeWidthsChange(d.widths)
                 owner.Column.updateStoresFromBridgeWidths(d.widths);
-                owner.DisplayController_.applyColumnWidth();
+                owner.Display.applyColumnWidth();
             else
                 this.restore();
             end

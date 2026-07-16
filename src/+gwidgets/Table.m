@@ -40,7 +40,7 @@ classdef Table < matlab.mixin.SetGet
 
     properties (Dependent, Hidden, SetAccess = private)
         DisplayTable (1,:) matlab.ui.control.Table
-        FilterController (1,:) gwidgets.internal.FilterController
+        FilterController (1,:) gwidgets.internal.table.FilterController
         Grid (1,:) matlab.ui.container.GridLayout
         GroupLabel (1,:) matlab.ui.control.Label
         HelpPanel (1,:) matlab.ui.container.Panel
@@ -343,7 +343,7 @@ classdef Table < matlab.mixin.SetGet
 
     methods
         function val = get.DisplayTable(this)
-            val = this.UITable_.DisplayTable;
+            val = this.UITable_.Graphics.DisplayTable;
         end
 
         function val = get.FilterController(this)
@@ -351,15 +351,15 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.Grid(this)
-            val = this.UITable_.Grid;
+            val = this.UITable_.Graphics.Grid;
         end
 
         function val = get.GroupLabel(this)
-            val = this.UITable_.GroupLabel;
+            val = this.UITable_.Graphics.GroupLabel;
         end
 
         function val = get.HelpPanel(this)
-            val = this.UITable_.HelpPanel;
+            val = this.UITable_.Graphics.HelpPanel;
         end
 
         function val = get.ContextMenu(this)
@@ -780,11 +780,11 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.BridgeDiagEnabled(this)
-            val = this.UITable_.BridgeController_.DiagEnabled;
+            val = this.UITable_.Bridge.DiagEnabled;
         end
 
         function set.BridgeDiagEnabled(this, val)
-            this.UITable_.BridgeController_.DiagEnabled = val;
+            this.UITable_.Bridge.DiagEnabled = val;
         end
     end
 
@@ -795,7 +795,7 @@ classdef Table < matlab.mixin.SetGet
 
         function [text, style] = simulateBridgeHover(this, displayRow, displayColumn)
             [text, style] = this.UITable_.Tooltip.resolveTextAndStyle(displayRow, displayColumn);
-            this.UITable_.BridgeController_.applyTooltipPayload(displayRow, displayColumn);
+            this.UITable_.Bridge.applyTooltipPayload(displayRow, displayColumn);
         end
 
         function blocks = simulateTooltipBlocks(this, displayRow, displayColumn)

@@ -36,9 +36,9 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            displayTable = owner.DisplayTable;
+            displayTable = owner.Graphics.DisplayTable;
 
-            owner.BridgeController_.suppress();
+            owner.Bridge.suppress();
             visWidths = owner.Column.Width;
             if ~isequal(displayTable.ColumnWidth, visWidths)
                 if isempty(visWidths)
@@ -48,7 +48,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 owner.forceRefresh();
                 displayTable.ColumnWidth = visWidths;
             end
-            owner.BridgeController_.restore();
+            owner.Bridge.restore();
         end
 
         function update(this, vars)
@@ -58,7 +58,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            displayTable = owner.DisplayTable;
+            displayTable = owner.Graphics.DisplayTable;
             toUpdate = cell(1, 2*numel(vars));
             nUpdates = 0;
             for iVar = 1:numel(vars)

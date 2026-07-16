@@ -34,7 +34,6 @@ classdef DataController < gwidgets.internal.table.TableController
     properties (Access = private)
         Table_ (:,:) table = table.empty(0,0)
         FilteringChangedListener (1,:) event.listener {mustBeScalarOrEmpty}
-        FilteringHelpListener (1,:) event.listener
     end
 
     methods
@@ -60,31 +59,42 @@ classdef DataController < gwidgets.internal.table.TableController
             data = this.Table_;
         end
 
+        function initialize(this)
+            arguments
+                this (1,1) gwidgets.internal.table.DataController
+            end
+
+            owner = this.owner();
+            if isempty(owner)
+                return
+            end
+
+            this.attachFilterController(owner.Filter);
+        end
+
         function val = get.Display(this)
             owner = this.owner();
-            if isempty(owner) || isempty(owner.DisplayTable)
+            if isempty(owner) || isempty(owner.Graphics.DisplayTable)
                 val = table.empty(0,0);
                 return
             end
 
-            val = owner.DisplayTable.Data;
+            val = owner.Graphics.DisplayTable.Data;
         end
 
         function attachFilterController(this, filterController)
             arguments
                 this (1,1) gwidgets.internal.table.DataController
-                filterController (1,1) gwidgets.internal.FilterController
+                filterController (1,1) gwidgets.internal.table.FilterController
             end
 
             this.FilteringChangedListener = this.weaklistener(filterController, "FilterChanged");
-            this.FilteringHelpListener = this.weaklistener(filterController, ...
-                ["FilterHelpRequested", "FilterHelpClosed"]);
         end
 
         function updateFiltering(this, filterController, filterValue, columnController)
             arguments
                 this (1,1) gwidgets.internal.table.DataController
-                filterController (1,1) gwidgets.internal.FilterController
+                filterController (1,1) gwidgets.internal.table.FilterController
                 filterValue
                 columnController (1,1) gwidgets.internal.table.ColumnController
             end
@@ -284,23 +294,6 @@ classdef DataController < gwidgets.internal.table.TableController
             end
         end
 
-        function onFilterHelpRequested(this, ~, ~)
-            owner = this.owner();
-            if isempty(owner)
-                return
-            end
-
-            owner.Grid.ColumnWidth = {"1x", "1x"};
-        end
-
-        function onFilterHelpClosed(this, ~, ~)
-            owner = this.owner();
-            if isempty(owner)
-                return
-            end
-
-            owner.Grid.ColumnWidth = {"1x", 0};
-        end
     end
 
     methods (Access = private)

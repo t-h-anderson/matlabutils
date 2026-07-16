@@ -8,16 +8,39 @@ classdef UITable < gwidgets.internal.Reparentable
         Sort (1,1) gwidgets.internal.table.SortController
         Style (1,1) gwidgets.internal.table.StyleController
         Data (1,1) gwidgets.internal.table.DataController
-        Filter (1,1) gwidgets.internal.FilterController
+        Filter (1,1) gwidgets.internal.table.FilterController
+        Graphics (1,1) gwidgets.internal.table.GraphicsController
         Menu (1,1) gwidgets.internal.table.ContextMenuController
         Tooltip (1,1) gwidgets.internal.table.TooltipController
         Callback (1,1) gwidgets.internal.table.CallbackController
         Selection (1,1) gwidgets.internal.table.SelectionController
     end
 
-    properties (Access = private)
-        UpdateManager (1,:) gwidgets.internal.UpdateManager {mustBeScalarOrEmpty} = gwidgets.internal.UpdateManager() % Suppress update trigger from a property to improve performance
+    properties (Dependent, Access = private)
+        Update (1,1) gwidgets.internal.table.UpdateController
+    end
 
+    properties (Dependent, GetAccess = {?gwidgets.Table, ...
+            ?gwidgets.internal.table.ColumnController, ...
+            ?gwidgets.internal.table.SelectionController, ...
+            ?gwidgets.internal.table.StyleController, ...
+            ?gwidgets.internal.table.GroupController, ...
+            ?gwidgets.internal.table.ContextMenuController, ...
+            ?gwidgets.internal.table.SortController, ...
+            ?gwidgets.internal.table.DisplayController, ...
+            ?gwidgets.internal.table.DataController, ...
+            ?gwidgets.internal.table.FilterController, ...
+            ?gwidgets.internal.table.GraphicsController, ...
+            ?gwidgets.internal.table.UpdateController, ...
+            ?gwidgets.internal.table.CallbackController, ...
+            ?gwidgets.internal.table.BridgeController, ...
+            ?gwidgets.internal.table.TooltipController}, ...
+            SetAccess = private)
+        Display (1,1) gwidgets.internal.table.DisplayController
+        Bridge (1,1) gwidgets.internal.table.BridgeController
+    end
+
+    properties (Access = private)
         % Avoid global pause/drawnow flushes while the widget is still
         % being constructed; a single refresh is enough once setup is live.
         SuppressForceRefresh_ (1,1) logical = true
@@ -27,28 +50,16 @@ classdef UITable < gwidgets.internal.Reparentable
         SortApi_ (1,:) gwidgets.internal.table.SortController {mustBeScalarOrEmpty}
         StyleApi_ (1,:) gwidgets.internal.table.StyleController {mustBeScalarOrEmpty}
         DataApi_ (1,:) gwidgets.internal.table.DataController {mustBeScalarOrEmpty}
-        FilterApi_ (1,:) gwidgets.internal.FilterController {mustBeScalarOrEmpty}
+        FilterApi_ (1,:) gwidgets.internal.table.FilterController {mustBeScalarOrEmpty}
+        GraphicsApi_ (1,:) gwidgets.internal.table.GraphicsController {mustBeScalarOrEmpty}
+        UpdateController_ (1,:) gwidgets.internal.table.UpdateController {mustBeScalarOrEmpty}
         TooltipController_ (1,:) gwidgets.internal.table.TooltipController {mustBeScalarOrEmpty}
         CallbackApi_ (1,:) gwidgets.internal.table.CallbackController {mustBeScalarOrEmpty}
         SelectionApi_ (1,:) gwidgets.internal.table.SelectionController {mustBeScalarOrEmpty}
         MenuApi_ (1,:) gwidgets.internal.table.ContextMenuController {mustBeScalarOrEmpty}
-    end
-
-    properties (GetAccess = {?gwidgets.Table, ...
-            ?gwidgets.internal.table.ColumnController, ...
-            ?gwidgets.internal.table.SelectionController, ...
-            ?gwidgets.internal.table.StyleController, ...
-            ?gwidgets.internal.table.GroupController, ...
-            ?gwidgets.internal.table.ContextMenuController, ...
-            ?gwidgets.internal.table.SortController, ...
-            ?gwidgets.internal.table.DisplayController, ...
-            ?gwidgets.internal.table.DataController, ...
-            ?gwidgets.internal.table.CallbackController, ...
-            ?gwidgets.internal.table.BridgeController, ...
-            ?gwidgets.internal.table.TooltipController}, ...
-            SetAccess = private)
-        DisplayController_ (1,:) gwidgets.internal.table.DisplayController {mustBeScalarOrEmpty}
-        BridgeController_ (1,:) gwidgets.internal.table.BridgeController {mustBeScalarOrEmpty}
+        DisplayApi_ (1,:) gwidgets.internal.table.DisplayController {mustBeScalarOrEmpty}
+        BridgeApi_ (1,:) gwidgets.internal.table.BridgeController {mustBeScalarOrEmpty}
+        Controllers_ (1,:) cell = cell.empty(1,0)
     end
 
     methods
@@ -61,10 +72,7 @@ classdef UITable < gwidgets.internal.Reparentable
 
             this@gwidgets.internal.Reparentable();
 
-            % Enable suppression of updates
-            this.UpdateManager = gwidgets.internal.UpdateManager();
             this.createControllers();
-            this.initializeControllersAfterSetup();
 
             data = namedArgs.Data;
             namedArgs = rmfield(namedArgs, "Data");
@@ -75,7 +83,7 @@ classdef UITable < gwidgets.internal.Reparentable
             this.Selection.Value = []; % Enforces correct inital selection shape
 
             % Support creation with filtering and grouping set
-            this.doUpdateSequence();
+            this.Update.run();
 
             this.SuppressForceRefresh_ = false;
             if ~isempty(this.Parent)
@@ -84,20 +92,7 @@ classdef UITable < gwidgets.internal.Reparentable
         end
 
         function delete(this)
-            delete(this.ColumnApi_);
-            delete(this.GroupApi_);
-            delete(this.SortApi_);
-            delete(this.StyleApi_);
-            delete(this.DataApi_);
-            delete(this.FilterApi_);
-            delete(this.TooltipController_);
-            delete(this.CallbackApi_);
-            delete(this.SelectionApi_);
-            delete(this.MenuApi_);
-            delete(this.DisplayController_);
-            delete(this.BridgeController_);
-            delete(this.GroupingController_);
-            delete(this.SortingController_);
+            this.deleteControllers();
             delete(this.ContextMenu);
         end
 
@@ -108,21 +103,21 @@ classdef UITable < gwidgets.internal.Reparentable
             % Clear the state of the table, suppressing update till the end
 
             % All columns are default visible, suppress update to wait for data
-            this.UpdateManager.addSuppression("ColumnVisible", Times=1);
+            this.Update.addSuppression("ColumnVisible", Times=1);
             this.Column.Visible = true;
 
             % Remove aliases
-            this.UpdateManager.addSuppression("ColumnNames", Times=1);
+            this.Update.addSuppression("ColumnNames", Times=1);
             this.Column.Names = [];
-            this.UpdateManager.addSuppression("DataColumnEditable", Times=1);
+            this.Update.addSuppression("DataColumnEditable", Times=1);
             this.Column.Editable = [];
-            this.UpdateManager.addSuppression("DataColumnSortable", Times=1);
+            this.Update.addSuppression("DataColumnSortable", Times=1);
             this.Column.Sortable = [];
-            this.UpdateManager.addSuppression("DataColumnWidth", Times=1);
+            this.Update.addSuppression("DataColumnWidth", Times=1);
             this.Column.DataWidth = {};
 
             % Clear the styling
-            this.UpdateManager.addSuppression("UpdateStyle", Times=1);
+            this.Update.addSuppression("UpdateStyle", Times=1);
             this.Style.remove();
 
             % Stash the text columns as a table of strings.
@@ -137,8 +132,8 @@ classdef UITable < gwidgets.internal.Reparentable
             % Apply the filter to the new data and clear the selection in case it is out of range
             this.Selection.clear();
 
-            if this.UpdateManager.doRun("Reset")
-                this.doUpdateSequence();
+            if this.Update.doRun("Reset")
+                this.Update.run();
             end
 
         end
@@ -174,6 +169,22 @@ classdef UITable < gwidgets.internal.Reparentable
             val = this.FilterApi_;
         end
 
+        function val = get.Graphics(this)
+            val = this.GraphicsApi_;
+        end
+
+        function val = get.Update(this)
+            val = this.UpdateController_;
+        end
+
+        function val = get.Display(this)
+            val = this.DisplayApi_;
+        end
+
+        function val = get.Bridge(this)
+            val = this.BridgeApi_;
+        end
+
         function val = get.Tooltip(this)
             val = this.TooltipController_;
         end
@@ -197,6 +208,9 @@ classdef UITable < gwidgets.internal.Reparentable
             ?gwidgets.internal.table.SortController, ...
             ?gwidgets.internal.table.DisplayController, ...
             ?gwidgets.internal.table.DataController, ...
+            ?gwidgets.internal.table.FilterController, ...
+            ?gwidgets.internal.table.GraphicsController, ...
+            ?gwidgets.internal.table.UpdateController, ...
             ?gwidgets.internal.table.CallbackController, ...
             ?gwidgets.internal.table.BridgeController, ...
             ?gwidgets.internal.table.TooltipController})
@@ -207,7 +221,7 @@ classdef UITable < gwidgets.internal.Reparentable
                 nvp.Times (1,1) double = 1
             end
 
-            this.UpdateManager.addSuppression(propertyName, Times=nvp.Times);
+            this.Update.addSuppression(propertyName, Times=nvp.Times);
         end
 
         function tf = doControllerUpdate(this, propertyName)
@@ -216,7 +230,7 @@ classdef UITable < gwidgets.internal.Reparentable
                 propertyName (1,1) string
             end
 
-            tf = this.UpdateManager.doRun(propertyName);
+            tf = this.Update.doRun(propertyName);
         end
 
         function requestControllerUpdate(this, nvp)
@@ -225,7 +239,7 @@ classdef UITable < gwidgets.internal.Reparentable
                 nvp.StartFrom (1,1) string {mustBeMember(nvp.StartFrom, ["Filtering", "Grouping", "Sorting", "Folding", "Display", "Style", "Interaction", "Skip"])}
             end
 
-            this.doUpdateSequence(StartFrom=nvp.StartFrom);
+            this.Update.request(StartFrom=nvp.StartFrom);
         end
 
         function forceRefresh(this)
@@ -272,24 +286,10 @@ classdef UITable < gwidgets.internal.Reparentable
             end
 
             this.ShowRowFilter_ = state;
-            if state
-                this.Grid.RowHeight{1} = "fit";
-            else
-                this.Grid.RowHeight{1} = 0;
-            end
+            this.Graphics.setRowFilterVisible(state);
 
         end
 
-    end
-
-    %% Grouping
-    properties (Access = private)
-        GroupingController_ (1,:) gwidgets.internal.table.GroupingController {mustBeScalarOrEmpty}
-    end
-
-    %% Sorting
-    properties (Access = private)
-        SortingController_ (1,:) gwidgets.internal.table.SortingController {mustBeScalarOrEmpty}
     end
 
     %% Find
@@ -305,58 +305,13 @@ classdef UITable < gwidgets.internal.Reparentable
         end
     end
 
-    %% Graphics components
-    properties (GetAccess = {?matlab.unittest.TestCase, ...
-            ?gwidgets.Table, ...
-            ?gwidgets.internal.table.SelectionController, ...
-            ?gwidgets.internal.table.StyleController, ...
-            ?gwidgets.internal.table.GroupController, ...
-            ?gwidgets.internal.table.ContextMenuController, ...
-            ?gwidgets.internal.table.SortController, ...
-            ?gwidgets.internal.table.DisplayController, ...
-            ?gwidgets.internal.table.DataController, ...
-            ?gwidgets.internal.table.BridgeController, ...
-            ?gwidgets.internal.table.TooltipController}, ...
-            SetAccess = private)
-        Grid (1,:) matlab.ui.container.GridLayout {mustBeScalarOrEmpty}
-
-        GroupLabel (1,:) matlab.ui.control.Label {mustBeScalarOrEmpty}
-        DisplayTable (1,:) matlab.ui.control.Table {mustBeScalarOrEmpty}
-
-        HelpPanel (1,:) matlab.ui.container.Panel {mustBeScalarOrEmpty}
-    end
-
     %% Private methods
     % From matlab.ui.componentcontainer.ComponentContainer
     methods (Access = protected)
         function setup(this)
             %SETUP Initialize the component's graphics.
-
-            this.Grid = uigridlayout(this, ...
-                "RowHeight", {"fit", 0, "1x", 2}, "ColumnWidth", {"1x", 0}, "Padding", 0);
-
-            this.HelpPanel = uipanel(Parent=this.Grid);
-            this.HelpPanel.Layout.Column = 2;
-            this.HelpPanel.Layout.Row = [1 3];
-
-            this.FilterApi_ = gwidgets.internal.FilterController(...
-                Parent=this.Grid,HelpParent=uigridlayout(this.HelpPanel, [1,1], "Padding",0));
-            this.Filter.Layout.Column = 1;
-            this.Filter.Layout.Row = 1;
-
-            % Create the table to display the filtered and grouped data
-            this.GroupLabel = uilabel("Parent", this.Grid);
-            this.GroupLabel.Layout.Column = 1;
-            this.GroupLabel.Layout.Row = 2;
-
-            this.DisplayTable = uitable(this.Grid);
-            this.DisplayTable.ClickedFcn = @(s,e)this.Callback.onCellClicked(s,e);
-            this.DisplayTable.DoubleClickedFcn = @(s,e)this.Callback.onCellDoubleClicked(s,e);
-            this.DisplayTable.CellSelectionCallback = @(s,e)this.Callback.onSelection(s,e);
-            this.DisplayTable.CellEditCallback = @(s,e)this.Callback.onCellEdit(s,e);
-            this.DisplayTable.DisplayDataChangedFcn = @(s,e)this.Callback.onDisplayDataChanged(s,e);
-            this.DisplayTable.Layout.Column = 1;
-            this.DisplayTable.Layout.Row = 3;
+            this.createSetupControllers();
+            this.Graphics.setup(this);
         end
 
     end
@@ -377,82 +332,72 @@ classdef UITable < gwidgets.internal.Reparentable
             % We do all the updating manually
         end
 
-        function doUpdateSequence(this, nvp)
-            arguments
-                this
-                nvp.StartFrom (1,1) string {mustBeMember(nvp.StartFrom, ["Filtering", "Grouping", "Sorting", "Folding", "Display", "Style", "Interaction", "Skip"])} = "Filtering"
-            end
-
-            updating = false;
-            if nvp.StartFrom == "Filtering" || updating
-                this.Data.updateFiltering(this.Filter, this.Filter.FilterValue, this.Column);
-                updating = true;
-            end
-
-            if nvp.StartFrom == "Grouping" || updating
-                this.Data.updateGrouping(this.GroupingController_, this.Group);
-                updating = true;
-            end
-
-            if nvp.StartFrom == "Sorting" || updating
-                this.Data.updateSorting(this.SortingController_, this.Sort, this.Group, this.Column);
-                updating = true;
-            end
-
-            if nvp.StartFrom == "Folding" || updating
-                this.Data.updateFolding(this.GroupingController_, this.Group);
-                this.Group.updateLabel(this.GroupLabel, this.Grid, this.Column, this.Data);
-                updating = true;
-            end
-
-            if nvp.StartFrom == "Display" || updating
-                this.DisplayController_.updateData();
-                updating = true;
-            end
-
-            if nvp.StartFrom == "Style" || updating
-                this.Style.applyToDisplay();
-                updating = true;
-            end
-
-            if nvp.StartFrom == "Interaction" || updating
-                this.DisplayController_.updateInteraction();
-            end
-
-            this.forceRefresh();
-        end
-
     end
 
     % Internal callbacks
     methods (Access = private)
 
+        function createSetupControllers(this)
+            if isempty(this.GraphicsApi_)
+                this.GraphicsApi_ = gwidgets.internal.table.GraphicsController();
+            end
+        end
+
         function createControllers(this)
+            this.createSetupControllers();
+            this.GraphicsApi_.attachOwner(this);
+            this.FilterApi_ = gwidgets.internal.table.FilterController(this, this.Graphics.FilterComponent);
+            this.UpdateController_ = gwidgets.internal.table.UpdateController(this);
             this.ColumnApi_ = gwidgets.internal.table.ColumnController(this);
             this.GroupApi_ = gwidgets.internal.table.GroupController(this);
             this.SortApi_ = gwidgets.internal.table.SortController(this);
             this.StyleApi_ = gwidgets.internal.table.StyleController(this);
             this.DataApi_ = gwidgets.internal.table.DataController(this);
-            this.DisplayController_ = gwidgets.internal.table.DisplayController(this);
-            this.BridgeController_ = gwidgets.internal.table.BridgeController(this);
+            this.DisplayApi_ = gwidgets.internal.table.DisplayController(this);
+            this.BridgeApi_ = gwidgets.internal.table.BridgeController(this);
             this.MenuApi_ = gwidgets.internal.table.ContextMenuController(this);
             this.TooltipController_ = gwidgets.internal.table.TooltipController(this);
             this.CallbackApi_ = gwidgets.internal.table.CallbackController(this);
             this.SelectionApi_ = gwidgets.internal.table.SelectionController(this);
-            this.GroupingController_ = gwidgets.internal.table.GroupingController();
-            this.SortingController_ = gwidgets.internal.table.SortingController();
+            this.initializeControllers();
         end
 
-        function initializeControllersAfterSetup(this)
-            this.Data.attachFilterController(this.Filter);
-            this.Menu.refresh();
-            this.BridgeController_.setup(this.Grid, this.DisplayTable);
-
-            % Apply any tooltip state that was configured before setup ran.
-            % The bridge will enable hover reports once it signals BridgeReady.
-            this.DisplayTable.Tooltip = this.Tooltip.Text;
+        function initializeControllers(this)
+            for iController = 1:numel(this.Controllers_)
+                controller = this.Controllers_{iController};
+                if isvalid(controller)
+                    controller.initialize();
+                end
+            end
         end
 
+        function deleteControllers(this)
+            for iController = numel(this.Controllers_):-1:1
+                controller = this.Controllers_{iController};
+                if isvalid(controller)
+                    delete(controller);
+                end
+            end
+            this.Controllers_ = cell.empty(1,0);
+        end
+
+    end
+
+    methods (Access = ?gwidgets.internal.table.TableController)
+        function registerController(this, controller)
+            arguments
+                this (1,1) gwidgets.UITable
+                controller (1,1) gwidgets.internal.table.TableController
+            end
+
+            for iController = 1:numel(this.Controllers_)
+                if isequal(this.Controllers_{iController}, controller)
+                    return
+                end
+            end
+
+            this.Controllers_{end+1} = controller;
+        end
     end
 
     methods (Access = {?gwidgets.UITable, ?gwidgets.Table})
@@ -461,13 +406,13 @@ classdef UITable < gwidgets.internal.Reparentable
         end
 
         function runFilterUpdate(this)
-            if this.UpdateManager.doRun("Filter")
-                this.doUpdateSequence(StartFrom="Filtering");
+            if this.Update.doRun("Filter")
+                this.Update.run(StartFrom="Filtering");
             end
         end
 
         function runConstructionUpdate(this)
-            this.doUpdateSequence();
+            this.Update.run();
         end
 
         function refreshAfterConstruction(this)

@@ -123,9 +123,15 @@ classdef tControllerFacade < matlab.unittest.TestCase
             propNames = string(properties(uiTable));
 
             testCase.verifyTrue(ismember("Filter", propNames))
+            testCase.verifyTrue(ismember("Graphics", propNames))
             testCase.verifyFalse(ismember("Bridge", propNames))
             testCase.verifyFalse(ismember("Display", propNames))
-            testCase.verifyInstanceOf(uiTable.Filter, "gwidgets.internal.FilterController")
+            testCase.verifyFalse(ismember("DisplayTable", propNames))
+            testCase.verifyFalse(ismember("Grid", propNames))
+            testCase.verifyFalse(ismember("GroupLabel", propNames))
+            testCase.verifyFalse(ismember("HelpPanel", propNames))
+            testCase.verifyInstanceOf(uiTable.Filter, "gwidgets.internal.table.FilterController")
+            testCase.verifyInstanceOf(uiTable.Graphics, "gwidgets.internal.table.GraphicsController")
         end
     end
 

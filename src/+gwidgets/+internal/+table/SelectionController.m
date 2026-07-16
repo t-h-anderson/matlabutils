@@ -54,11 +54,11 @@ classdef SelectionController < gwidgets.internal.table.TableController
         end
 
         function val = get.Type(this)
-            val = this.owner().DisplayTable.SelectionType;
+            val = this.owner().Graphics.DisplayTable.SelectionType;
         end
 
         function set.Type(this, val)
-            this.owner().DisplayTable.SelectionType = val;
+            this.owner().Graphics.DisplayTable.SelectionType = val;
             this.clear();
 
             if this.owner().doControllerUpdate("SelectionType")
@@ -67,11 +67,11 @@ classdef SelectionController < gwidgets.internal.table.TableController
         end
 
         function val = get.Multiselect(this)
-            val = this.owner().DisplayTable.Multiselect;
+            val = this.owner().Graphics.DisplayTable.Multiselect;
         end
 
         function set.Multiselect(this, val)
-            this.owner().DisplayTable.Multiselect = val;
+            this.owner().Graphics.DisplayTable.Multiselect = val;
             this.clear();
         end
 
@@ -464,7 +464,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
 
         function refreshVisibleSelection(this)
             owner = this.owner();
-            if isempty(owner.DisplayTable) || isempty(owner.Data.FoldedDataToVisibleMap)
+            if isempty(owner.Graphics.DisplayTable) || isempty(owner.Data.FoldedDataToVisibleMap)
                 return
             end
 
@@ -476,9 +476,9 @@ classdef SelectionController < gwidgets.internal.table.TableController
             this.IsSettingProgrammatically = true;
             cleanupObj = onCleanup(@()this.clearProgrammaticFlag());
             try
-                owner.DisplayTable.Selection = selection;
+                owner.Graphics.DisplayTable.Selection = selection;
             catch
-                owner.DisplayTable.Selection = [];
+                owner.Graphics.DisplayTable.Selection = [];
             end
             delete(cleanupObj);
             owner.forceRefresh();
@@ -516,7 +516,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
                 return
             end
 
-            values = this.owner().DisplayTable.Data{:, colIdx};
+            values = this.owner().Graphics.DisplayTable.Data{:, colIdx};
             if iscategorical(values)
                 this.owner().Filter.CategoricalVariables = categories(values);
             else

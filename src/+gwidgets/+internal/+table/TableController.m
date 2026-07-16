@@ -11,9 +11,30 @@ classdef TableController < gwidgets.internal.WithWeakListeners
                 owner (1,:) gwidgets.UITable = gwidgets.UITable.empty(1,0)
             end
 
-            if ~isempty(owner)
-                this.OwnerRef = matlab.lang.WeakReference(owner);
+            this.attachOwner(owner);
+        end
+
+        function attachOwner(this, owner)
+            arguments
+                this (1,1) gwidgets.internal.table.TableController
+                owner (1,:) gwidgets.UITable = gwidgets.UITable.empty(1,0)
             end
+
+            if isempty(owner)
+                this.OwnerRef = matlab.lang.WeakReference.empty(1,0);
+                return
+            end
+
+            this.OwnerRef = matlab.lang.WeakReference(owner);
+            owner.registerController(this);
+        end
+
+        function initialize(this) %#ok<MANU>
+            arguments
+                this (1,1) gwidgets.internal.table.TableController
+            end
+
+            % Default lifecycle hook for controllers with no setup work.
         end
     end
 

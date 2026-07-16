@@ -53,11 +53,11 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function val = get.Configurations(this)
-            val = this.owner().DisplayTable.StyleConfigurations;
+            val = this.owner().Graphics.DisplayTable.StyleConfigurations;
         end
 
         function set.Configurations(this, val)
-            this.owner().DisplayTable.StyleConfigurations = val;
+            this.owner().Graphics.DisplayTable.StyleConfigurations = val;
         end
 
         function val = get.GroupHeaderStyle(this)
@@ -72,7 +72,7 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function applyToDisplay(this)
-            displayTable = this.owner().DisplayTable;
+            displayTable = this.owner().Graphics.DisplayTable;
             displayTable.removeStyle();
             styles = [this.Styles_, this.GroupHeaderStyle_];
 

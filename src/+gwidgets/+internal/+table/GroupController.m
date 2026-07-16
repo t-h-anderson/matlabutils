@@ -73,7 +73,7 @@ classdef GroupController < gwidgets.internal.table.TableController
 
             owner = this.owner();
             columnIdx = this.groupingColumnFromContext(displayColumn);
-            groupingVariable = string(owner.DisplayTable.Data.Properties.VariableNames(columnIdx));
+            groupingVariable = string(owner.Graphics.DisplayTable.Data.Properties.VariableNames(columnIdx));
             groupingVariable = owner.Column.aliasesToData(groupingVariable);
             groupingVariable(~ismember(groupingVariable, owner.Column.DataNames)) = [];
 

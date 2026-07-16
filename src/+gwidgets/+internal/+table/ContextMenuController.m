@@ -43,6 +43,14 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             this.CustomItems = [this.CustomItems_, menuItems];
         end
 
+        function initialize(this)
+            arguments
+                this (1,1) gwidgets.internal.table.ContextMenuController
+            end
+
+            this.refresh();
+        end
+
         function refresh(this)
             arguments
                 this (1,1) gwidgets.internal.table.ContextMenuController
@@ -50,7 +58,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
             owner = this.owner();
             owner.ContextMenu = this.buildForTable( ...
-                owner.DisplayTable, owner.ContextMenu, owner.Column.Sortable);
+                owner.Graphics.DisplayTable, owner.ContextMenu, owner.Column.Sortable);
         end
 
         function reparentToOwner(this)
