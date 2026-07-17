@@ -263,6 +263,61 @@ classdef tSorting < test.WithExampleTables
             testCase.verifyEqual(t.SortedDataToVisibleMap, [3 2 6 5])
         end
 
+        function tMultiGroupSortRespectsRequestedGroupVariableOrder(testCase)
+            data = table( ...
+                ["b"; "a"; "b"; "a"; "a"], ...
+                ["x"; "y"; "y"; "x"; "x"], ...
+                [1; 2; 3; 4; 5], ...
+                'VariableNames', {'G1', 'G2', 'Value'});
+            t = gwidgets.Table(Data=data);
+            t.GroupingVariable = ["G1", "G2"];
+            t.SortDirection = "Ascend";
+            t.ColumnSortable = true;
+            testCase.verifyWarningFree(@() t.set("SortByColumn", ["G2", "G1"]))
+
+            headerLabels = arrayfun(@(idx) string(t.SortedVisibleData{idx, 1}), t.SortedGroupHeaderRowIdx);
+
+            testCase.verifyEqual(t.DisplayGroups, ["a|x", "b|x", "a|y", "b|y"])
+            testCase.verifyEqual(headerLabels, ["a|x (2/2)", "b|x (1/1)", "a|y (1/1)", "b|y (1/1)"])
+
+            testCase.verifyWarningFree(@() t.set("SortDirection", "Descend"))
+            headerLabels = arrayfun(@(idx) string(t.SortedVisibleData{idx, 1}), t.SortedGroupHeaderRowIdx);
+
+            testCase.verifyEqual(t.DisplayGroups, ["b|y", "a|y", "b|x", "a|x"])
+            testCase.verifyEqual(headerLabels, ["b|y (1/1)", "a|y (1/1)", "b|x (1/1)", "a|x (2/2)"])
+        end
+
+        function tMultiGroupSortUsesStoredKeysForDelimiterValues(testCase)
+            data = table( ...
+                ["a|1"; "a"; "b"], ...
+                ["b"; "1|b"; "a"], ...
+                [1; 2; 3], ...
+                'VariableNames', {'G1', 'G2', 'Value'});
+            t = gwidgets.Table(Data=data);
+            t.GroupingVariable = ["G1", "G2"];
+            t.SortDirection = "Ascend";
+            t.ColumnSortable = true;
+            t.SortByColumn = ["G2", "G1"];
+
+            testCase.verifyEqual(t.Groups, ["a|1\|b", "a\|1|b", "b|a"])
+            testCase.verifyEqual(t.DisplayGroups, ["a|1\|b", "b|a", "a\|1|b"])
+        end
+
+        function tSortedEmptyGroupCountsFollowSortedGroupOrder(testCase)
+            data = table( ...
+                ["w"; "x"; "y"], ...
+                [1; 2; 3], ...
+                'VariableNames', {'Group', 'Value'});
+            t = gwidgets.Table(Data=data);
+            t.GroupingVariable = "Group";
+            t.Filter = "Value>1";
+            t.SortDirection = "Descend";
+            t.ColumnSortable = true;
+            t.SortByColumn = "Group";
+
+            testCase.verifyEqual(t.DisplayGroups, ["y", "x"])
+        end
+
     end
 
 end

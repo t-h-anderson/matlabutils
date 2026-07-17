@@ -5,7 +5,7 @@ classdef GroupingController < handle
         function result = group(this, data, filteredData, filteredDataToVisibleMap, ...
                 filteredVisibleToDataMap, groupingVariable, openGroups, hiddenGroups)
             arguments
-                this (1,1) gwidgets.internal.table.GroupingController %#ok<INUSA>
+                this (1,1) gwidgets.internal.table.GroupingController
                 data (:,:) table
                 filteredData (:,:) table
                 filteredDataToVisibleMap (1,:) double
@@ -16,33 +16,20 @@ classdef GroupingController < handle
             end
 
             groupColumnIdx = ismember(string(data.Properties.VariableNames), groupingVariable);
+            allGroupKeys = data(:, groupingVariable);
 
-            if numel(groupingVariable) > 1
-                allGroupVars = arrayfun(@(name) data.(name), groupingVariable, UniformOutput=false);
-                allGroupVars = cellfun(@string, allGroupVars, UniformOutput=false);
-                allGroupVars = join([allGroupVars{:}], "|", 2);
-            else
-                allGroupVars = data.(groupingVariable);
-            end
-
-            if isempty(allGroupVars)
+            if height(allGroupKeys) == 0
                 groupIdxs = zeros(1,0);
-                allGroups = allGroupVars;
+                groupKeys = allGroupKeys;
             else
-                [groupIdxs, allGroups] = findgroups(allGroupVars);
+                [groupIdxs, groupKeys] = findgroups(allGroupKeys);
             end
 
-            groupNames = reshape(string(allGroups), 1, []);
+            groupNames = this.groupLabels(groupKeys);
             openGroups = openGroups(ismember(openGroups, groupNames));
             hiddenGroups = hiddenGroups(ismember(hiddenGroups, groupNames));
 
-            if numel(groupingVariable) > 1
-                filteredGroupVars = arrayfun(@(name) filteredData.(name), groupingVariable, UniformOutput=false);
-                filteredGroupVars = cellfun(@string, filteredGroupVars, UniformOutput=false);
-                filteredGroupVars = join([filteredGroupVars{:}], "|", 2);
-            else
-                filteredGroupVars = filteredData.(groupingVariable);
-            end
+            filteredGroupKeys = filteredData(:, groupingVariable);
 
             tmpData = filteredData;
             idx = ismember(string(tmpData.Properties.VariableNames), groupingVariable);
@@ -50,14 +37,14 @@ classdef GroupingController < handle
             tmpData(:, idx) = [];
             tmpData = table2cell(tmpData);
 
-            nGroups = numel(allGroups);
+            nGroups = height(groupKeys);
             allGroupCount = accumarray(groupIdxs(:), 1, [nGroups 1], @sum, 0);
-            if isempty(filteredGroupVars)
+            if height(filteredGroupKeys) == 0
                 groupFilteredCount = zeros(nGroups, 1);
                 filteredRowIdxByGroup = cell(nGroups, 1);
                 [filteredRowIdxByGroup{:}] = deal(zeros(1,0));
             else
-                [~, filteredToAllGroupIdx] = ismember(filteredGroupVars, allGroups);
+                [~, filteredToAllGroupIdx] = ismember(filteredGroupKeys, groupKeys, "rows");
                 filteredToAllGroupIdx = filteredToAllGroupIdx(:);
                 groupFilteredCount = accumarray(filteredToAllGroupIdx, 1, [nGroups 1], @sum, 0);
                 filteredRowIdxByGroup = accumarray(filteredToAllGroupIdx, ...
@@ -77,7 +64,7 @@ classdef GroupingController < handle
             headerPos = 1;
 
             for iGroup = 1:nGroups
-                thisGroup = allGroups(iGroup);
+                thisGroup = groupNames(iGroup);
                 rowIdxs = filteredRowIdxByGroup{iGroup};
                 nInGroup = groupFilteredCount(iGroup);
                 thisGroupDisp = tmpData(rowIdxs, :);
@@ -115,6 +102,7 @@ classdef GroupingController < handle
                 "GroupedVisibleData", {groupedData}, ...
                 "GroupedDataVariables", groupedDataVariables, ...
                 "Groups", groupNames, ...
+                "GroupKeys", groupKeys, ...
                 "GroupHeaderRowIdx", find(headerIdx), ...
                 "GroupColumnIdx", groupColumnIdx, ...
                 "GroupFilteredCount", reshape(groupFilteredCount, 1, []), ...
@@ -212,6 +200,36 @@ classdef GroupingController < handle
                 "VisibleGroupHeaderRowIdx", find(idxVisibleHeaderRowMask), ...
                 "FoldedVisibleToDataMap", visibleToDataMap, ...
                 "FoldedDataToVisibleMap", dataToVisibleMap);
+        end
+    end
+
+    methods (Static, Access = private)
+        function labels = groupLabels(groupKeys)
+            arguments
+                groupKeys (:,:) table
+            end
+
+            if height(groupKeys) == 0
+                labels = string.empty(1,0);
+                return
+            end
+
+            groupLabelParts = strings(height(groupKeys), width(groupKeys));
+            for iKey = 1:width(groupKeys)
+                groupLabelParts(:, iKey) = gwidgets.internal.table.GroupingController.escapeGroupValue( ...
+                    string(groupKeys{:, iKey}));
+            end
+
+            labels = reshape(join(groupLabelParts, "|", 2), 1, []);
+        end
+
+        function values = escapeGroupValue(values)
+            arguments
+                values (:,1) string
+            end
+
+            values = replace(values, "\", "\\");
+            values = replace(values, "|", "\|");
         end
     end
 

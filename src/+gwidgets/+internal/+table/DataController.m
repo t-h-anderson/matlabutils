@@ -14,6 +14,7 @@ classdef DataController < gwidgets.internal.table.TableController
         FilteredDataToVisibleMap (1,:) double = double.empty(1,0)
         GroupedVisible (:,:) cell = cell.empty(0,0)
         GroupedVariables (1,:) string = string.empty(1,0)
+        GroupKeys (:,:) table = table.empty(0,0)
         GroupHeaderRowIdx (1,:) double = double.empty(1,0)
         GroupColumnIdx (1,:) double = double.empty(1,0)
         GroupFilteredCount (1,:) double = double.empty(1,0)
@@ -23,6 +24,8 @@ classdef DataController < gwidgets.internal.table.TableController
         SortedVisible (:,:) cell = cell.empty(0,0)
         SortedGroupHeaderRowIdx (1,:) double = double.empty(1,0)
         SortedGroupValues (1,:) string = string.empty(1,0)
+        SortedGroupKeys (:,:) table = table.empty(0,0)
+        SortedGroupFilteredCount (1,:) double = double.empty(1,0)
         SortedVisibleToDataMap (1,:) double = double.empty(1,0)
         SortedDataToVisibleMap (1,:) double = double.empty(1,0)
         FoldedVisibleToDataMap (1,:) double = double.empty(1,0)
@@ -128,6 +131,7 @@ classdef DataController < gwidgets.internal.table.TableController
                 this.GroupedVisible = table2cell(this.Filtered);
                 this.GroupedVariables = string(this.Filtered.Properties.VariableNames);
                 groupController.clearGroupingState();
+                this.GroupKeys = table.empty(0,0);
                 this.GroupHeaderRowIdx = zeros(1,0);
                 this.GroupColumnIdx = zeros(1,0);
                 this.GroupFilteredCount = zeros(1,0);
@@ -143,6 +147,7 @@ classdef DataController < gwidgets.internal.table.TableController
             this.GroupedVisible = result.GroupedVisibleData;
             this.GroupedVariables = result.GroupedDataVariables;
             groupController.applyGroupingResult(result);
+            this.GroupKeys = result.GroupKeys;
             this.GroupHeaderRowIdx = result.GroupHeaderRowIdx;
             this.GroupColumnIdx = result.GroupColumnIdx;
             this.GroupFilteredCount = result.GroupFilteredCount;
@@ -164,6 +169,8 @@ classdef DataController < gwidgets.internal.table.TableController
             this.SortedVisibleToDataMap = this.GroupedVisibleToDataMap;
             this.SortedGroupHeaderRowIdx = this.GroupHeaderRowIdx;
             this.SortedGroupValues = groupController.Groups;
+            this.SortedGroupKeys = this.GroupKeys;
+            this.SortedGroupFilteredCount = this.GroupFilteredCount;
 
             if sortController.Direction == "None" || isempty(sortController.ByData)
                 return
@@ -176,6 +183,8 @@ classdef DataController < gwidgets.internal.table.TableController
             this.SortedVisibleToDataMap = result.SortedVisibleToDataMap;
             this.SortedGroupHeaderRowIdx = result.SortedGroupHeaderRowIdx;
             this.SortedGroupValues = result.SortedGroupValues;
+            this.SortedGroupKeys = result.SortedGroupKeys;
+            this.SortedGroupFilteredCount = result.SortedGroupFilteredCount;
         end
 
         function updateFolding(this)
