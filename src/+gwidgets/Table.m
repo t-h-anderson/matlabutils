@@ -1,5 +1,5 @@
 classdef Table < matlab.mixin.SetGet
-    %TABLE Legacy-compatible wrapper around gwidgets.UITable.
+    %TABLE Controller-first table widget with legacy-compatible aliases.
 
     properties (Access = private)
         UITable_ (1,:) gwidgets.UITable {mustBeScalarOrEmpty}

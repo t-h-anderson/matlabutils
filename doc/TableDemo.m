@@ -11,8 +11,9 @@ T = table;
 T.ID = (1:n).'; 
 T.Category = categorical(randi([1 4], n, 1), 1:4, ["A","B","C","D"]); 
 T.Group = categorical(randi([1 5], n, 1), 1:5, compose("G%d", 1:5)); 
-T.Value = randn(n,1) * 10 + 50; T.Note = arrayfun(@(x) "Row" + x, (1:n).', 'UniformOutput', false) %[output:49dad326]
-T = T(:, [1:3]);
+T.Value = randn(n,1) * 10 + 50;
+T.Note = arrayfun(@(x) "Row" + x, (1:n).', 'UniformOutput', false);
+T = T(:, 1:3);
 %%
 %[text] ### Create the widget
 fig = uifigure('Name','Table Widget Demo');
@@ -22,33 +23,32 @@ tb = gwidgets.Table(Parent=gl, Data=T, ColumnEditable=true);
 %%
 %[text] ### Enable features
 %[text] Enable the row filter control 
-tb.HasToggleFilter = true; tb.ShowRowFilter = true;
+tb.Menu.HasToggleFilter = true; tb.ShowRowFilter = true;
 %%
 %[text] Make grouping-related features available 
-tb.HasChangeGroupingVariable = true; tb.HasToggleShowEmptyGroups = true;
+tb.Menu.HasChangeGroupingVariable = true; tb.Menu.HasToggleShowEmptyGroups = true;
 %%
-%[text] Allow sorting on the Value column only 
-tb.ColumnSortable = true; tb.HasColumnSorting = true; %[output:15ee2932]
+%[text] Allow sorting from the table and context menu
+tb.Column.Sortable = true; tb.Menu.HasColumnSorting = true; %[output:15ee2932]
 %%
 %[text] Allow cell selection and column selection (context menu will show both) 
-tb.SupportedSelectionTypes = ["cell","column"]; %[output:5618cee7]
+tb.Menu.SupportedSelectionTypes = ["cell","column"]; %[output:5618cee7]
 %%
 %[text] ### Grouping example (programmatic)
-%[text] Group by 'Group' column 
-tb.GroupingVariable = "Category";  %[output:3f0d36d2]
+%[text] Group by the Category column
+tb.Group.By = "Category";  %[output:3f0d36d2]
 %[text] Open all groups 
-tb.openAllGroups(); %[output:3f0d36d2]
+tb.Group.openAll(); %[output:3f0d36d2]
 %%
 %[text] ###  Filtering example (programmatic)
-%[text] Restrict to Category A and B using the Filter controller API 
-%[text] The widget exposes FilterController to set filter programmatically. 
+%[text] Restrict to Category A and B.
 %[text] Set the high-level Filter property (string or filter object)
 tb.Filter = "Category = A|B"; %[output:71c74ad3]
 %%
 %[text] ### Sorting example
 %[text] Sort by Value descending 
-tb.SortByColumn = "Value";  %[output:353999fd]
-tb.SortDirection = "Descend"; %[output:353999fd]
+tb.Sort.By = "Value";  %[output:353999fd]
+tb.Sort.Direction = "Descend"; %[output:353999fd]
 %%
 %[text] Selection and callbacks
 %[text] Cell clicked callback: show selected data indices and values in the command window. 

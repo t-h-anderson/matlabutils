@@ -26,6 +26,23 @@ Run the table demo from MATLAB with:
 run("doc/TableDemo.m")
 ```
 
+### Table Controller API
+
+`gwidgets.Table` exposes focused controller objects for table behavior. Prefer these for new code:
+
+```matlab
+t = gwidgets.Table(Data=data);
+
+t.Column.Sortable = true;
+t.Group.By = ["Category", "Status"];
+t.Group.openAll();
+t.Sort.By = ["Status", "Value"];
+t.Sort.Direction = "Ascend";
+```
+
+The older pass-through properties, such as `GroupingVariable`, `OpenGroups`, `SortByColumn`, and `SortDirection`,
+remain supported as compatibility aliases.
+
 ## Testing
 
 The project uses class-based `matlab.unittest` tests under `tests/+test`.

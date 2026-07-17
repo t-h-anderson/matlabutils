@@ -63,6 +63,35 @@ classdef tControllerFacade < matlab.unittest.TestCase
             testCase.verifyEqual(t.Sort.Direction, "Ascend")
         end
 
+        function tGroupFacadeIsPrimaryApi(testCase)
+            t = test.unit.gwidgets.Table.tControllerFacade.createTable();
+
+            t.Group.By = "Group";
+            t.Group.openAll();
+            t.Group.ShowEmpty = true;
+
+            testCase.verifyEqual(t.GroupingVariable, "Group")
+            testCase.verifyEqual(t.GroupingVariableName, "Group")
+            testCase.verifyEqual(t.Groups, ["A", "B"])
+            testCase.verifyEqual(t.OpenGroups, ["A", "B"])
+            testCase.verifyTrue(t.ShowEmptyGroups)
+            testCase.verifyEqual(t.DisplayGroups, ["A", "B"])
+            testCase.verifyEqual(t.DisplayData.Var1([2 3 5 6]), ["1"; "2"; "3"; "4"])
+        end
+
+        function tSortFacadeIsPrimaryApi(testCase)
+            t = test.unit.gwidgets.Table.tControllerFacade.createTable();
+
+            t.Column.DataSortable = true;
+            t.Sort.Direction = "Ascend";
+            t.Sort.By = "Var2";
+
+            testCase.verifyEqual(t.SortByColumn, "Var2")
+            testCase.verifyEqual(t.SortDirection, "Ascend")
+            testCase.verifyEqual(t.DisplayData.Var2, [1; 2; 3; 4])
+            testCase.verifyEqual(t.DisplayData.Var1, [4; 3; 2; 1])
+        end
+
         function tStyleFacadeDelegates(testCase)
             t = test.unit.gwidgets.Table.tControllerFacade.createTable();
             s = uistyle(BackgroundColor=[0.2 0.3 0.4]);
