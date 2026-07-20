@@ -21,6 +21,7 @@ classdef tControllerFacade < matlab.unittest.TestCase
             testCase.verifyTrue(ismember("FilterControl", propNames))
             testCase.verifyTrue(ismember("SelectionControl", propNames))
             testCase.verifyTrue(ismember("TooltipControl", propNames))
+            testCase.verifyTrue(ismember("Drag", propNames))
             testCase.verifyFalse(ismember("ColumnWidth", propNames))
             testCase.verifyFalse(ismember("GroupingVariable", propNames))
             testCase.verifyFalse(ismember("SortByColumn", propNames))

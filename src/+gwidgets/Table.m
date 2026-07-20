@@ -39,6 +39,7 @@ classdef Table < matlab.mixin.SetGet
         FilterControl (1,1) gwidgets.internal.table.FilterController
         SelectionControl (1,1) gwidgets.internal.table.SelectionController
         TooltipControl (1,1) gwidgets.internal.table.TooltipController
+        Drag (1,1) gwidgets.internal.table.DragController
     end
 
     properties (Dependent)
@@ -60,6 +61,7 @@ classdef Table < matlab.mixin.SetGet
 
     properties (Dependent, SetAccess = private)
         DisplayData (1,1) table
+        DropSelection (1,1) struct
         Layout
         RowFilterIndices (1,:) logical
         VisibleData (:,:) table
@@ -118,6 +120,7 @@ classdef Table < matlab.mixin.SetGet
         HasToggleShowEmptyGroups (1,1) logical
         HasColumnSorting (1,1) logical
         HasAutoResizeColumns (1,1) logical
+        HasToggleDragging (1,1) logical
     end
 
     properties (Dependent, Hidden)
@@ -246,6 +249,10 @@ classdef Table < matlab.mixin.SetGet
             val = this.UITable_.Tooltip;
         end
 
+        function val = get.Drag(this)
+            val = this.UITable_.Drag;
+        end
+
         function val = get.Data(this)
             val = this.UITable_.Data.Table;
         end
@@ -256,6 +263,10 @@ classdef Table < matlab.mixin.SetGet
 
         function val = get.DisplayData(this)
             val = this.UITable_.Data.Display;
+        end
+
+        function val = get.DropSelection(this)
+            val = this.UITable_.Drag.DropSelection;
         end
 
         function val = get.Filter(this)
@@ -712,6 +723,14 @@ classdef Table < matlab.mixin.SetGet
 
         function set.HasAutoResizeColumns(this, val)
             this.Menu.HasAutoResizeColumns = val;
+        end
+
+        function val = get.HasToggleDragging(this)
+            val = this.Menu.HasToggleDragging;
+        end
+
+        function set.HasToggleDragging(this, val)
+            this.Menu.HasToggleDragging = val;
         end
 
         function val = get.SupportedSelectionTypes(this)

@@ -26,6 +26,29 @@ classdef tContextMenu < test.WithFigureFixture & test.WithExampleTables
             testCase.verifyEmpty(items)
         end
 
+        function tDraggingMenuTogglesDragState(testCase)
+            fh = testCase.figureFixture("Type", "uifigure");
+            t = gwidgets.Table(Parent=fh, ...
+                Data=testCase.stringData(), ...
+                HasToggleDragging=true);
+
+            item = findall(t.ContextMenu, "Text", "Enable row dragging");
+            item.MenuSelectedFcn(item, []);
+
+            testCase.verifyTrue(t.Drag.Enabled)
+            testCase.verifyNumElements(findall(t.ContextMenu, "Text", "Disable row dragging"), 1)
+        end
+
+        function tDraggingMenuAbsentWhenDisabled(testCase)
+            fh = testCase.figureFixture("Type", "uifigure");
+            t = gwidgets.Table(Parent=fh, ...
+                Data=testCase.stringData(), ...
+                HasToggleDragging=false);
+
+            items = findall(t.ContextMenu, "Text", "Enable row dragging");
+            testCase.verifyEmpty(items)
+        end
+
     end
 
 end

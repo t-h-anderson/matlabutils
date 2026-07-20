@@ -96,6 +96,24 @@ classdef BridgeController < gwidgets.internal.table.TableController
             this.send("HoverDisable", []);
         end
 
+        function enableDragging(this, moveKey, copyKey)
+            arguments
+                this (1,1) gwidgets.internal.table.BridgeController
+                moveKey (1,1) string
+                copyKey (1,1) string
+            end
+
+            this.send("DragEnable", struct("moveKey", moveKey, "copyKey", copyKey));
+        end
+
+        function disableDragging(this)
+            arguments
+                this (1,1) gwidgets.internal.table.BridgeController
+            end
+
+            this.send("DragDisable", []);
+        end
+
         function suppress(this)
             arguments
                 this (1,1) gwidgets.internal.table.BridgeController
@@ -160,6 +178,10 @@ classdef BridgeController < gwidgets.internal.table.TableController
                     if this.hasTooltips()
                         this.applyTooltipPayload(double(d.row), double(d.col));
                     end
+                case "TableDragStart"
+                    this.owner().Drag.onBridgeDragStart(d);
+                case "TableDrop"
+                    this.owner().Drag.onBridgeDrop(d);
                 case "BridgeDiag"
                     fprintf("%s\n", d.msg);
                 otherwise

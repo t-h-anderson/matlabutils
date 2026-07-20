@@ -9,6 +9,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
         HasToggleShowEmptyGroups
         HasColumnSorting
         HasAutoResizeColumns
+        HasToggleDragging
     end
 
     properties (Access = private)
@@ -19,6 +20,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
         HasToggleShowEmptyGroups_ (1,1) logical = false
         HasColumnSorting_ (1,1) logical = false
         HasAutoResizeColumns_ (1,1) logical = false
+        HasToggleDragging_ (1,1) logical = false
     end
 
     methods
@@ -161,6 +163,15 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             this.HasAutoResizeColumns_ = val;
             this.refresh();
         end
+
+        function val = get.HasToggleDragging(this)
+            val = this.HasToggleDragging_;
+        end
+
+        function set.HasToggleDragging(this, val)
+            this.HasToggleDragging_ = val;
+            this.refresh();
+        end
     end
 
     methods (Access = private)
@@ -177,7 +188,9 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
                 "ColumnSortable", columnSortable, ...
                 "SupportedSelectionTypes", this.SupportedSelectionTypes_, ...
                 "HasToggleFilter", this.HasToggleFilter_, ...
-                "HasAutoResizeColumns", this.HasAutoResizeColumns_);
+                "HasAutoResizeColumns", this.HasAutoResizeColumns_, ...
+                "HasToggleDragging", this.HasToggleDragging_, ...
+                "DragEnabled", this.owner().Drag.Enabled);
         end
 
         function callbacks = callbacks(this)
@@ -196,12 +209,19 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
                 "RowSelection", @(~,~)owner.Selection.requestRowSelection(), ...
                 "ColumnSelection", @(~,~)owner.Selection.requestColumnSelection(), ...
                 "ToggleRowFilter", @(~,~)this.toggleRowFilter(), ...
-                "AutoResizeColumns", @(~,~)owner.Column.requestAutoResize());
+                "AutoResizeColumns", @(~,~)owner.Column.requestAutoResize(), ...
+                "ToggleDragging", @(~,~)this.toggleDragging());
         end
 
         function toggleRowFilter(this)
             owner = this.owner();
             owner.ShowRowFilter = ~owner.ShowRowFilter;
+        end
+
+        function toggleDragging(this)
+            owner = this.owner();
+            owner.Drag.Enabled = ~owner.Drag.Enabled;
+            this.refresh();
         end
     end
 
@@ -331,6 +351,16 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             if options.HasAutoResizeColumns
                 uimenu("Parent", contextMenu, "Text", "Auto-resize columns", ...
                     "MenuSelectedFcn", callbacks.AutoResizeColumns, ...
+                    "Tag", "graphicscomponentsTableContextMenu");
+            end
+
+            if options.HasToggleDragging
+                menuText = "Enable row dragging";
+                if options.DragEnabled
+                    menuText = "Disable row dragging";
+                end
+                uimenu("Parent", contextMenu, "Text", menuText, ...
+                    "MenuSelectedFcn", callbacks.ToggleDragging, ...
                     "Tag", "graphicscomponentsTableContextMenu");
             end
         end

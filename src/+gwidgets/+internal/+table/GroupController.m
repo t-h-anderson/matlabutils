@@ -21,6 +21,7 @@ classdef GroupController < gwidgets.internal.table.TableController
         DisplayGroups_ (1,:) string = string.empty(1,0)
         Open_ (1,:) string = string.empty(1,0)
         Hidden_ (1,:) string = string.empty(1,0)
+        Order_ (1,:) string = string.empty(1,0)
         ShowEmpty_ (1,1) logical = false
         GroupingEngine (1,:) gwidgets.internal.table.GroupingController {mustBeScalarOrEmpty}
     end
@@ -160,6 +161,36 @@ classdef GroupController < gwidgets.internal.table.TableController
                 this.By, ...
                 this.RawOpen, ...
                 this.Hidden);
+            result = this.applyOrder(result);
+        end
+
+        function reorder(this, sourceGroup, targetGroup, placement)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                sourceGroup (1,1) string
+                targetGroup (1,1) string
+                placement (1,1) string {mustBeMember(placement, ["before", "after"])} = "before"
+            end
+
+            if sourceGroup == targetGroup || isempty(sourceGroup) || isempty(targetGroup)
+                return
+            end
+
+            if this.reorderCategorical(sourceGroup, targetGroup, placement)
+                return
+            end
+
+            groups = this.Groups_;
+            if isempty(groups)
+                groups = [sourceGroup, targetGroup];
+            end
+            this.Order_ = gwidgets.internal.table.GroupController.moveLabels( ...
+                groups, sourceGroup, targetGroup, placement);
+
+            owner = this.owner();
+            if owner.doControllerUpdate("GroupOrder")
+                owner.requestControllerUpdate(StartFrom="Grouping");
+            end
         end
 
         function result = foldData(this, dataController)
@@ -190,6 +221,7 @@ classdef GroupController < gwidgets.internal.table.TableController
             this.Groups_ = string.empty(1,0);
             this.Open_ = string.empty(1,0);
             this.Hidden_ = string.empty(1,0);
+            this.Order_ = string.empty(1,0);
         end
 
         function applyGroupingResult(this, result)
@@ -367,6 +399,58 @@ classdef GroupController < gwidgets.internal.table.TableController
     end
 
     methods (Access = private)
+        function tf = reorderCategorical(this, sourceGroup, targetGroup, placement)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                sourceGroup (1,1) string
+                targetGroup (1,1) string
+                placement (1,1) string
+            end
+
+            tf = false;
+            if numel(this.By_) ~= 1
+                return
+            end
+
+            owner = this.owner();
+            data = owner.Data.Table;
+            groupingVariable = this.By_(1);
+            if ~iscategorical(data.(groupingVariable))
+                return
+            end
+
+            categoriesInOrder = string(categories(data.(groupingVariable)));
+            if ~ismember(sourceGroup, categoriesInOrder) || ~ismember(targetGroup, categoriesInOrder)
+                return
+            end
+
+            categoriesInOrder = gwidgets.internal.table.GroupController.moveLabels( ...
+                categoriesInOrder, sourceGroup, targetGroup, placement);
+            data.(groupingVariable) = reordercats(data.(groupingVariable), categoriesInOrder);
+            this.Order_ = string.empty(1,0);
+            owner.Data.Table = data;
+            tf = true;
+        end
+
+        function result = applyOrder(this, result)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                result (1,1) struct
+            end
+
+            groups = result.Groups;
+            order = this.Order_(ismember(this.Order_, groups));
+            order = [order, groups(~ismember(groups, order))];
+            [~, orderIdx] = ismember(order, groups);
+            orderIdx(orderIdx == 0) = [];
+
+            if isempty(orderIdx) || isequal(orderIdx, 1:numel(groups))
+                return
+            end
+
+            result = gwidgets.internal.table.GroupController.reorderResult(result, orderIdx);
+        end
+
         function columnIdx = groupingColumnFromContext(this, displayColumn)
             arguments
                 this (1,1) gwidgets.internal.table.GroupController
@@ -389,6 +473,71 @@ classdef GroupController < gwidgets.internal.table.TableController
                 otherwise
                     columnIdx = displayColumn;
             end
+        end
+    end
+
+    methods (Static, Access = private)
+        function labels = moveLabels(labels, sourceLabel, targetLabel, placement)
+            labels = reshape(labels, 1, []);
+            sourceIdx = find(labels == sourceLabel, 1);
+            targetIdx = find(labels == targetLabel, 1);
+
+            if isempty(sourceIdx) || isempty(targetIdx)
+                return
+            end
+
+            movingLabel = labels(sourceIdx);
+            labels(sourceIdx) = [];
+            if sourceIdx < targetIdx
+                targetIdx = targetIdx - 1;
+            end
+            if placement == "after"
+                targetIdx = targetIdx + 1;
+            end
+
+            labels = [labels(1:targetIdx-1), movingLabel, labels(targetIdx:end)];
+        end
+
+        function result = reorderResult(result, orderIdx)
+            groupHeaderRowIdxs = [result.GroupHeaderRowIdx, size(result.GroupedVisibleData, 1)+1];
+            nGroups = numel(orderIdx);
+            groupRows = cell(1, nGroups);
+            groupSize = zeros(1, nGroups);
+            dataToVisibleGroups = cell(1, nGroups);
+
+            for iGroup = 1:nGroups
+                groupStart = groupHeaderRowIdxs(iGroup);
+                groupStop = groupHeaderRowIdxs(iGroup+1) - 1;
+                groupRows{iGroup} = groupStart:groupStop;
+                groupSize(iGroup) = numel(groupRows{iGroup}) - 1;
+
+                idx = ismember(result.GroupedDataToVisibleMap, groupRows{iGroup});
+                tmp = result.GroupedDataToVisibleMap;
+                tmp = tmp - sum(groupSize(1:iGroup-1)) - iGroup;
+                dataToVisibleGroups{iGroup} = tmp .* idx;
+            end
+
+            groupSize = groupSize(orderIdx);
+            groupRows = groupRows(orderIdx);
+            dataToVisibleGroups = dataToVisibleGroups(orderIdx);
+            newRowOrder = [groupRows{:}];
+
+            result.GroupedVisibleData = result.GroupedVisibleData(newRowOrder, :);
+            result.GroupedVisibleToDataMap = result.GroupedVisibleToDataMap(newRowOrder);
+            result.Groups = result.Groups(orderIdx);
+            result.GroupKeys = result.GroupKeys(orderIdx, :);
+            result.GroupFilteredCount = result.GroupFilteredCount(orderIdx);
+
+            result.GroupedDataToVisibleMap = 0*result.GroupedDataToVisibleMap;
+            cumSize = 1;
+            for iGroup = 1:numel(dataToVisibleGroups)
+                result.GroupedDataToVisibleMap = result.GroupedDataToVisibleMap + dataToVisibleGroups{iGroup} + ...
+                    (dataToVisibleGroups{iGroup} ~= 0)*cumSize;
+                cumSize = cumSize + groupSize(iGroup) + 1;
+            end
+
+            result.GroupHeaderRowIdx = [0, cumsum(groupSize)] + (1:(numel(groupSize)+1));
+            result.GroupHeaderRowIdx = result.GroupHeaderRowIdx(1:end-1);
         end
     end
 end

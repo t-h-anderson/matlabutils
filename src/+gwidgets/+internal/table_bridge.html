@@ -15,6 +15,8 @@
   //   Diag        true|false              — enable/disable diagnostic messages to MATLAB
   //   HoverEnable                         — start reporting CellHover events
   //   HoverDisable                        — stop reporting CellHover events
+  //   DragEnable  {moveKey,copyKey}       — start reporting table row drag/drop events
+  //   DragDisable                         — stop reporting table row drag/drop events
   //   SetTooltip  {blocks:[{containerCss, lines:[{text,css}...]}, ...]}
   //                           — render or hide the popup; empty list hides.
   //                             Each block is a styled container <div>;
@@ -24,6 +26,8 @@
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
   //   CellHover               — {row:int, col:int} (row=0 means header; 0/0 means none)
+  //   TableDragStart          — {sourceRow:int, sourceCol:int, key:string}
+  //   TableDrop               — {sourceRow:int, targetRow:int, placement:string, key:string}
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
   var COL_SELECTOR       = ".mw-table-header-column";
@@ -45,6 +49,12 @@
   var hoverListener      = null;
   var mouseDownListener  = null;
   var mouseUpListener    = null;
+  var mouseMoveListener  = null;
+  var dragEnabled        = false;
+  var moveDragKey        = "alt";
+  var copyDragKey        = "control";
+  var dragCandidate      = null;
+  var activeTableDrag    = null;
   var lastHoverRow       = -1;
   var lastHoverCol       = -1;
   var lastHoverCellEl    = null;
@@ -103,8 +113,15 @@
     if (mouseDownListener || mouseUpListener) return;
     var pd = parentDocument();
     if (!pd) return;
-    mouseDownListener = function() { isMoving = true; };
-    mouseUpListener = function() {
+    mouseDownListener = function(evt) {
+      isMoving = true;
+      onTableMouseDown(evt);
+    };
+    mouseMoveListener = function(evt) {
+      onTableMouseMove(evt);
+    };
+    mouseUpListener = function(evt) {
+      onTableMouseUp(evt);
       // isMoving must be false before we call onResize so the settled
       // event carries moving=false.  ResizeObserver won't fire after
       // release (size stopped changing), so we send one explicit report.
@@ -120,6 +137,7 @@
       flushDiag();
     };
     pd.addEventListener("mousedown", mouseDownListener, true);
+    pd.addEventListener("mousemove", mouseMoveListener, true);
     pd.addEventListener("mouseup", mouseUpListener, true);
   }
 
@@ -128,10 +146,14 @@
     var pd = parentDocument();
     if (pd) {
       if (mouseDownListener) pd.removeEventListener("mousedown", mouseDownListener, true);
+      if (mouseMoveListener) pd.removeEventListener("mousemove", mouseMoveListener, true);
       if (mouseUpListener) pd.removeEventListener("mouseup", mouseUpListener, true);
     }
     mouseDownListener = null;
+    mouseMoveListener = null;
     mouseUpListener = null;
+    dragCandidate = null;
+    activeTableDrag = null;
   }
 
   // ---- Observer management ----
@@ -189,9 +211,10 @@
     // aria-colindex attributes. This is the generic ARIA grid approach
     // and works regardless of which exact class names MATLAB happens
     // to use for cells/rows in a given release.
-    if (!target || !root) return { row: -1, col: -1, cell: null };
+    if (!target || !root) return { row: -1, col: -1, cell: null, rowEl: null };
     var row = -1, col = -1;
     var cellEl = null;
+    var rowEl = null;
     var node = target;
     while (node && node.nodeType === 1 && node !== root) {
       if (col < 0) {
@@ -200,8 +223,9 @@
       }
       if (row < 0) {
         var r = parseInt(node.getAttribute && node.getAttribute("aria-rowindex"), 10);
-        if (!isNaN(r)) row = r;
+        if (!isNaN(r)) { row = r; if (!rowEl) rowEl = node; }
       }
+      if (!rowEl && node.matches && node.matches(ROW_SELECTOR)) rowEl = node;
       if (row >= 0 && col >= 0) break;
       node = node.parentNode;
     }
@@ -237,7 +261,7 @@
     // MATLAB display indices directly — no shift needed. Header cells
     // have no aria-rowindex, so row stays at -1 and onHoverMove maps
     // that to 0 (= "header row").
-    return { row: row, col: col, cell: cellEl };
+    return { row: row, col: col, cell: cellEl, rowEl: rowEl };
   }
 
   // ---- Custom popup (replaces native title) ----------------------
@@ -326,6 +350,76 @@
     bridgeLog("[Bridge] " + ts() + " hover row=" + row + " col=" + col);
     flushDiag();
     htmlComponent.Data = { event: "CellHover", row: row, col: col };
+  }
+
+  function dragKeyFromEvent(evt) {
+    var hasModifier = evt.altKey || evt.ctrlKey || evt.shiftKey;
+    if (!hasModifier && (moveDragKey === "" || copyDragKey === "")) return "";
+    if (evt.altKey && (moveDragKey === "alt" || copyDragKey === "alt")) return "alt";
+    if (evt.ctrlKey && (moveDragKey === "control" || copyDragKey === "control")) return "control";
+    if (evt.shiftKey && (moveDragKey === "shift" || copyDragKey === "shift")) return "shift";
+    return null;
+  }
+
+  function onTableMouseDown(evt) {
+    if (!dragEnabled) return;
+    var key = dragKeyFromEvent(evt);
+    if (key === null) return;
+
+    var root = findTableRoot();
+    var pos = gridCoordsFromTarget(evt.target, root);
+    if (pos.row <= 0) return;
+
+    dragCandidate = {
+      row: pos.row,
+      col: pos.col >= 0 ? pos.col : 0,
+      key: key,
+      clientX: evt.clientX,
+      clientY: evt.clientY
+    };
+  }
+
+  function onTableMouseMove(evt) {
+    if (!dragEnabled || !dragCandidate || activeTableDrag) return;
+    var dx = evt.clientX - dragCandidate.clientX;
+    var dy = evt.clientY - dragCandidate.clientY;
+    if (Math.sqrt(dx*dx + dy*dy) < 5) return;
+
+    activeTableDrag = dragCandidate;
+    if (!htmlComponent) return;
+    htmlComponent.Data = {
+      event: "TableDragStart",
+      sourceRow: activeTableDrag.row,
+      sourceCol: activeTableDrag.col,
+      key: activeTableDrag.key
+    };
+  }
+
+  function onTableMouseUp(evt) {
+    if (!dragEnabled || !activeTableDrag) {
+      dragCandidate = null;
+      return;
+    }
+
+    var root = findTableRoot();
+    var pos = gridCoordsFromTarget(evt.target, root);
+    if (pos.row > 0 && htmlComponent) {
+      var placement = "after";
+      if (pos.rowEl) {
+        var rect = pos.rowEl.getBoundingClientRect();
+        placement = evt.clientY < (rect.top + rect.height/2) ? "before" : "after";
+      }
+      htmlComponent.Data = {
+        event: "TableDrop",
+        sourceRow: activeTableDrag.row,
+        targetRow: pos.row,
+        placement: placement,
+        key: activeTableDrag.key
+      };
+    }
+
+    dragCandidate = null;
+    activeTableDrag = null;
   }
 
   function onHoverMove(evt) {
@@ -430,6 +524,22 @@
       lastHoverCellEl = null;
       detachHover();
       bridgeLog("[Bridge] " + ts() + " HoverDisable");
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("DragEnable", function(event) {
+      dragEnabled = true;
+      moveDragKey = (event.Data && event.Data.moveKey) || "alt";
+      copyDragKey = (event.Data && event.Data.copyKey) || "control";
+      bridgeLog("[Bridge] " + ts() + " DragEnable move=" + moveDragKey + " copy=" + copyDragKey);
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("DragDisable", function() {
+      dragEnabled = false;
+      dragCandidate = null;
+      activeTableDrag = null;
+      bridgeLog("[Bridge] " + ts() + " DragDisable");
       flushDiag();
     });
 

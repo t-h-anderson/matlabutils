@@ -14,6 +14,7 @@ classdef UITable < gwidgets.internal.Reparentable
         Tooltip (1,1) gwidgets.internal.table.TooltipController
         Callback (1,1) gwidgets.internal.table.CallbackController
         Selection (1,1) gwidgets.internal.table.SelectionController
+        Drag (1,1) gwidgets.internal.table.DragController
     end
 
     properties (Dependent, Access = private)
@@ -34,6 +35,7 @@ classdef UITable < gwidgets.internal.Reparentable
             ?gwidgets.internal.table.UpdateController, ...
             ?gwidgets.internal.table.CallbackController, ...
             ?gwidgets.internal.table.BridgeController, ...
+            ?gwidgets.internal.table.DragController, ...
             ?gwidgets.internal.table.TooltipController}, ...
             SetAccess = private)
         Display (1,1) gwidgets.internal.table.DisplayController
@@ -56,6 +58,7 @@ classdef UITable < gwidgets.internal.Reparentable
         TooltipController_ (1,:) gwidgets.internal.table.TooltipController {mustBeScalarOrEmpty}
         CallbackApi_ (1,:) gwidgets.internal.table.CallbackController {mustBeScalarOrEmpty}
         SelectionApi_ (1,:) gwidgets.internal.table.SelectionController {mustBeScalarOrEmpty}
+        DragApi_ (1,:) gwidgets.internal.table.DragController {mustBeScalarOrEmpty}
         MenuApi_ (1,:) gwidgets.internal.table.ContextMenuController {mustBeScalarOrEmpty}
         DisplayApi_ (1,:) gwidgets.internal.table.DisplayController {mustBeScalarOrEmpty}
         BridgeApi_ (1,:) gwidgets.internal.table.BridgeController {mustBeScalarOrEmpty}
@@ -197,6 +200,10 @@ classdef UITable < gwidgets.internal.Reparentable
             val = this.SelectionApi_;
         end
 
+        function val = get.Drag(this)
+            val = this.DragApi_;
+        end
+
     end
 
     methods (Access = {?gwidgets.internal.table.ColumnController, ...
@@ -213,6 +220,7 @@ classdef UITable < gwidgets.internal.Reparentable
             ?gwidgets.internal.table.UpdateController, ...
             ?gwidgets.internal.table.CallbackController, ...
             ?gwidgets.internal.table.BridgeController, ...
+            ?gwidgets.internal.table.DragController, ...
             ?gwidgets.internal.table.TooltipController})
         function addControllerUpdateSuppression(this, propertyName, nvp)
             arguments
@@ -359,6 +367,7 @@ classdef UITable < gwidgets.internal.Reparentable
             this.TooltipController_ = gwidgets.internal.table.TooltipController(this);
             this.CallbackApi_ = gwidgets.internal.table.CallbackController(this);
             this.SelectionApi_ = gwidgets.internal.table.SelectionController(this);
+            this.DragApi_ = gwidgets.internal.table.DragController(this);
             this.initializeControllers();
         end
 
