@@ -86,6 +86,7 @@ classdef StyleController < gwidgets.internal.table.TableController
                 if thisStyle.SelectionMode == gwidgets.table.SelectionMode.Data
                     index = this.owner().Selection.dataToDisplay(index, target);
                 end
+                [target, index] = this.orientStyleTarget(target, index);
                 displayTable.addStyle(style, target, index);
             end
 
@@ -103,6 +104,30 @@ classdef StyleController < gwidgets.internal.table.TableController
             end
 
             styles = [styles, this.NestedGroupHeaderStyles_];
+        end
+
+        function [target, index] = orientStyleTarget(this, target, index)
+            arguments
+                this (1,1) gwidgets.internal.table.StyleController
+                target (1,1) string
+                index
+            end
+
+            if this.owner().Display.Orientation ~= "Transposed" || isempty(index)
+                return
+            end
+
+            switch target
+                case "row"
+                    target = "column";
+                    index = index + 1;
+                case "column"
+                    target = "row";
+                case "cell"
+                    index = [index(:, 2), index(:, 1) + 1];
+                otherwise
+                    % Table-wide styles remain table-wide.
+            end
         end
     end
 

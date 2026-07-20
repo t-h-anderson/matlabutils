@@ -47,7 +47,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
 
         function set.DisplayValue(this, val)
             val = this.validateShape(val);
-            this.validateDimensions(val, size(this.owner().Data.Visible));
+            this.validateDimensions(val, this.displaySelectionSize());
             this.Value_ = val;
             this.Mode = "Display";
             this.refreshVisibleSelection();
@@ -116,6 +116,10 @@ classdef SelectionController < gwidgets.internal.table.TableController
                 return
             end
 
+            if this.owner().Display.Orientation == "Transposed" && type == "cell"
+                visibleIdxs = this.transposedCellsToNormal(visibleIdxs);
+            end
+
             dataIdxs = gwidgets.internal.table.SelectionController.displayToDataStatic( ...
                 visibleIdxs, type, this.mapState());
         end
@@ -134,6 +138,9 @@ classdef SelectionController < gwidgets.internal.table.TableController
 
             visibleIdxs = gwidgets.internal.table.SelectionController.dataToDisplayStatic( ...
                 dataIdxs, type, this.mapState());
+            if this.owner().Display.Orientation == "Transposed" && type == "cell"
+                visibleIdxs = gwidgets.internal.table.SelectionController.normalCellsToTransposed(visibleIdxs);
+            end
         end
 
         function [displayIdx, shouldContinue] = onDisplaySelection(this, displayIdx, selectionType)
@@ -539,7 +546,43 @@ classdef SelectionController < gwidgets.internal.table.TableController
                 "GroupingVariable", owner.Group.By, ...
                 "DataWidth", size(owner.Data.Table, 2));
         end
+
+        function normalIdxs = transposedCellsToNormal(this, displayIdxs)
+            arguments
+                this (1,1) gwidgets.internal.table.SelectionController
+                displayIdxs (:,2) double
+            end
+
+            state = this.mapState();
+            visibleCols = state.VisibleDataColumnNames;
+            visibleCols(ismember(visibleCols, state.GroupingVariable)) = [];
+
+            isDataCell = displayIdxs(:, 2) > 1 ...
+                & displayIdxs(:, 1) >= 1 ...
+                & displayIdxs(:, 1) <= numel(visibleCols) ...
+                & displayIdxs(:, 2) - 1 <= numel(state.FoldedVisibleToDataMap);
+            displayIdxs = displayIdxs(isDataCell, :);
+            normalIdxs = [displayIdxs(:, 2) - 1, displayIdxs(:, 1)];
+        end
+
+        function sz = displaySelectionSize(this)
+            owner = this.owner();
+            if owner.Display.Orientation == "Transposed"
+                sz = size(owner.Graphics.DisplayTable.Data);
+            else
+                sz = size(owner.Data.Visible);
+            end
+        end
+    end
+
+    methods (Static)
+        function displayIdxs = normalCellsToTransposed(normalIdxs)
+            arguments
+                normalIdxs (:,2) double
+            end
+
+            displayIdxs = [normalIdxs(:, 2), normalIdxs(:, 1) + 1];
+        end
     end
 
 end
-

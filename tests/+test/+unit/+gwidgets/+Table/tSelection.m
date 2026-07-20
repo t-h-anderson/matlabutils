@@ -29,6 +29,28 @@ classdef tSelection < test.WithExampleTables
             testCase.verifyEqual(t.DisplaySelection, [2 2])
         end
 
+        function tTransposedCellSelectionMapsToData(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData(), DisplayOrientation="Transposed");
+
+            t.Selection = [2 4];
+
+            testCase.verifyEqual(t.Selection, [2 4])
+            testCase.verifyEqual(t.DisplaySelection, [4 3])
+
+            t.DisplaySelection = [4 1; 4 3];
+
+            testCase.verifyEqual(t.Selection, [2 4])
+            testCase.verifyEqual(t.DisplaySelection, [4 1; 4 3])
+        end
+
+        function tTransposedDisplayEditMapsToData(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData(), DisplayOrientation="Transposed");
+
+            t.UITable.Data.editDisplayCell([4 3], "z", t.UITable.Selection);
+
+            testCase.verifyEqual(t.Data.String(2), "z")
+        end
+
         function tDisplaySelectionMapsThroughAliases(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.ColumnNames = ["Number", "Category", "Boolean", "Text"];

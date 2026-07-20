@@ -133,6 +133,27 @@ classdef tGrouping < test.WithExampleTables
                 "⮞ G1: B (2/2)"])
         end
 
+        function tGroupColumnSpanPayloadUsesTransposedLabels(testCase)
+            data = table( ...
+                ["B"; "A"; "A"; "B"], ...
+                ["x"; "x"; "y"; "x"], ...
+                [1; 2; 3; 4], ...
+                'VariableNames', {'G1', 'G2', 'Value'});
+            t = gwidgets.Table(Data=data, GroupingVariable=["G1", "G2"], GroupingMode="Nested");
+
+            t.OpenGroups = "A";
+            t.DisplayOrientation = "Transposed";
+
+            payload = gwidgets.internal.table.BridgeController.groupColumnSpanPayload( ...
+                t.DisplayTable.Data, t.UITable.Data.VisibleGroupHeaderRowIdx);
+            t.DisplayOrientation = "Normal";
+            rowPayload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
+                t.DisplayTable.Data, t.UITable.Data.VisibleGroupHeaderRowIdx);
+
+            testCase.verifyEqual(payload.columns, [2 3 4 5])
+            testCase.verifyEqual(string(payload.labels), string(rowPayload.labels))
+        end
+
         function tUngroupedTable(testCase)
             data = testCase.stringData();
             t = gwidgets.Table(Data=data);

@@ -48,6 +48,7 @@ classdef Table < matlab.mixin.SetGet
         ShowRowFilter (1,1) logical
         Tooltip (1,1) string
         DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle
+        DisplayOrientation (1,1) string
         Parent
         Position
         Units
@@ -300,6 +301,19 @@ classdef Table < matlab.mixin.SetGet
 
         function set.DefaultTooltipStyle(this, val)
             this.TooltipControl.DefaultStyle = val;
+        end
+
+        function val = get.DisplayOrientation(this)
+            val = this.UITable_.Display.Orientation;
+        end
+
+        function set.DisplayOrientation(this, val)
+            arguments
+                this (1,1) gwidgets.Table
+                val (1,1) string {mustBeMember(val, ["Normal", "Transposed"])}
+            end
+
+            this.UITable_.Display.Orientation = val;
         end
 
         function val = get.Tooltips(this)

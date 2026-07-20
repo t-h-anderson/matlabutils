@@ -170,12 +170,21 @@ classdef BridgeController < gwidgets.internal.table.TableController
             owner = this.owner();
             if isempty(owner) || isempty(owner.Graphics.DisplayTable) || ~isvalid(owner.Graphics.DisplayTable)
                 this.send("SetGroupHeaderSpans", struct("rows", zeros(1,0), "labels", {cell(1,0)}));
+                this.send("SetGroupColumnSpans", struct("columns", zeros(1,0), "labels", {cell(1,0)}));
                 return
             end
 
-            payload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
-                owner.Graphics.DisplayTable.Data, owner.Data.VisibleGroupHeaderRowIdx);
-            this.send("SetGroupHeaderSpans", payload);
+            if owner.Display.Orientation == "Transposed"
+                this.send("SetGroupHeaderSpans", struct("rows", zeros(1,0), "labels", {cell(1,0)}));
+                payload = gwidgets.internal.table.BridgeController.groupColumnSpanPayload( ...
+                    owner.Graphics.DisplayTable.Data, owner.Data.VisibleGroupHeaderRowIdx);
+                this.send("SetGroupColumnSpans", payload);
+            else
+                this.send("SetGroupColumnSpans", struct("columns", zeros(1,0), "labels", {cell(1,0)}));
+                payload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
+                    owner.Graphics.DisplayTable.Data, owner.Data.VisibleGroupHeaderRowIdx);
+                this.send("SetGroupHeaderSpans", payload);
+            end
         end
     end
 
@@ -198,6 +207,28 @@ classdef BridgeController < gwidgets.internal.table.TableController
             end
 
             payload = struct("rows", rowIdx, "labels", {cellstr(labels)});
+        end
+
+        function payload = groupColumnSpanPayload(displayData, rowIdx)
+            arguments
+                displayData (:,:) table
+                rowIdx (1,:) double
+            end
+
+            columns = rowIdx + 1;
+            if height(displayData) == 0 || width(displayData) == 0 || isempty(columns)
+                payload = struct("columns", zeros(1,0), "labels", {cell(1,0)});
+                return
+            end
+
+            columns = columns(columns >= 1 & columns <= width(displayData));
+            labels = strings(1, numel(columns));
+            for iColumn = 1:numel(columns)
+                labels(iColumn) = gwidgets.internal.table.BridgeController.labelString( ...
+                    displayData{1, columns(iColumn)});
+            end
+
+            payload = struct("columns", columns, "labels", {cellstr(labels)});
         end
     end
 
