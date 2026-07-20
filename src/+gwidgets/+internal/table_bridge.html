@@ -21,6 +21,8 @@
   //                           — render or hide the popup; empty list hides.
   //                             Each block is a styled container <div>;
   //                             each line inside has its own per-line CSS.
+  //   SetGroupHeaderSpans {rows:[...], labels:[...]}
+  //                           — render group header labels over the full table row.
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
@@ -61,6 +63,9 @@
   var lastClientX        = 0;
   var lastClientY        = 0;
   var tooltipEl          = null;
+  var groupHeaderSpans   = [];
+  var groupHeaderSpanState = [];
+  var spanScrollListener = null;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -262,6 +267,229 @@
     // have no aria-rowindex, so row stays at -1 and onHoverMove maps
     // that to 0 (= "header row").
     return { row: row, col: col, cell: cellEl, rowEl: rowEl };
+  }
+
+  // ---- Group header row spanning --------------------------------
+
+  function normaliseArray(value) {
+    if (!value && value !== 0) return [];
+    return Array.isArray(value) ? value : [value];
+  }
+
+  function normaliseGroupHeaderSpans(data) {
+    var rows = normaliseArray(data && data.rows);
+    var labels = normaliseArray(data && data.labels);
+    var result = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = parseInt(rows[i], 10);
+      if (isNaN(row) || row <= 0) continue;
+      result.push({
+        row: row,
+        label: labels[i] === undefined || labels[i] === null ? "" : String(labels[i])
+      });
+    }
+    return result;
+  }
+
+  function rowElementForIndex(root, rowIndex) {
+    if (!root) return null;
+    var rows = Array.from(root.querySelectorAll(ROW_SELECTOR));
+    for (var i = 0; i < rows.length; i++) {
+      var rowEl = rows[i];
+      var ariaRow = parseInt(rowEl.getAttribute && rowEl.getAttribute("aria-rowindex"), 10);
+      if (!isNaN(ariaRow) && ariaRow === rowIndex) return rowEl;
+
+      var indexedCell = rowEl.querySelector && rowEl.querySelector("[aria-rowindex='" + rowIndex + "']");
+      if (indexedCell) return rowEl;
+    }
+    return null;
+  }
+
+  function bodyCellsForRow(rowEl) {
+    if (!rowEl) return [];
+    var cells = Array.from(rowEl.querySelectorAll(CELL_SELECTOR));
+    if (cells.length > 0) return cells;
+    return Array.from(rowEl.children || []);
+  }
+
+  function clearGroupHeaderSpans() {
+    for (var i = 0; i < groupHeaderSpanState.length; i++) {
+      var state = groupHeaderSpanState[i];
+      if (state.overlay && state.overlay.isConnected) state.overlay.remove();
+      if (state.rowEl && state.rowEl.isConnected) state.rowEl.style.position = state.rowPosition;
+      restoreHiddenStyles(state.hiddenText);
+      restoreHiddenStyles(state.hiddenDividers);
+    }
+    groupHeaderSpanState = [];
+  }
+
+  function hideCellText(cells) {
+    var hidden = [];
+    var elements = [];
+    var props = ["color", "text-shadow", "-webkit-text-fill-color"];
+
+    for (var i = 0; i < cells.length; i++) {
+      if (!cells[i]) continue;
+      elements.push(cells[i]);
+      var descendants = Array.from(cells[i].querySelectorAll("*"));
+      for (var j = 0; j < descendants.length; j++) {
+        elements.push(descendants[j]);
+      }
+    }
+
+    for (var k = 0; k < elements.length; k++) {
+      var el = elements[k];
+      if (elements.indexOf(el) !== k) continue;
+      var savedProps = [];
+      for (var p = 0; p < props.length; p++) {
+        savedProps.push({
+          name: props[p],
+          value: el.style.getPropertyValue(props[p]),
+          priority: el.style.getPropertyPriority(props[p])
+        });
+      }
+      hidden.push({
+        el: el,
+        props: savedProps
+      });
+      el.style.setProperty("color", "transparent", "important");
+      el.style.setProperty("text-shadow", "none", "important");
+      el.style.setProperty("-webkit-text-fill-color", "transparent", "important");
+    }
+
+    return hidden;
+  }
+
+  function hideCellVerticalDividers(cells) {
+    var hidden = [];
+    var props = [
+      "border-left-color",
+      "border-right-color",
+      "border-inline-start-color",
+      "border-inline-end-color"
+    ];
+
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      if (!cell) continue;
+
+      var savedProps = [];
+      for (var p = 0; p < props.length; p++) {
+        savedProps.push({
+          name: props[p],
+          value: cell.style.getPropertyValue(props[p]),
+          priority: cell.style.getPropertyPriority(props[p])
+        });
+      }
+
+      hidden.push({
+        el: cell,
+        props: savedProps
+      });
+
+      if (i > 0) {
+        cell.style.setProperty("border-left-color", "transparent", "important");
+        cell.style.setProperty("border-inline-start-color", "transparent", "important");
+      }
+      if (i < cells.length - 1) {
+        cell.style.setProperty("border-right-color", "transparent", "important");
+        cell.style.setProperty("border-inline-end-color", "transparent", "important");
+      }
+    }
+
+    return hidden;
+  }
+
+  function restoreHiddenStyles(hidden) {
+    if (!hidden) return;
+    for (var i = 0; i < hidden.length; i++) {
+      var item = hidden[i];
+      if (!item.el || !item.el.isConnected) continue;
+      for (var p = 0; p < item.props.length; p++) {
+        var prop = item.props[p];
+        if (prop.value) {
+          item.el.style.setProperty(prop.name, prop.value, prop.priority);
+        } else {
+          item.el.style.removeProperty(prop.name);
+        }
+      }
+    }
+  }
+
+  function renderGroupHeaderSpans() {
+    clearGroupHeaderSpans();
+    if (!groupHeaderSpans || groupHeaderSpans.length === 0) return;
+
+    var root = findTableRoot();
+    if (!root) return;
+
+    for (var i = 0; i < groupHeaderSpans.length; i++) {
+      var span = groupHeaderSpans[i];
+      var rowEl = rowElementForIndex(root, span.row);
+      var cells = bodyCellsForRow(rowEl);
+      if (!rowEl || cells.length === 0) continue;
+
+      var firstCellStyle = window.getComputedStyle(cells[0]);
+      var overlay = rowEl.ownerDocument.createElement("div");
+      overlay.className = "gwidgets-group-header-span";
+      overlay.textContent = span.label;
+      overlay.style.cssText = [
+        "position:absolute",
+        "left:0",
+        "right:0",
+        "top:0",
+        "bottom:0",
+        "z-index:3",
+        "pointer-events:none",
+        "display:flex",
+        "align-items:center",
+        "box-sizing:border-box",
+        "padding-left:6px",
+        "white-space:nowrap",
+        "overflow:hidden",
+        "text-overflow:ellipsis"
+      ].join(";") + ";";
+      overlay.style.color = firstCellStyle.color;
+      overlay.style.fontFamily = firstCellStyle.fontFamily;
+      overlay.style.fontSize = firstCellStyle.fontSize;
+      overlay.style.fontWeight = firstCellStyle.fontWeight;
+      overlay.style.fontStyle = firstCellStyle.fontStyle;
+      overlay.style.lineHeight = firstCellStyle.lineHeight;
+
+      var hiddenText = hideCellText(cells);
+      var hiddenDividers = hideCellVerticalDividers(cells);
+
+      var rowPosition = rowEl.style.position;
+      if (window.getComputedStyle(rowEl).position === "static") rowEl.style.position = "relative";
+      rowEl.appendChild(overlay);
+      groupHeaderSpanState.push({
+        overlay: overlay,
+        rowEl: rowEl,
+        rowPosition: rowPosition,
+        hiddenText: hiddenText,
+        hiddenDividers: hiddenDividers
+      });
+    }
+  }
+
+  function onSpanScroll() {
+    if (!groupHeaderSpans || groupHeaderSpans.length === 0) return;
+    renderGroupHeaderSpans();
+  }
+
+  function attachSpanScroll() {
+    if (spanScrollListener) return;
+    var pd = parentDocument();
+    if (!pd) return;
+    spanScrollListener = onSpanScroll;
+    pd.addEventListener("scroll", spanScrollListener, true);
+  }
+
+  function detachSpanScroll() {
+    if (!spanScrollListener) return;
+    var pd = parentDocument();
+    if (pd) pd.removeEventListener("scroll", spanScrollListener, true);
+    spanScrollListener = null;
   }
 
   // ---- Custom popup (replaces native title) ----------------------
@@ -467,10 +695,12 @@
   function cleanup() {
     detachHover();
     detachMouseTracking();
+    detachSpanScroll();
     if (resizeObserver) {
       resizeObserver.disconnect();
       resizeObserver = null;
     }
+    clearGroupHeaderSpans();
     hideTooltip();
     htmlComponent = null;
   }
@@ -491,6 +721,7 @@
     htmlComponent.addEventListener("Ready", function() {
       bridgeLog("[Bridge] " + ts() + " Ready");
       attachObserver();
+      renderGroupHeaderSpans();
       flushDiag();
     });
 
@@ -548,6 +779,12 @@
       // Render them in our floating popup div near the cursor.
       var blocks = (event.Data && event.Data.blocks) || [];
       renderTooltipBlocks(blocks);
+    });
+
+    htmlComponent.addEventListener("SetGroupHeaderSpans", function(event) {
+      groupHeaderSpans = normaliseGroupHeaderSpans(event.Data || {});
+      if (groupHeaderSpans.length > 0) attachSpanScroll();
+      renderGroupHeaderSpans();
     });
 
     htmlComponent.Data = { event: "BridgeReady" };

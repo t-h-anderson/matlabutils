@@ -129,6 +129,7 @@ classdef Table < matlab.mixin.SetGet
         DisplayGroups (1,:) string
         IsGroupTable (1,1) logical
         GroupingVariable (1,:) string
+        GroupingMode (1,1) string
         GroupingVariableName (1,1) string
         OpenGroups (1,:) string
         ClosedGroups (1,:) string
@@ -812,6 +813,14 @@ classdef Table < matlab.mixin.SetGet
             this.Group.By = val;
         end
 
+        function val = get.GroupingMode(this)
+            val = this.Group.Mode;
+        end
+
+        function set.GroupingMode(this, val)
+            this.Group.Mode = val;
+        end
+
         function val = get.SortByColumn(this)
             val = this.Sort.By;
         end
@@ -874,6 +883,10 @@ classdef Table < matlab.mixin.SetGet
             end
 
             style = gwidgets.internal.table.StyleController.defaultGroupHeaderStyle(style);
+        end
+
+        function styles = defaultNestedGroupHeaderStyles()
+            styles = gwidgets.internal.table.StyleController.defaultNestedGroupHeaderStyles();
         end
     end
 

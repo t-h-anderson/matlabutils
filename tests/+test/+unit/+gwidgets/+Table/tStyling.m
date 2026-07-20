@@ -23,6 +23,27 @@ classdef tStyling < test.WithExampleTables
 
         end
 
+        function tNestedGroupHeadersUseLevelStyles(testCase)
+            data = table( ...
+                ["A"; "A"], ...
+                ["x"; "x"], ...
+                ["p"; "q"], ...
+                [1; 2], ...
+                'VariableNames', {'G1', 'G2', 'G3', 'Value'});
+            t = gwidgets.Table(Data=data, ...
+                GroupingVariable=["G1", "G2", "G3"], ...
+                GroupingMode="Nested");
+
+            t.OpenGroups = ["A", "A|x"];
+
+            configs = t.StyleConfigurations;
+            testCase.verifyEqual(configs.TargetIndex{1}, 1)
+            testCase.verifyEqual(configs.TargetIndex{2}, 2)
+            testCase.verifyEqual(configs.TargetIndex{3}, [3 4])
+            testCase.verifyNotEqual(configs.Style(1).BackgroundColor, configs.Style(2).BackgroundColor)
+            testCase.verifyNotEqual(configs.Style(2).BackgroundColor, configs.Style(3).BackgroundColor)
+        end
+
         function tAddStyleToCells(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             s = uistyle(FontColor="blue");

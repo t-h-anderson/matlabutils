@@ -213,7 +213,11 @@ classdef DragController < gwidgets.internal.table.TableController
 
             group = owner.Group.DisplayGroups(groupDisplayIdx);
             groupIdx = find(owner.Group.Groups == group, 1);
-            dataRows = find(owner.Data.GroupIdxs == groupIdx);
+            if owner.Group.Mode == "Nested" && groupIdx <= numel(owner.Data.GroupHeaderDataRows)
+                dataRows = owner.Data.GroupHeaderDataRows{groupIdx};
+            else
+                dataRows = find(owner.Data.GroupIdxs == groupIdx);
+            end
             selection = this.selectionStruct("group", displayRow, dataRows, group, placement);
         end
 

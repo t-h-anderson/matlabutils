@@ -136,6 +136,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
             end
 
             this.send("Ready", []);
+            this.applyGroupHeaderSpans();
         end
 
         function reattach(this)
@@ -159,6 +160,44 @@ classdef BridgeController < gwidgets.internal.table.TableController
             end
 
             this.send("SetTooltip", struct("blocks", {blocks}));
+        end
+
+        function applyGroupHeaderSpans(this)
+            arguments
+                this (1,1) gwidgets.internal.table.BridgeController
+            end
+
+            owner = this.owner();
+            if isempty(owner) || isempty(owner.Graphics.DisplayTable) || ~isvalid(owner.Graphics.DisplayTable)
+                this.send("SetGroupHeaderSpans", struct("rows", zeros(1,0), "labels", {cell(1,0)}));
+                return
+            end
+
+            payload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
+                owner.Graphics.DisplayTable.Data, owner.Data.VisibleGroupHeaderRowIdx);
+            this.send("SetGroupHeaderSpans", payload);
+        end
+    end
+
+    methods (Static)
+        function payload = groupHeaderSpanPayload(displayData, rowIdx)
+            arguments
+                displayData (:,:) table
+                rowIdx (1,:) double
+            end
+
+            if width(displayData) == 0 || isempty(rowIdx)
+                payload = struct("rows", zeros(1,0), "labels", {cell(1,0)});
+                return
+            end
+
+            rowIdx = rowIdx(rowIdx >= 1 & rowIdx <= height(displayData));
+            labels = strings(1, numel(rowIdx));
+            for iRow = 1:numel(rowIdx)
+                labels(iRow) = gwidgets.internal.table.BridgeController.labelString(displayData{rowIdx(iRow), 1});
+            end
+
+            payload = struct("rows", rowIdx, "labels", {cellstr(labels)});
         end
     end
 
@@ -230,5 +269,28 @@ classdef BridgeController < gwidgets.internal.table.TableController
             sendEventToHTMLSource(this.Bridge, eventName, payload);
         end
     end
-end
 
+    methods (Static, Access = private)
+        function label = labelString(value)
+            if iscell(value)
+                if isempty(value)
+                    label = "";
+                    return
+                end
+                value = value{1};
+            end
+
+            if isstring(value)
+                if isempty(value)
+                    label = "";
+                else
+                    label = value(1);
+                end
+            elseif ischar(value)
+                label = string(value);
+            else
+                label = string(value);
+            end
+        end
+    end
+end

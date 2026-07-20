@@ -3,7 +3,8 @@ classdef SortingController < handle
 
     methods
         function result = sort(this, filteredData, dataTable, groupedVisibleData, groupedDataVariables, ...
-                groupingVariable, groups, groupKeys, groupHeaderRowIdx, groupFilteredCount, ...
+                groupingVariable, groups, groupKeys, groupHeaderRowIdx, groupHeaderLevels, groupHeaderDataRows, ...
+                groupFilteredCount, ...
                 groupedVisibleToDataMap, groupedDataToVisibleMap, dataColumnSortable, sortByDataColumn, ...
                 sortDirection)
             arguments
@@ -16,6 +17,8 @@ classdef SortingController < handle
                 groups (1,:) string
                 groupKeys (:,:) table
                 groupHeaderRowIdx (1,:) double
+                groupHeaderLevels (1,:) double
+                groupHeaderDataRows (1,:) cell
                 groupFilteredCount (1,:) double
                 groupedVisibleToDataMap (1,:) double
                 groupedDataToVisibleMap (1,:) double
@@ -30,11 +33,21 @@ classdef SortingController < handle
             sortedGroupHeaderRowIdx = groupHeaderRowIdx;
             sortedGroupValues = groups;
             sortedGroupKeys = groupKeys;
+            sortedGroupHeaderLevels = groupHeaderLevels;
+            sortedGroupHeaderDataRows = groupHeaderDataRows;
             sortedGroupFilteredCount = groupFilteredCount;
+
+            if any(groupHeaderLevels > 0)
+                result = this.createResult(data, dataToVisibleMap, visibleToDataMap, ...
+                    sortedGroupHeaderRowIdx, sortedGroupHeaderLevels, sortedGroupHeaderDataRows, ...
+                    sortedGroupValues, sortedGroupKeys, sortedGroupFilteredCount);
+                return
+            end
 
             if sortDirection == "None"
                 result = this.createResult(data, dataToVisibleMap, visibleToDataMap, ...
-                    sortedGroupHeaderRowIdx, sortedGroupValues, sortedGroupKeys, sortedGroupFilteredCount);
+                    sortedGroupHeaderRowIdx, sortedGroupHeaderLevels, sortedGroupHeaderDataRows, ...
+                    sortedGroupValues, sortedGroupKeys, sortedGroupFilteredCount);
                 return
             end
 
@@ -46,7 +59,8 @@ classdef SortingController < handle
                     || (isscalar(dataColumnSortable) && ~dataColumnSortable) ...
                     || (~isscalar(dataColumnSortable) && all(~dataColumnSortable))
                 result = this.createResult(data, dataToVisibleMap, visibleToDataMap, ...
-                    sortedGroupHeaderRowIdx, sortedGroupValues, sortedGroupKeys, sortedGroupFilteredCount);
+                    sortedGroupHeaderRowIdx, sortedGroupHeaderLevels, sortedGroupHeaderDataRows, ...
+                    sortedGroupValues, sortedGroupKeys, sortedGroupFilteredCount);
                 return
             elseif ~isscalar(dataColumnSortable)
                 vars = string(dataTable.Properties.VariableNames);
@@ -124,19 +138,22 @@ classdef SortingController < handle
             end
 
             result = this.createResult(data, dataToVisibleMap, visibleToDataMap, ...
-                sortedGroupHeaderRowIdx, sortedGroupValues, sortedGroupKeys, sortedGroupFilteredCount);
+                sortedGroupHeaderRowIdx, sortedGroupHeaderLevels, sortedGroupHeaderDataRows, ...
+                sortedGroupValues, sortedGroupKeys, sortedGroupFilteredCount);
         end
     end
 
     methods (Access = private)
         function result = createResult(this, data, dataToVisibleMap, visibleToDataMap, ...
-                groupHeaderRowIdx, groupValues, groupKeys, groupFilteredCount)
+                groupHeaderRowIdx, groupHeaderLevels, groupHeaderDataRows, groupValues, groupKeys, groupFilteredCount)
             arguments
                 this (1,1) gwidgets.internal.table.SortingController %#ok<INUSA>
                 data (:,:) cell
                 dataToVisibleMap (1,:) double
                 visibleToDataMap (1,:) double
                 groupHeaderRowIdx (1,:) double
+                groupHeaderLevels (1,:) double
+                groupHeaderDataRows (1,:) cell
                 groupValues (1,:) string
                 groupKeys (:,:) table
                 groupFilteredCount (1,:) double
@@ -147,6 +164,8 @@ classdef SortingController < handle
                 "SortedDataToVisibleMap", dataToVisibleMap, ...
                 "SortedVisibleToDataMap", visibleToDataMap, ...
                 "SortedGroupHeaderRowIdx", groupHeaderRowIdx, ...
+                "SortedGroupHeaderLevels", groupHeaderLevels, ...
+                "SortedGroupHeaderDataRows", {groupHeaderDataRows}, ...
                 "SortedGroupValues", groupValues, ...
                 "SortedGroupKeys", groupKeys, ...
                 "SortedGroupFilteredCount", groupFilteredCount);

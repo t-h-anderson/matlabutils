@@ -8,8 +8,10 @@ classdef StyleController < gwidgets.internal.table.TableController
 
     properties (Access = private)
         Styles_ (1,:) gwidgets.internal.table.TableStyle
-        GroupHeaderStyle_ (1,:) gwidgets.internal.table.TableStyle {mustBeScalarOrEmpty} = ...
+        GroupHeaderStyle_ (1,:) gwidgets.internal.table.TableStyle = ...
             gwidgets.internal.table.StyleController.defaultGroupHeaderStyle()
+        NestedGroupHeaderStyles_ (1,:) gwidgets.internal.table.TableStyle = ...
+            gwidgets.internal.table.StyleController.defaultNestedGroupHeaderStyles()
     end
 
     methods
@@ -74,7 +76,7 @@ classdef StyleController < gwidgets.internal.table.TableController
         function applyToDisplay(this)
             displayTable = this.owner().Graphics.DisplayTable;
             displayTable.removeStyle();
-            styles = [this.Styles_, this.GroupHeaderStyle_];
+            styles = [this.Styles_, this.groupHeaderStylesForDisplay()];
 
             for iStyle = 1:numel(styles)
                 thisStyle = styles(iStyle);
@@ -88,6 +90,19 @@ classdef StyleController < gwidgets.internal.table.TableController
             end
 
             this.owner().forceRefresh();
+            this.owner().Bridge.applyGroupHeaderSpans();
+        end
+    end
+
+    methods (Access = private)
+        function styles = groupHeaderStylesForDisplay(this)
+            owner = this.owner();
+            styles = this.GroupHeaderStyle_;
+            if numel(styles) ~= 1 || owner.Group.Mode ~= "Nested" || ~any(owner.Data.VisibleGroupHeaderLevels > 1)
+                return
+            end
+
+            styles = [styles, this.NestedGroupHeaderStyles_];
         end
     end
 
@@ -132,7 +147,26 @@ classdef StyleController < gwidgets.internal.table.TableController
             style = gwidgets.internal.table.TableStyle( ...
                 style, "row", ...
                 SelectionMode="Display", ...
-                TargetFunction=@(this)this.Data.VisibleGroupHeaderRowIdx);
+                TargetFunction=@(this)gwidgets.internal.table.StyleController.groupHeaderRowsAtLevel(this, 1));
+        end
+
+        function styles = defaultNestedGroupHeaderStyles()
+            levelTwo = matlab.ui.style.Style( ...
+                "BackgroundColor", [0.16 0.36 0.50], ...
+                "FontColor", [0.95 0.95 0.95]);
+            levelThree = matlab.ui.style.Style( ...
+                "BackgroundColor", [0.24 0.42 0.38], ...
+                "FontColor", [0.95 0.95 0.95]);
+
+            styles = [ ...
+                gwidgets.internal.table.TableStyle( ...
+                levelTwo, "row", ...
+                SelectionMode="Display", ...
+                TargetFunction=@(this)gwidgets.internal.table.StyleController.groupHeaderRowsAtLevel(this, 2)), ...
+                gwidgets.internal.table.TableStyle( ...
+                levelThree, "row", ...
+                SelectionMode="Display", ...
+                TargetFunction=@(this)gwidgets.internal.table.StyleController.groupHeaderRowsFromLevel(this, 3))];
         end
 
         function styles = removeStyle(styles, orderNum)
@@ -170,6 +204,47 @@ classdef StyleController < gwidgets.internal.table.TableController
                 end
                 displayTable.addStyle(style, target, index);
             end
+        end
+    end
+
+    methods (Static, Access = private)
+        function rowIdx = groupHeaderRowsAtLevel(tbl, level)
+            arguments
+                tbl (1,1) gwidgets.UITable
+                level (1,1) double
+            end
+
+            rowIdx = tbl.Data.VisibleGroupHeaderRowIdx;
+            levels = tbl.Data.VisibleGroupHeaderLevels;
+            if isempty(rowIdx) || isempty(levels)
+                rowIdx = zeros(1,0);
+                return
+            end
+
+            if all(levels == 0)
+                if level ~= 1
+                    rowIdx = zeros(1,0);
+                end
+                return
+            end
+
+            rowIdx = rowIdx(levels == level);
+        end
+
+        function rowIdx = groupHeaderRowsFromLevel(tbl, minLevel)
+            arguments
+                tbl (1,1) gwidgets.UITable
+                minLevel (1,1) double
+            end
+
+            rowIdx = tbl.Data.VisibleGroupHeaderRowIdx;
+            levels = tbl.Data.VisibleGroupHeaderLevels;
+            if isempty(rowIdx) || isempty(levels) || all(levels == 0)
+                rowIdx = zeros(1,0);
+                return
+            end
+
+            rowIdx = rowIdx(levels >= minLevel);
         end
     end
 

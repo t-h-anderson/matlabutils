@@ -481,6 +481,9 @@ classdef SelectionController < gwidgets.internal.table.TableController
                 owner.Graphics.DisplayTable.Selection = [];
             end
             delete(cleanupObj);
+            if owner.Menu.HasChangeGroupingVariable
+                owner.Menu.refresh();
+            end
             owner.forceRefresh();
         end
 

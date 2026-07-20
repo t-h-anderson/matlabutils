@@ -10,6 +10,7 @@ classdef GroupController < gwidgets.internal.table.TableController
         Closed
         Hidden
         ShowEmpty
+        Mode
         IsGrouped
         Groups
         DisplayGroups
@@ -23,6 +24,7 @@ classdef GroupController < gwidgets.internal.table.TableController
         Hidden_ (1,:) string = string.empty(1,0)
         Order_ (1,:) string = string.empty(1,0)
         ShowEmpty_ (1,1) logical = false
+        Mode_ (1,1) string {mustBeMember(Mode_, ["Flat", "Nested"])} = "Flat"
         GroupingEngine (1,:) gwidgets.internal.table.GroupingController {mustBeScalarOrEmpty}
     end
 
@@ -61,7 +63,7 @@ classdef GroupController < gwidgets.internal.table.TableController
                 this (1,1) gwidgets.internal.table.GroupController
             end
 
-            this.By = string.empty(1,0);
+            this.clearBy();
         end
 
         function requestToggleShowEmpty(this)
@@ -78,22 +80,90 @@ classdef GroupController < gwidgets.internal.table.TableController
                 displayColumn (1,1) double
             end
 
-            owner = this.owner();
-            columnIdx = this.groupingColumnFromContext(displayColumn);
-            groupingVariable = string(owner.Graphics.DisplayTable.Data.Properties.VariableNames(columnIdx));
-            groupingVariable = owner.Column.aliasesToData(groupingVariable);
-            groupingVariable(~ismember(groupingVariable, owner.Column.DataNames)) = [];
+            this.replaceBy(this.groupingVariablesFromContext(displayColumn));
+        end
 
-            if isempty(groupingVariable)
-                groupingVariable = string.empty(1,0);
+        function requestAddGroupBy(this, displayColumn)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                displayColumn (1,1) double
             end
 
-            owner.Selection.clear();
+            this.addBy(this.groupingVariablesFromContext(displayColumn));
+        end
+
+        function requestRemoveGroupBy(this, groupingVariable)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                groupingVariable (1,:) string
+            end
+
+            this.removeBy(groupingVariable);
+        end
+
+        function requestToggleMode(this)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+            end
+
+            if this.Mode == "Flat"
+                this.Mode = "Nested";
+            else
+                this.Mode = "Flat";
+            end
+        end
+
+        function replaceBy(this, groupingVariable)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                groupingVariable (1,:) string
+            end
+
+            this.owner().Selection.clear();
             try
                 this.By = groupingVariable;
             catch
                 this.By = string.empty(1,0);
             end
+        end
+
+        function addBy(this, groupingVariable)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                groupingVariable (1,:) string
+            end
+
+            groupingVariable = this.validateGroupingVariables(groupingVariable);
+            if isempty(groupingVariable)
+                return
+            end
+
+            this.owner().Selection.clear();
+            this.By = [this.By_, groupingVariable];
+        end
+
+        function removeBy(this, groupingVariable)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                groupingVariable (1,:) string
+            end
+
+            groupingVariable = this.validateGroupingVariables(groupingVariable);
+            if isempty(groupingVariable)
+                return
+            end
+
+            this.owner().Selection.clear();
+            this.By = this.By_(~ismember(this.By_, groupingVariable));
+        end
+
+        function clearBy(this)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+            end
+
+            this.owner().Selection.clear();
+            this.By = string.empty(1,0);
         end
 
         function toggleOpenStateForRows(this, rowIdx, groupHeaderRowIdx)
@@ -153,15 +223,26 @@ classdef GroupController < gwidgets.internal.table.TableController
                 dataController (1,1) gwidgets.internal.table.DataController
             end
 
-            result = this.GroupingEngine.group( ...
-                dataController.Table, ...
-                dataController.Filtered, ...
-                dataController.FilteredDataToVisibleMap, ...
-                dataController.FilteredVisibleToDataMap, ...
-                this.By, ...
-                this.RawOpen, ...
-                this.Hidden);
-            result = this.applyOrder(result);
+            if this.Mode == "Nested"
+                result = this.GroupingEngine.groupNested( ...
+                    dataController.Table, ...
+                    dataController.Filtered, ...
+                    dataController.FilteredDataToVisibleMap, ...
+                    dataController.FilteredVisibleToDataMap, ...
+                    this.By, ...
+                    this.RawOpen, ...
+                    this.Hidden);
+            else
+                result = this.GroupingEngine.group( ...
+                    dataController.Table, ...
+                    dataController.Filtered, ...
+                    dataController.FilteredDataToVisibleMap, ...
+                    dataController.FilteredVisibleToDataMap, ...
+                    this.By, ...
+                    this.RawOpen, ...
+                    this.Hidden);
+                result = this.applyOrder(result);
+            end
         end
 
         function reorder(this, sourceGroup, targetGroup, placement)
@@ -197,6 +278,22 @@ classdef GroupController < gwidgets.internal.table.TableController
             arguments
                 this (1,1) gwidgets.internal.table.GroupController
                 dataController (1,1) gwidgets.internal.table.DataController
+            end
+
+            if this.Mode == "Nested"
+                result = this.GroupingEngine.foldNested( ...
+                    dataController.SortedVisible, ...
+                    dataController.SortedGroupHeaderRowIdx, ...
+                    dataController.SortedGroupValues, ...
+                    dataController.SortedGroupHeaderLevels, ...
+                    dataController.SortedVisibleToDataMap, ...
+                    dataController.SortedDataToVisibleMap, ...
+                    dataController.SortedGroupFilteredCount, ...
+                    this.By, ...
+                    this.Open, ...
+                    this.ShowEmpty, ...
+                    string(dataController.Table.Properties.VariableNames));
+                return
             end
 
             result = this.GroupingEngine.fold( ...
@@ -279,6 +376,7 @@ classdef GroupController < gwidgets.internal.table.TableController
             if owner.doControllerUpdate("GroupingVariable")
                 owner.requestControllerUpdate(StartFrom="Grouping");
             end
+            owner.Menu.refresh();
         end
 
         function val = get.ByName(this)
@@ -384,6 +482,23 @@ classdef GroupController < gwidgets.internal.table.TableController
             end
         end
 
+        function val = get.Mode(this)
+            val = this.Mode_;
+        end
+
+        function set.Mode(this, val)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                val (1,1) string {mustBeMember(val, ["Flat", "Nested"])}
+            end
+
+            this.Mode_ = val;
+            if this.owner().doControllerUpdate("GroupingMode")
+                this.owner().requestControllerUpdate(StartFrom="Grouping");
+            end
+            this.owner().Menu.refresh();
+        end
+
         function val = get.IsGrouped(this)
             val = ~isempty(this.By_);
         end
@@ -449,6 +564,22 @@ classdef GroupController < gwidgets.internal.table.TableController
             end
 
             result = gwidgets.internal.table.GroupController.reorderResult(result, orderIdx);
+        end
+
+        function groupingVariable = groupingVariablesFromContext(this, displayColumn)
+            owner = this.owner();
+            columnIdx = this.groupingColumnFromContext(displayColumn);
+            groupingVariable = string(owner.Graphics.DisplayTable.Data.Properties.VariableNames(columnIdx));
+            groupingVariable = owner.Column.aliasesToData(groupingVariable);
+            groupingVariable = this.validateGroupingVariables(groupingVariable);
+        end
+
+        function groupingVariable = validateGroupingVariables(this, groupingVariable)
+            owner = this.owner();
+            groupingVariable = reshape(string(groupingVariable), 1, []);
+            groupingVariable(groupingVariable == "") = [];
+            groupingVariable = unique(groupingVariable, "stable");
+            groupingVariable(~ismember(groupingVariable, owner.Column.DataNames)) = [];
         end
 
         function columnIdx = groupingColumnFromContext(this, displayColumn)
