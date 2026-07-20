@@ -26,6 +26,12 @@ Run the table demo from MATLAB with:
 run("doc/TableDemo.m")
 ```
 
+For fuller MATLAB-style documentation, open:
+
+- `doc/TableUserGuide.m`: user-facing workflow and controller API examples.
+- `doc/TableDeveloperGuide.m`: controller architecture, update phases, bridge boundaries, and performance rules.
+- `doc/TableBridge_DeveloperNotes.md`: detailed JavaScript bridge notes.
+
 ### Table Controller API
 
 `gwidgets.Table` exposes focused controller objects for table behavior. Prefer these for new code:
@@ -34,14 +40,22 @@ run("doc/TableDemo.m")
 t = gwidgets.Table(Data=data);
 
 t.Column.Sortable = true;
+t.FilterControl.FilterValue = "Category=A|B";
 t.Group.By = ["Category", "Status"];
 t.Group.openAll();
+t.SelectionControl.Type = "row";
+t.SelectionControl.Value = 1;
 t.Sort.By = ["Status", "Value"];
 t.Sort.Direction = "Ascend";
+t.TooltipControl.Text = "Visible table row";
 ```
 
 The older pass-through properties, such as `GroupingVariable`, `OpenGroups`, `SortByColumn`, and `SortDirection`,
-remain supported as compatibility aliases.
+remain supported as compatibility aliases. Where a legacy value property already uses the natural name, the controller
+surface uses a `Control` suffix, such as `FilterControl`, `SelectionControl`, and `TooltipControl`.
+
+Automatic `drawnow`/`pause` flushing is disabled during normal table creation and customisation. Build larger apps by
+creating figures hidden, setting controller state, and showing the figure once setup is complete.
 
 ## Testing
 

@@ -23,6 +23,34 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyNumElements(t.Tooltips, 1)
         end
 
+        function tTooltipControllerAliasesRemainLive(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            style = gwidgets.table.TooltipStyle(BackgroundColor="#456");
+
+            t.UITable.Tooltip.setTooltipText("alias text");
+            t.UITable.Tooltip.setDefaultTooltipStyle(style);
+            didEnable = t.UITable.Tooltip.addTooltip("row text", "row", @(tbl)2);
+            didDisable = t.UITable.Tooltip.removeTooltip(1);
+
+            testCase.verifyEqual(t.UITable.Tooltip.TooltipText, "alias text")
+            testCase.verifyEqual(t.UITable.Tooltip.DefaultTooltipStyle.BackgroundColor, "#456")
+            testCase.verifyTrue(didEnable)
+            testCase.verifyTrue(didDisable)
+            testCase.verifyEmpty(t.Tooltips)
+        end
+
+        function tDetachedTooltipControllerHandlesTextAndRejectsAdd(testCase)
+            controller = gwidgets.internal.table.TooltipController();
+            style = gwidgets.table.TooltipStyle(FontColor="white");
+
+            controller.Text = "detached";
+            controller.DefaultStyle = style;
+
+            testCase.verifyEqual(controller.Text, "detached")
+            testCase.verifyEqual(controller.DefaultStyle.FontColor, "white")
+            testCase.verifyError(@()controller.add("x"), "GraphicsWidgets:Table:TooltipOwner")
+        end
+
         function tAddTooltipWithStaticStyle(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             sty = gwidgets.table.TooltipStyle( ...
@@ -497,6 +525,107 @@ classdef tTooltips < test.WithExampleTables
             testCase.verifyEqual(t.simulateBridgeHover(2, 1), "tgt=row")
         end
 
+        function tFunctionTooltipTextArrayJoins(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.addTooltip(@(ctx)["line 1"; "line 2"], "cell", [1 1]);
+
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), ...
+                strjoin(["line 1", "line 2"], newline))
+        end
+
+        function tFunctionTooltipUnwrapsCellValue(testCase)
+            data = table({42; 99}, VariableNames="Value");
+            t = gwidgets.Table(Data=data);
+            t.addTooltip(@(ctx)"value=" + string(ctx.Value), "cell", [1 1]);
+
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), "value=42")
+        end
+
+        function tTableTooltipOutOfRangeContext(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.addTooltip(@test.unit.gwidgets.Table.tTooltips.describeContext, "table");
+
+            testCase.verifyEqual(t.simulateBridgeHover(0, 0), ...
+                "missing=true,row=true,col=true")
+            testCase.verifyEqual(t.simulateBridgeHover(99, 99), ...
+                "missing=true,row=true,col=true")
+        end
+
+        function tTooltipTargetErrorIsSkipped(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.Tooltip = "fallback";
+            t.BridgeDiagEnabled = true;
+            t.addTooltip("bad target", "column", ...
+                @test.unit.gwidgets.Table.tTooltips.targetFunctionMaybeErrors);
+            setappdata(t.DisplayTable, "ThrowTooltipTargetError", true);
+
+            testCase.verifyWarning(@()t.simulateBridgeHover(1, 1), ...
+                "GraphicsWidgets:Table:TooltipTargetError")
+
+            t.BridgeDiagEnabled = false;
+
+            testCase.verifyEqual(t.simulateBridgeHover(1, 1), "fallback")
+        end
+
+        function tTableTooltipConstructorBranches(testCase)
+            style = gwidgets.table.TooltipStyle();
+            tableTooltip = gwidgets.internal.table.TableTooltip( ...
+                "text", "table", "TargetIndices", [1 1]);
+            rowTooltip = gwidgets.internal.table.TableTooltip( ...
+                "text", "row", "TargetFunction", @(tbl)2, "Style", style);
+
+            testCase.verifyEmpty(tableTooltip.TargetIndices)
+            testCase.verifyEqual(rowTooltip.indices(), 2)
+            testCase.verifyEqual(rowTooltip.defaultContextShapeFor(), "Table")
+            testCase.verifyError( ...
+                @()gwidgets.internal.table.TableTooltip("text", "row"), ...
+                "GraphicsWidgets:Table:TooltipTargetIndices")
+            testCase.verifyError( ...
+                @()gwidgets.internal.table.TableTooltip("text", "row", ...
+                    "TargetIndices", 1, "Style", "bad"), ...
+                "GraphicsWidgets:Table:TooltipStyleArg")
+        end
+
+        function tTooltipStyleFullCss(testCase)
+            style = gwidgets.table.TooltipStyle( ...
+                FontWeight="bold", ...
+                FontSize=14, ...
+                FontFamily="Arial", ...
+                Padding=6, ...
+                BorderColor=[1 0 0], ...
+                BorderRadius=5);
+            css = style.toCss();
+
+            testCase.verifyThat(css, ...
+                matlab.unittest.constraints.ContainsSubstring("font-weight:bold"))
+            testCase.verifyThat(css, ...
+                matlab.unittest.constraints.ContainsSubstring("font-size:14px"))
+            testCase.verifyThat(css, ...
+                matlab.unittest.constraints.ContainsSubstring("font-family:Arial"))
+            testCase.verifyThat(css, ...
+                matlab.unittest.constraints.ContainsSubstring("padding:6px"))
+            testCase.verifyThat(css, ...
+                matlab.unittest.constraints.ContainsSubstring("border:1px solid rgb(255,0,0)"))
+            testCase.verifyThat(css, ...
+                matlab.unittest.constraints.ContainsSubstring("border-radius:5px"))
+            testCase.verifyEqual(gwidgets.table.TooltipStyle.cssColor([1 2]), "inherit")
+        end
+
+    end
+
+    methods (Static, Access = private)
+        function text = describeContext(ctx)
+            text = "missing=" + string(ismissing(ctx.Value)) + ...
+                ",row=" + string(isnan(ctx.DataRow)) + ...
+                ",col=" + string(isnan(ctx.DataColumn));
+        end
+
+        function idx = targetFunctionMaybeErrors(uiTable)
+            if isappdata(uiTable.Graphics.DisplayTable, "ThrowTooltipTargetError")
+                error("test:TableTooltip:Target", "Target resolution failed.")
+            end
+            idx = 1;
+        end
     end
 
 end

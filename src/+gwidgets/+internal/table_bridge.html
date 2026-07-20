@@ -43,6 +43,8 @@
   var diagQueue          = [];
   var hoverEnabled       = false;
   var hoverListener      = null;
+  var mouseDownListener  = null;
+  var mouseUpListener    = null;
   var lastHoverRow       = -1;
   var lastHoverCol       = -1;
   var lastHoverCellEl    = null;
@@ -66,6 +68,14 @@
     diagQueue = [];
   }
 
+  function parentDocument() {
+    try {
+      return window.parent && window.parent.document ? window.parent.document : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // ---- DOM helpers ----
 
   function colWidthsFromDOM(cols) {
@@ -75,8 +85,8 @@
   // ---- DOM locator ----
 
   function findColumns() {
-    var parentDoc;
-    try { parentDoc = window.parent.document; } catch (e) { return []; }
+    var parentDoc = parentDocument();
+    if (!parentDoc) return [];
     if (tableTag) {
       var tableEl = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
       if (tableEl) {
@@ -90,25 +100,38 @@
   // ---- Mouse tracking — drives the moving flag ----
 
   function setupMouseTracking() {
-    try {
-      var pd = window.parent.document;
-      pd.addEventListener("mousedown", function() { isMoving = true; }, true);
-      pd.addEventListener("mouseup", function() {
-        // isMoving must be false before we call onResize so the settled
-        // event carries moving=false.  ResizeObserver won't fire after
-        // release (size stopped changing), so we send one explicit report.
-        isMoving = false;
-        onResize();
-        // Self-suppress: block the snap-back ResizeObserver callback that fires
-        // ~120ms after mouseup when the drag handler releases its px constraints
-        // and the <th> reverts to the pre-drag <col> widths.  MATLAB takes ~133ms
-        // to process the ColumnWidthChanged above and deliver Suppress — too late.
-        // We suppress here instead; MATLAB un-suppresses via Restore as normal.
-        callbackSuppressed = true;
-        bridgeLog("[Bridge] " + ts() + " mouseup self-suppress");
-        flushDiag();
-      }, true);
-    } catch (e) {}
+    if (mouseDownListener || mouseUpListener) return;
+    var pd = parentDocument();
+    if (!pd) return;
+    mouseDownListener = function() { isMoving = true; };
+    mouseUpListener = function() {
+      // isMoving must be false before we call onResize so the settled
+      // event carries moving=false.  ResizeObserver won't fire after
+      // release (size stopped changing), so we send one explicit report.
+      isMoving = false;
+      onResize();
+      // Self-suppress: block the snap-back ResizeObserver callback that fires
+      // ~120ms after mouseup when the drag handler releases its px constraints
+      // and the <th> reverts to the pre-drag <col> widths. MATLAB takes ~133ms
+      // to process the ColumnWidthChanged above and deliver Suppress - too late.
+      // We suppress here instead; MATLAB un-suppresses via Restore as normal.
+      callbackSuppressed = true;
+      bridgeLog("[Bridge] " + ts() + " mouseup self-suppress");
+      flushDiag();
+    };
+    pd.addEventListener("mousedown", mouseDownListener, true);
+    pd.addEventListener("mouseup", mouseUpListener, true);
+  }
+
+  function detachMouseTracking() {
+    if (!mouseDownListener && !mouseUpListener) return;
+    var pd = parentDocument();
+    if (pd) {
+      if (mouseDownListener) pd.removeEventListener("mousedown", mouseDownListener, true);
+      if (mouseUpListener) pd.removeEventListener("mouseup", mouseUpListener, true);
+    }
+    mouseDownListener = null;
+    mouseUpListener = null;
   }
 
   // ---- Observer management ----
@@ -127,6 +150,7 @@
 
   function onResize() {
     if (callbackSuppressed) return;
+    if (!htmlComponent) return;
     var cols = findColumns();
     if (cols.length === 0) return;
     var widths = colWidthsFromDOM(cols);
@@ -141,8 +165,8 @@
   // ---- Cell hover tracking ----
 
   function findTableRoot() {
-    var parentDoc;
-    try { parentDoc = window.parent.document; } catch (e) { return null; }
+    var parentDoc = parentDocument();
+    if (!parentDoc) return null;
     if (tableTag) {
       var el = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
       if (el) return el;
@@ -165,6 +189,7 @@
     // aria-colindex attributes. This is the generic ARIA grid approach
     // and works regardless of which exact class names MATLAB happens
     // to use for cells/rows in a given release.
+    if (!target || !root) return { row: -1, col: -1, cell: null };
     var row = -1, col = -1;
     var cellEl = null;
     var node = target;
@@ -219,8 +244,8 @@
 
   function ensureTooltipEl() {
     if (tooltipEl && tooltipEl.isConnected) return tooltipEl;
-    var pd;
-    try { pd = window.parent.document; } catch (e) { return null; }
+    var pd = parentDocument();
+    if (!pd) return null;
     tooltipEl = pd.createElement("div");
     tooltipEl.id = "gwidgets-tooltip";
     tooltipEl.style.cssText = [
@@ -241,8 +266,8 @@
 
   function positionTooltipNearCursor() {
     if (!tooltipEl) return;
-    var pd;
-    try { pd = window.parent.document; } catch (e) { return; }
+    var pd = parentDocument();
+    if (!pd) return;
     var w = tooltipEl.offsetWidth;
     var h = tooltipEl.offsetHeight;
     var viewW = pd.documentElement.clientWidth;
@@ -295,6 +320,7 @@
 
   function sendHover(row, col) {
     if (row === lastHoverRow && col === lastHoverCol) return;
+    if (!htmlComponent) return;
     lastHoverRow = row;
     lastHoverCol = col;
     bridgeLog("[Bridge] " + ts() + " hover row=" + row + " col=" + col);
@@ -329,21 +355,30 @@
 
   function attachHover() {
     if (hoverListener) return;
-    try {
-      var pd = window.parent.document;
-      hoverListener = onHoverMove;
-      pd.addEventListener("mouseover", hoverListener, true);
-    } catch (e) {}
+    var pd = parentDocument();
+    if (!pd) return;
+    hoverListener = onHoverMove;
+    pd.addEventListener("mouseover", hoverListener, true);
   }
 
   function detachHover() {
     if (!hoverListener) return;
-    try {
-      window.parent.document.removeEventListener("mouseover", hoverListener, true);
-    } catch (e) {}
+    var pd = parentDocument();
+    if (pd) pd.removeEventListener("mouseover", hoverListener, true);
     hoverListener = null;
     lastHoverRow = -1;
     lastHoverCol = -1;
+  }
+
+  function cleanup() {
+    detachHover();
+    detachMouseTracking();
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
+    hideTooltip();
+    htmlComponent = null;
   }
 
   // ---- Event wiring ----
@@ -351,6 +386,7 @@
   function setup(component) {
     htmlComponent = component;
     setupMouseTracking();
+    window.addEventListener("beforeunload", cleanup);
 
     htmlComponent.addEventListener("Init", function(event) {
       tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;

@@ -150,7 +150,7 @@ classdef DragLinker < handle
     end  % public methods
 
     % ================================================================== %
-    methods (Access = private)
+    methods (Access = ?matlab.unittest.TestCase)
 
         % ---- Listener Setup ----------------------------------------- %
 
@@ -380,7 +380,11 @@ classdef DragLinker < handle
                 if ~isempty(h.Value)
                     vals = h.Value;
                     if isscalar(vals)
-                        txt = string(vals{1});
+                        if iscell(vals)
+                            txt = string(vals{1});
+                        else
+                            txt = string(vals(1));
+                        end
                     else
                         txt = sprintf("%d items", numel(vals));
                     end

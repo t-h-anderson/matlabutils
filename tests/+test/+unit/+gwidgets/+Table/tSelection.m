@@ -278,6 +278,94 @@ classdef tSelection < test.WithExampleTables
             testCase.verifyEqual(t.DisplaySelection, double.empty(0,2))
         end
 
+        function tCellSelectionAcceptsTransposedPair(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+
+            t.Selection = [2; 3];
+
+            testCase.verifyEqual(t.Selection, [2 3])
+            testCase.verifyEqual(t.DisplaySelection, [2 3])
+        end
+
+        function tSelectionRejectsNonnumericAndUndefinedValues(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+
+            testCase.verifyError(@() t.set("Selection", "bad"), ...
+                "GraphicsWidgets:Table:UnsupportedSelectionSize")
+            testCase.verifyError(@() t.set("Selection", [NaN 1]), ...
+                "GraphicsWidgets:Table:UnsupportedSelection")
+            testCase.verifyError(@() t.set("Selection", [Inf 1]), ...
+                "GraphicsWidgets:Table:UnsupportedSelection")
+            testCase.verifyError(@() t.set("Selection", [0 1]), ...
+                "GraphicsWidgets:Table:UnsupportedSelection")
+        end
+
+        function tStaticDisplayToDataMapsRowsColumnsAndMissingRows(testCase)
+            state = test.unit.gwidgets.Table.tSelection.mappingState();
+
+            cellIdx = gwidgets.internal.table.SelectionController.displayToDataStatic([1 1; 2 2], "cell", state);
+            rowIdx = gwidgets.internal.table.SelectionController.displayToDataStatic([1 3], "row", state);
+            columnIdx = gwidgets.internal.table.SelectionController.displayToDataStatic([1 2], "column", state);
+
+            testCase.verifyEqual(cellIdx, [1 1])
+            testCase.verifyEqual(rowIdx, [1 3])
+            testCase.verifyEqual(columnIdx, [1 2])
+        end
+
+        function tStaticDataToDisplayMapsRowsColumnsAndHiddenColumns(testCase)
+            state = test.unit.gwidgets.Table.tSelection.mappingState();
+
+            cellIdx = gwidgets.internal.table.SelectionController.dataToDisplayStatic([1 1; 3 2], "cell", state);
+            rowIdx = gwidgets.internal.table.SelectionController.dataToDisplayStatic([1 3], "row", state);
+            columnIdx = gwidgets.internal.table.SelectionController.dataToDisplayStatic([1 3], "column", state);
+
+            testCase.verifyEqual(cellIdx, [1 1; 3 2])
+            testCase.verifyEqual(rowIdx, [1 3])
+            testCase.verifyEqual(columnIdx, 1)
+        end
+
+        function tStaticDataToDisplayHandlesEmptyFoldedMap(testCase)
+            state = test.unit.gwidgets.Table.tSelection.mappingState();
+            state.FoldedDataToVisibleMap = [];
+
+            cellIdx = gwidgets.internal.table.SelectionController.dataToDisplayStatic([1 1], "cell", state);
+            rowIdx = gwidgets.internal.table.SelectionController.dataToDisplayStatic(1, "row", state);
+            columnIdx = gwidgets.internal.table.SelectionController.dataToDisplayStatic(2, "column", state);
+
+            testCase.verifyEqual(cellIdx, zeros(0,2))
+            testCase.verifyEqual(rowIdx, zeros(1,0))
+            testCase.verifyEqual(columnIdx, 2)
+        end
+
+        function tStaticDisplayToDataDropsUnknownColumns(testCase)
+            state = test.unit.gwidgets.Table.tSelection.mappingState();
+            state.VisibleColumnNames = ["A", "Ghost"];
+            state.VisibleDataColumnNames = ["A", "Ghost"];
+
+            columnIdx = gwidgets.internal.table.SelectionController.displayToDataStatic(2, "column", state);
+
+            testCase.verifyEqual(columnIdx, zeros(1,0))
+        end
+
+        function tStaticDataToDisplayTableSelection(testCase)
+            state = test.unit.gwidgets.Table.tSelection.mappingState();
+
+            testCase.verifyError( ...
+                @()gwidgets.internal.table.SelectionController.dataToDisplayStatic([1 3], "table", state), ...
+                "GraphicsWidgets:Table:SelectionOutOfRange")
+        end
+
+        function tStaticDataToDisplayRejectsOutOfRangeSelections(testCase)
+            state = test.unit.gwidgets.Table.tSelection.mappingState();
+
+            testCase.verifyError( ...
+                @()gwidgets.internal.table.SelectionController.dataToDisplayStatic(4, "row", state), ...
+                "GraphicsWidgets:Table:SelectionOutOfRange")
+            testCase.verifyError( ...
+                @()gwidgets.internal.table.SelectionController.dataToDisplayStatic(4, "column", state), ...
+                "GraphicsWidgets:Table:SelectionOutOfRange")
+        end
+
         function tChangeSupportedSelectionTypes(testCase)
             % Change supported selection types after making a selection
             % with the previously supported type.
@@ -315,6 +403,20 @@ classdef tSelection < test.WithExampleTables
             testCase.verifyEqual(t.DisplaySelection, [2 2])
         end
 
+    end
+
+    methods (Static, Access = private)
+        function state = mappingState()
+            state = struct( ...
+                "FoldedVisibleToDataMap", [1 NaN 3], ...
+                "FoldedDataToVisibleMap", [1 NaN 3], ...
+                "FilteredDataToVisibleMap", [1 2 3], ...
+                "VisibleColumnNames", ["A", "Group", "B"], ...
+                "VisibleDataColumnNames", ["A", "Group", "B"], ...
+                "DataColumnNames", ["A", "B", "Hidden"], ...
+                "GroupingVariable", "Group", ...
+                "DataWidth", 3);
+        end
     end
 
 end

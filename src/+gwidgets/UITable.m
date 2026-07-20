@@ -244,10 +244,10 @@ classdef UITable < gwidgets.internal.Reparentable
 
         function forceRefresh(this)
             % Force a refresh
-            if this.SuppressForceRefresh_
+            if this.SuppressForceRefresh_ || ~gwidgets.internal.Drawnow.isEnabled()
                 return
             end
-            gwidgets.internal.Drawnow.runWithPause("limitrate");
+            gwidgets.internal.Drawnow.run("limitrate");
         end
 
     end

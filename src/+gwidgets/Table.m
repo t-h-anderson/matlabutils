@@ -1,5 +1,29 @@
 classdef Table < matlab.mixin.SetGet
     %TABLE Controller-first table widget with legacy-compatible aliases.
+    %   t = gwidgets.Table(Data=T) creates an interactive table widget for
+    %   tabular data. The primary API is exposed through focused
+    %   controllers:
+    %
+    %       t.Column             Column names, widths, visibility, editing
+    %       t.FilterControl      Programmatic and row-filter state
+    %       t.Group              Grouping and group folding
+    %       t.Sort               Sorting variables and direction
+    %       t.SelectionControl   Data/display selection state
+    %       t.Style              Table styles
+    %       t.TooltipControl     Static and function-based hover tooltips
+    %       t.Menu               Context-menu capabilities
+    %       t.Callback           Stable callback properties
+    %
+    %   Legacy aliases such as Filter, Selection, GroupingVariable,
+    %   SortByColumn, SortDirection, Tooltip, and addTooltip remain
+    %   supported for compatibility. Prefer controller properties in new
+    %   code.
+    %
+    %   Table creation and normal customisation do not force drawnow or
+    %   pause. For complex apps, create figures hidden, assign controller
+    %   state, and make the figure visible after setup.
+    %
+    %   See also gwidgets.UITable, gwidgets.table.TooltipStyle.
 
     properties (Access = private)
         UITable_ (1,:) gwidgets.UITable {mustBeScalarOrEmpty}
@@ -12,6 +36,9 @@ classdef Table < matlab.mixin.SetGet
         Style (1,1) gwidgets.internal.table.StyleController
         Menu (1,1) gwidgets.internal.table.ContextMenuController
         Callback (1,1) gwidgets.internal.table.CallbackController
+        FilterControl (1,1) gwidgets.internal.table.FilterController
+        SelectionControl (1,1) gwidgets.internal.table.SelectionController
+        TooltipControl (1,1) gwidgets.internal.table.TooltipController
     end
 
     properties (Dependent)
@@ -207,6 +234,18 @@ classdef Table < matlab.mixin.SetGet
             val = this.UITable_.Callback;
         end
 
+        function val = get.FilterControl(this)
+            val = this.UITable_.Filter;
+        end
+
+        function val = get.SelectionControl(this)
+            val = this.UITable_.Selection;
+        end
+
+        function val = get.TooltipControl(this)
+            val = this.UITable_.Tooltip;
+        end
+
         function val = get.Data(this)
             val = this.UITable_.Data.Table;
         end
@@ -220,12 +259,11 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.Filter(this)
-            val = this.UITable_.Filter.FilterValue;
+            val = this.FilterControl.FilterValue;
         end
 
         function set.Filter(this, val)
-            this.UITable_.Filter.FilterValue = val;
-            this.UITable_.runFilterUpdate();
+            this.FilterControl.FilterValue = val;
         end
 
         function val = get.ShowRowFilter(this)
@@ -237,23 +275,23 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.Tooltip(this)
-            val = this.UITable_.Tooltip.Text;
+            val = this.TooltipControl.Text;
         end
 
         function set.Tooltip(this, val)
-            this.UITable_.Tooltip.Text = val;
+            this.TooltipControl.Text = val;
         end
 
         function val = get.DefaultTooltipStyle(this)
-            val = this.UITable_.Tooltip.DefaultStyle;
+            val = this.TooltipControl.DefaultStyle;
         end
 
         function set.DefaultTooltipStyle(this, val)
-            this.UITable_.Tooltip.DefaultStyle = val;
+            this.TooltipControl.DefaultStyle = val;
         end
 
         function val = get.Tooltips(this)
-            val = this.UITable_.Tooltip.Tooltips;
+            val = this.TooltipControl.Tooltips;
         end
 
         function val = get.Parent(this)
@@ -517,35 +555,35 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function val = get.Multiselect(this)
-            val = this.UITable_.Selection.Multiselect;
+            val = this.SelectionControl.Multiselect;
         end
 
         function set.Multiselect(this, val)
-            this.UITable_.Selection.Multiselect = val;
+            this.SelectionControl.Multiselect = val;
         end
 
         function val = get.Selection(this)
-            val = this.UITable_.Selection.Value;
+            val = this.SelectionControl.Value;
         end
 
         function set.Selection(this, selection)
-            this.UITable_.Selection.Value = selection;
+            this.SelectionControl.Value = selection;
         end
 
         function val = get.SelectionType(this)
-            val = this.UITable_.Selection.Type;
+            val = this.SelectionControl.Type;
         end
 
         function set.SelectionType(this, selectionType)
-            this.UITable_.Selection.Type = selectionType;
+            this.SelectionControl.Type = selectionType;
         end
 
         function val = get.DisplaySelection(this)
-            val = this.UITable_.Selection.DisplayValue;
+            val = this.SelectionControl.DisplayValue;
         end
 
         function set.DisplaySelection(this, selection)
-            this.UITable_.Selection.DisplayValue = selection;
+            this.SelectionControl.DisplayValue = selection;
         end
     end
 
@@ -563,7 +601,7 @@ classdef Table < matlab.mixin.SetGet
                 nvp.Style = []
             end
 
-            this.UITable_.Tooltip.add(text, tableTarget, targetIndicesOrFunction, ...
+            this.TooltipControl.add(text, tableTarget, targetIndicesOrFunction, ...
                 SelectionMode=nvp.SelectionMode, ...
                 ContextShape=nvp.ContextShape, ...
                 Style=nvp.Style);
@@ -575,7 +613,7 @@ classdef Table < matlab.mixin.SetGet
                 orderNum (1,:) double = []
             end
 
-            this.UITable_.Tooltip.remove(orderNum);
+            this.TooltipControl.remove(orderNum);
         end
     end
 

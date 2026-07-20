@@ -112,6 +112,11 @@ classdef FilterController < gwidgets.internal.table.TableController
             if ~isempty(this.Component)
                 this.Component.FilterValue = val;
             end
+
+            owner = this.owner();
+            if ~isempty(owner) && owner.doControllerUpdate("Filter")
+                owner.requestControllerUpdate(StartFrom="Filtering");
+            end
         end
 
         function val = get.CategoricalVariables(this)

@@ -566,7 +566,7 @@ classdef FilterController < gwidgets.internal.Reparentable
 
     end
 
-    methods (Access = private)
+    methods (Access = ?matlab.unittest.TestCase)
 
         function createPopout(this)
             % Otherwise, create the popout
@@ -595,7 +595,6 @@ classdef FilterController < gwidgets.internal.Reparentable
             % Listen for this event, and pass a table into 
             % applyCurrentFilter
             this.FilterValue = this.FilterDropDown.Value;
-            gwidgets.internal.Drawnow.runWithPause(); % Required to make the filter value update on error
             notify(this, "FilterChanged");
         end
 
