@@ -326,6 +326,35 @@ classdef tControllerFacade < matlab.unittest.TestCase
             testCase.verifyEqual(t.Data.Var2(1), 42)
         end
 
+        function tTransposedClickCallbackMapsDataIndices(testCase)
+            t = test.unit.gwidgets.Table.tControllerFacade.createTable();
+            t.DisplayOrientation = "Transposed";
+            t.Callback.CellClicked = @(src, evt)setappdata(t.DisplayTable, "ClickedEvent", evt);
+            eventData = struct( ...
+                InteractionInformation=struct(DisplayRow=3, DisplayColumn=4));
+
+            t.UITable.Callback.onCellClicked([], eventData);
+
+            clickedData = getappdata(t.DisplayTable, "ClickedEvent");
+            testCase.verifyEqual(clickedData.DisplayIndices, [3 4])
+            testCase.verifyEqual(clickedData.Indices, [3 3])
+        end
+
+        function tTransposedGroupClickUsesDisplayColumn(testCase)
+            t = test.unit.gwidgets.Table.tControllerFacade.createTable();
+            t.Group.By = "Group";
+            t.DisplayOrientation = "Transposed";
+
+            headerRows = t.UITable.Data.VisibleGroupHeaderRowIdx;
+            targetGroup = t.DisplayGroups(2);
+            eventData = struct( ...
+                InteractionInformation=struct(DisplayRow=1, DisplayColumn=headerRows(2) + 1));
+
+            t.UITable.Callback.onCellClicked([], eventData);
+
+            testCase.verifyTrue(ismember(targetGroup, t.OpenGroups))
+        end
+
         function tCallbackControllerAppliesDisplaySort(testCase)
             t = test.unit.gwidgets.Table.tControllerFacade.createTable();
             t.Column.DataSortable = true;

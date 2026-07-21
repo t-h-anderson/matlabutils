@@ -610,9 +610,7 @@
         "height:" + rect.height + "px",
         "z-index:3",
         "pointer-events:none",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
+        "display:block",
         "box-sizing:border-box",
         "white-space:nowrap",
         "overflow:hidden"
@@ -627,12 +625,16 @@
       var label = pd.createElement("div");
       label.textContent = span.label;
       label.style.cssText = [
-        "transform:rotate(90deg)",
+        "position:absolute",
+        "left:50%",
+        "top:50%",
+        "width:" + Math.max(rect.height - 8, 0) + "px",
+        "transform:translate(-50%,-50%) rotate(-90deg)",
         "transform-origin:center",
         "white-space:nowrap",
         "overflow:hidden",
         "text-overflow:ellipsis",
-        "max-width:" + Math.max(rect.height - 8, 0) + "px"
+        "text-align:center"
       ].join(";") + ";";
       overlay.textContent = "";
       overlay.appendChild(label);

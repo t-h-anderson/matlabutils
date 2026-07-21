@@ -215,6 +215,7 @@ classdef DataController < gwidgets.internal.table.TableController
                 this.VisibleGroupHeaderLevels = zeros(1,0);
                 this.Visible = cell2table(this.SortedVisible, ...
                     VariableNames=string(this.Table.Properties.VariableNames));
+                this.applyVisibleRowNames();
                 return
             end
 
@@ -227,6 +228,26 @@ classdef DataController < gwidgets.internal.table.TableController
             this.VisibleGroupHeaderLevels = result.VisibleGroupHeaderLevels;
             this.FoldedVisibleToDataMap = result.FoldedVisibleToDataMap;
             this.FoldedDataToVisibleMap = result.FoldedDataToVisibleMap;
+        end
+
+        function applyVisibleRowNames(this)
+            arguments
+                this (1,1) gwidgets.internal.table.DataController
+            end
+
+            rowNames = string(this.Table.Properties.RowNames);
+            if isempty(rowNames) || height(this.Visible) == 0
+                return
+            end
+
+            dataRowIdx = this.SortedVisibleToDataMap;
+            if numel(dataRowIdx) ~= height(this.Visible) ...
+                    || any(ismissing(dataRowIdx)) ...
+                    || any(dataRowIdx < 1 | dataRowIdx > numel(rowNames))
+                return
+            end
+
+            this.Visible.Properties.RowNames = cellstr(rowNames(dataRowIdx));
         end
 
         function editDisplayCell(this, displayIdx, value, selectionController)

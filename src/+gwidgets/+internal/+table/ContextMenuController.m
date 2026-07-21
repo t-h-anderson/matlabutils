@@ -14,12 +14,13 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
     properties (Access = private)
         CustomItems_ (1,:) matlab.ui.container.Menu = matlab.ui.container.Menu.empty(1,0)
-        SupportedSelectionTypes_ (1,:) string {mustBeMember(SupportedSelectionTypes_, ["cell", "row", "column"])} = "cell"
+        SupportedSelectionTypes_ (1,:) string { ...
+            mustBeMember(SupportedSelectionTypes_, ["cell", "row", "column"])} = "cell"
         HasToggleFilter_ (1,1) logical = false
         HasChangeGroupingVariable_ (1,1) logical = false
         HasToggleShowEmptyGroups_ (1,1) logical = false
         HasColumnSorting_ (1,1) logical = false
-        HasAutoResizeColumns_ (1,1) logical = false
+        HasAutoResizeColumns_ (1,1) logical = true
         HasToggleDragging_ (1,1) logical = false
     end
 

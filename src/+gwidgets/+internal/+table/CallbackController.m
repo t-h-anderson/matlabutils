@@ -37,7 +37,7 @@ classdef CallbackController < gwidgets.internal.table.TableController
             owner = this.owner();
             displayIdx = this.interactionDisplayIndex(eventData);
             if ~isempty(displayIdx)
-                rowIdxs = unique(displayIdx(:,1));
+                rowIdxs = this.groupHeaderRowsFromDisplay(displayIdx);
                 owner.Group.toggleOpenStateForRows(rowIdxs, owner.Data.VisibleGroupHeaderRowIdx);
             end
 
@@ -191,6 +191,22 @@ classdef CallbackController < gwidgets.internal.table.TableController
             end
 
             owner.Sort.By = eventData.InteractionVariable;
+        end
+
+        function rowIdxs = groupHeaderRowsFromDisplay(this, displayIdx)
+            arguments
+                this (1,1) gwidgets.internal.table.CallbackController
+                displayIdx (:,2) double
+            end
+
+            owner = this.owner();
+            if owner.Display.Orientation == "Transposed"
+                rowIdxs = unique(displayIdx(:, 2)) - 1;
+                rowIdxs(rowIdxs < 1) = [];
+                return
+            end
+
+            rowIdxs = unique(displayIdx(:, 1));
         end
     end
 

@@ -99,6 +99,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                     currentVal = displayTable.DisplayData;
                     newVal = gwidgets.internal.table.DisplayController.visibleDataForTable( ...
                         newVal, this.updateState(owner));
+                    columnName = this.columnNamesForDisplay(newVal);
                     newVal = this.orientVisibleData(newVal);
                     newVar = "Data";
                 else
@@ -109,6 +110,11 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 if ~isequal(currentVal, newVal)
                     nUpdates = nUpdates + 2;
                     toUpdate(nUpdates-1:nUpdates) = {newVar, newVal};
+                end
+
+                if currentVar == "VisibleData" && ~isequal(displayTable.ColumnName, columnName)
+                    nUpdates = nUpdates + 2;
+                    toUpdate(nUpdates-1:nUpdates) = {"ColumnName", columnName};
                 end
             end
 
@@ -179,6 +185,27 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             data = gwidgets.internal.table.DisplayController.transposeVisibleData(data);
+        end
+
+        function columnName = columnNamesForDisplay(this, data)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                data (:,:) table
+            end
+
+            if this.Orientation ~= "Transposed"
+                columnName = cellstr(string(data.Properties.VariableNames).');
+                return
+            end
+
+            nColumns = height(data) + 1;
+            rowNames = string(data.Properties.RowNames);
+            if isempty(rowNames)
+                columnName = repmat({char.empty(0,0)}, nColumns, 1);
+                return
+            end
+
+            columnName = cellstr([""; rowNames(:)]);
         end
 
         function widths = visibleColumnWidths(this, owner)

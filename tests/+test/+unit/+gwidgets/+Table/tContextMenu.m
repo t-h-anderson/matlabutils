@@ -8,9 +8,7 @@ classdef tContextMenu < test.WithFigureFixture & test.WithExampleTables
             % columns" item twice (with different Tag values), producing
             % a duplicate entry in the context menu.
             fh = testCase.figureFixture("Type", "uifigure");
-            t = gwidgets.Table(Parent=fh, ...
-                Data=testCase.stringData(), ...
-                HasAutoResizeColumns=true);
+            t = gwidgets.Table(Parent=fh, Data=testCase.stringData());
 
             items = findall(t.ContextMenu, "Text", "Auto-resize columns");
             testCase.verifyNumElements(items, 1)

@@ -184,6 +184,17 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture
             testCase.verifyEqual(string(t.DisplayData.Row2{2}), "b")
             testCase.verifyEqual(t.DisplayData.Row2{3}, false)
             testCase.verifyEqual(t.DisplayData.Row2{4}, "x")
+            testCase.verifyEqual(string(t.DisplayTable.ColumnName), repmat("", 6, 1))
+        end
+
+        function tTransposedHeadersUseRowNamesWhenPresent(testCase)
+            data = table( ...
+                [1; 2], ["a"; "b"], ...
+                VariableNames=["Number", "Text"], ...
+                RowNames=["One", "Two"]);
+            t = gwidgets.Table(Data=data, DisplayOrientation="Transposed");
+
+            testCase.verifyEqual(string(t.DisplayTable.ColumnName), ["", "One", "Two"].')
         end
 
         function tDeletionClearsUpChildren(testCase)
