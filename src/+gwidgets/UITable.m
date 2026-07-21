@@ -15,6 +15,7 @@ classdef UITable < gwidgets.internal.Reparentable
         Callback (1,1) gwidgets.internal.table.CallbackController
         Selection (1,1) gwidgets.internal.table.SelectionController
         Drag (1,1) gwidgets.internal.table.DragController
+        Display (1,1) gwidgets.internal.table.DisplayController
     end
 
     properties (Dependent, Access = private)
@@ -38,7 +39,6 @@ classdef UITable < gwidgets.internal.Reparentable
             ?gwidgets.internal.table.DragController, ...
             ?gwidgets.internal.table.TooltipController}, ...
             SetAccess = private)
-        Display (1,1) gwidgets.internal.table.DisplayController
         Bridge (1,1) gwidgets.internal.table.BridgeController
     end
 

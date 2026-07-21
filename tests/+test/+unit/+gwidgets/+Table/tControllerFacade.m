@@ -28,6 +28,21 @@ classdef tControllerFacade < matlab.unittest.TestCase
             testCase.verifyFalse(ismember("StyleConfigurations", propNames))
         end
 
+        function tUITableDisplayControllerIsVisible(testCase)
+            u = gwidgets.UITable(Data=table((1:3)', ["a"; "b"; "c"]));
+            testCase.addTeardown(@()delete(u));
+
+            propNames = string(properties(u));
+
+            testCase.verifyTrue(ismember("Display", propNames))
+            testCase.verifyInstanceOf(u.Display, "gwidgets.internal.table.DisplayController")
+
+            u.Display.Orientation = "Transposed";
+
+            testCase.verifyEqual(u.Display.Orientation, "Transposed")
+            testCase.verifyEqual(string(u.Graphics.DisplayTable.Data.Variable), ["Var1"; "Var2"])
+        end
+
         function tCreationAndCustomisationDoNotForceDrawnow(testCase)
             drawnowState = gwidgets.internal.Drawnow.make(true);
             fig = uifigure(Visible="off");
@@ -482,14 +497,15 @@ classdef tControllerFacade < matlab.unittest.TestCase
 
             testCase.verifyTrue(ismember("Filter", propNames))
             testCase.verifyTrue(ismember("Graphics", propNames))
+            testCase.verifyTrue(ismember("Display", propNames))
             testCase.verifyFalse(ismember("Bridge", propNames))
-            testCase.verifyFalse(ismember("Display", propNames))
             testCase.verifyFalse(ismember("DisplayTable", propNames))
             testCase.verifyFalse(ismember("Grid", propNames))
             testCase.verifyFalse(ismember("GroupLabel", propNames))
             testCase.verifyFalse(ismember("HelpPanel", propNames))
             testCase.verifyInstanceOf(uiTable.Filter, "gwidgets.internal.table.FilterController")
             testCase.verifyInstanceOf(uiTable.Graphics, "gwidgets.internal.table.GraphicsController")
+            testCase.verifyInstanceOf(uiTable.Display, "gwidgets.internal.table.DisplayController")
         end
     end
 
