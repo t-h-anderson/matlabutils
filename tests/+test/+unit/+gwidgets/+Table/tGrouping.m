@@ -131,6 +131,7 @@ classdef tGrouping < test.WithExampleTables
                 indent + "⮞ G2: x (1/1)", ...
                 indent + "⮞ G2: y (1/1)", ...
                 "⮞ G1: B (2/2)"])
+            testCase.verifyEqual(string(payload.tooltips), string(payload.labels))
         end
 
         function tGroupColumnSpanPayloadUsesTransposedLabels(testCase)
@@ -152,6 +153,7 @@ classdef tGrouping < test.WithExampleTables
 
             testCase.verifyEqual(payload.columns, [2 3 4 5])
             testCase.verifyEqual(string(payload.labels), string(rowPayload.labels))
+            testCase.verifyEqual(string(payload.tooltips), string(payload.labels))
         end
 
         function tUngroupedTable(testCase)

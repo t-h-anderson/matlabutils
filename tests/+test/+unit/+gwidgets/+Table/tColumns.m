@@ -233,6 +233,104 @@ classdef tColumns < test.WithExampleTables
             testCase.verifyEqual(t.DisplayTable.ColumnWidth, {100, 150, 80})
         end
 
+        function tGroupedDisplayWidthsFollowRenderedDataColumns(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+
+            t.GroupingVariable = "Categorical";
+
+            testCase.verifyEqual( ...
+                string(t.DisplayTable.Data.Properties.VariableNames), ...
+                ["Numerical", "Logical", "String"])
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth, {100, 150, 80})
+            testCase.verifyEqual(t.DataColumnWidth, {100, 200, 150, 80})
+        end
+
+        function tGroupedBridgeDragUpdatesRenderedDataColumns(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.DataColumnWidth = {100, 200, 150, 80};
+            t.GroupingVariable = "Categorical";
+
+            t.simulateBridgeDrag([120, 170, 90]);
+
+            testCase.verifyEqual(t.DataColumnWidth, {120, 200, 170, 90})
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth, {120, 170, 90})
+        end
+
+        function tNormalSyntheticGroupColumnUsesMeasuredWidth(testCase)
+            data = table(categorical(["a"; "bb"; "a"]), VariableNames="GroupOnly");
+            t = gwidgets.Table(Data=data, GroupingVariable="GroupOnly");
+
+            t.simulateGroupSpanMeasure(struct( ...
+                "rows", [1 2], ...
+                "rowWidths", [420 390]));
+
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth, {420})
+            testCase.verifyEqual(t.DataColumnWidth, {"1x"})
+            testCase.verifyEqual(t.ColumnWidth, {"1x"})
+            testCase.verifyEqual(t.DataColumnWidthTypes, "Relative")
+        end
+
+        function tTransposedGroupColumnsUseMeasuredWidths(testCase)
+            t = gwidgets.Table( ...
+                Data=testCase.multivariableData(), ...
+                GroupingVariable="Categorical", ...
+                DisplayOrientation="Transposed");
+
+            t.simulateGroupSpanMeasure(struct( ...
+                "columns", [2 3], ...
+                "columnWidths", [240 280]));
+
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth(1:3), {'1x', 240, 280})
+            testCase.verifyEqual(t.DataColumnWidth, {"1x", "1x", "1x", "1x"})
+        end
+
+        function tNormalSyntheticGroupResizeDoesNotMutateDataWidths(testCase)
+            data = table(categorical(["a"; "bb"; "a"]), VariableNames="GroupOnly");
+            t = gwidgets.Table(Data=data, GroupingVariable="GroupOnly");
+
+            dataWidth = t.DataColumnWidth;
+            columnWidth = t.ColumnWidth;
+            dataTypes = t.DataColumnWidthTypes;
+            pixelWidths = t.PixelDataColumnWidths;
+            relativeWidths = t.RelativeDataColumnWidths;
+
+            t.simulateGroupSpanMeasure(struct( ...
+                "rows", [1 2], ...
+                "rowWidths", [180 90]));
+            t.simulateBridgeDrag(260);
+
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth, {260})
+            testCase.verifyEqual(t.DataColumnWidth, dataWidth)
+            testCase.verifyEqual(t.ColumnWidth, columnWidth)
+            testCase.verifyEqual(t.DataColumnWidthTypes, dataTypes)
+            testCase.verifyEqual(t.PixelDataColumnWidths, pixelWidths)
+            testCase.verifyEqual(t.RelativeDataColumnWidths, relativeWidths)
+        end
+
+        function tTransposedGroupResizeDoesNotMutateDataWidths(testCase)
+            t = gwidgets.Table( ...
+                Data=testCase.multivariableData(), ...
+                GroupingVariable="Categorical", ...
+                DisplayOrientation="Transposed");
+
+            t.DataColumnWidth = {100, 200, 150, 80};
+            dataWidth = t.DataColumnWidth;
+            columnWidth = t.ColumnWidth;
+            dataTypes = t.DataColumnWidthTypes;
+            pixelWidths = t.PixelDataColumnWidths;
+            relativeWidths = t.RelativeDataColumnWidths;
+
+            t.simulateBridgeDrag([90 260 320]);
+
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth(1:3), {'1x', 260, 320})
+            testCase.verifyEqual(t.DataColumnWidth, dataWidth)
+            testCase.verifyEqual(t.ColumnWidth, columnWidth)
+            testCase.verifyEqual(t.DataColumnWidthTypes, dataTypes)
+            testCase.verifyEqual(t.PixelDataColumnWidths, pixelWidths)
+            testCase.verifyEqual(t.RelativeDataColumnWidths, relativeWidths)
+        end
+
         function tColumnWidthClearedByEmpty(testCase)
             % Setting ColumnWidth to [] or {} resets all widths to "1x".
             t = gwidgets.Table(Data=testCase.multivariableData());

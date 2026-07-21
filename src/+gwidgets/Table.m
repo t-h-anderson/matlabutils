@@ -870,7 +870,11 @@ classdef Table < matlab.mixin.SetGet
 
     methods (Access = ?matlab.unittest.TestCase)
         function simulateBridgeDrag(this, pixelWidths)
-            this.UITable_.Column.applyBridgeWidths(pixelWidths);
+            this.UITable_.Display.handleBridgeColumnWidths(pixelWidths);
+        end
+
+        function simulateGroupSpanMeasure(this, data)
+            this.UITable_.Display.applyGroupSpanMeasurements(data);
         end
 
         function [text, style] = simulateBridgeHover(this, displayRow, displayColumn)

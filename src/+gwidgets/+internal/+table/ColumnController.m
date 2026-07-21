@@ -341,6 +341,23 @@ classdef ColumnController < gwidgets.internal.table.TableController
             this.applyWidthStores(stores);
         end
 
+        function updateBridgeWidthsForMask(this, pixelWidths, visibleMask)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                pixelWidths (1,:) double
+                visibleMask (1,:) logical
+            end
+
+            nData = this.nData();
+            [stores, ~, countMatches] = gwidgets.internal.table.ColumnWidthController.updateFromBridge( ...
+                pixelWidths, visibleMask, nData, this.widthStores());
+            if ~countMatches
+                this.owner().Bridge.reattach();
+                return
+            end
+            this.applyWidthStores(stores);
+        end
+
         function applyBridgeWidths(this, pixelWidths)
             arguments
                 this (1,1) gwidgets.internal.table.ColumnController
@@ -356,7 +373,7 @@ classdef ColumnController < gwidgets.internal.table.TableController
                 this (1,1) gwidgets.internal.table.ColumnController
             end
 
-            this.Width = {};
+            this.owner().Display.requestAutoResize();
         end
 
         function changed = didBridgeWidthsChange(this, incomingPx)
@@ -367,6 +384,17 @@ classdef ColumnController < gwidgets.internal.table.TableController
 
             changed = gwidgets.internal.table.ColumnWidthController.didBridgeWidthsChange( ...
                 incomingPx, this.Visible, this.nData(), this.widthStores());
+        end
+
+        function changed = didBridgeWidthsChangeForMask(this, incomingPx, visibleMask)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                incomingPx (1,:) double
+                visibleMask (1,:) logical
+            end
+
+            changed = gwidgets.internal.table.ColumnWidthController.didBridgeWidthsChange( ...
+                incomingPx, visibleMask, this.nData(), this.widthStores());
         end
 
         function result = dataToAliases(this, inputs)

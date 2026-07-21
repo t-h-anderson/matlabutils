@@ -139,6 +139,14 @@ classdef BridgeController < gwidgets.internal.table.TableController
             this.applyGroupHeaderSpans();
         end
 
+        function requestGroupSpanMeasurement(this)
+            arguments
+                this (1,1) gwidgets.internal.table.BridgeController
+            end
+
+            this.send("MeasureGroupSpans", []);
+        end
+
         function reattach(this)
             arguments
                 this (1,1) gwidgets.internal.table.BridgeController
@@ -169,18 +177,22 @@ classdef BridgeController < gwidgets.internal.table.TableController
 
             owner = this.owner();
             if isempty(owner) || isempty(owner.Graphics.DisplayTable) || ~isvalid(owner.Graphics.DisplayTable)
-                this.send("SetGroupHeaderSpans", struct("rows", zeros(1,0), "labels", {cell(1,0)}));
-                this.send("SetGroupColumnSpans", struct("columns", zeros(1,0), "labels", {cell(1,0)}));
+                this.send("SetGroupHeaderSpans", struct( ...
+                    "rows", zeros(1,0), "labels", {cell(1,0)}, "tooltips", {cell(1,0)}));
+                this.send("SetGroupColumnSpans", struct( ...
+                    "columns", zeros(1,0), "labels", {cell(1,0)}, "tooltips", {cell(1,0)}));
                 return
             end
 
             if owner.Display.Orientation == "Transposed"
-                this.send("SetGroupHeaderSpans", struct("rows", zeros(1,0), "labels", {cell(1,0)}));
+                this.send("SetGroupHeaderSpans", struct( ...
+                    "rows", zeros(1,0), "labels", {cell(1,0)}, "tooltips", {cell(1,0)}));
                 payload = gwidgets.internal.table.BridgeController.groupColumnSpanPayload( ...
                     owner.Graphics.DisplayTable.Data, owner.Data.VisibleGroupHeaderRowIdx);
                 this.send("SetGroupColumnSpans", payload);
             else
-                this.send("SetGroupColumnSpans", struct("columns", zeros(1,0), "labels", {cell(1,0)}));
+                this.send("SetGroupColumnSpans", struct( ...
+                    "columns", zeros(1,0), "labels", {cell(1,0)}, "tooltips", {cell(1,0)}));
                 payload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
                     owner.Graphics.DisplayTable.Data, owner.Data.VisibleGroupHeaderRowIdx);
                 this.send("SetGroupHeaderSpans", payload);
@@ -196,7 +208,10 @@ classdef BridgeController < gwidgets.internal.table.TableController
             end
 
             if width(displayData) == 0 || isempty(rowIdx)
-                payload = struct("rows", zeros(1,0), "labels", {cell(1,0)});
+                payload = struct( ...
+                    "rows", zeros(1,0), ...
+                    "labels", {cell(1,0)}, ...
+                    "tooltips", {cell(1,0)});
                 return
             end
 
@@ -206,7 +221,10 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 labels(iRow) = gwidgets.internal.table.BridgeController.labelString(displayData{rowIdx(iRow), 1});
             end
 
-            payload = struct("rows", rowIdx, "labels", {cellstr(labels)});
+            payload = struct( ...
+                "rows", rowIdx, ...
+                "labels", {cellstr(labels)}, ...
+                "tooltips", {cellstr(labels)});
         end
 
         function payload = groupColumnSpanPayload(displayData, rowIdx)
@@ -217,7 +235,10 @@ classdef BridgeController < gwidgets.internal.table.TableController
 
             columns = rowIdx + 1;
             if height(displayData) == 0 || width(displayData) == 0 || isempty(columns)
-                payload = struct("columns", zeros(1,0), "labels", {cell(1,0)});
+                payload = struct( ...
+                    "columns", zeros(1,0), ...
+                    "labels", {cell(1,0)}, ...
+                    "tooltips", {cell(1,0)});
                 return
             end
 
@@ -228,7 +249,10 @@ classdef BridgeController < gwidgets.internal.table.TableController
                     displayData{1, columns(iColumn)});
             end
 
-            payload = struct("columns", columns, "labels", {cellstr(labels)});
+            payload = struct( ...
+                "columns", columns, ...
+                "labels", {cellstr(labels)}, ...
+                "tooltips", {cellstr(labels)});
         end
     end
 
@@ -244,6 +268,8 @@ classdef BridgeController < gwidgets.internal.table.TableController
                     this.onReady();
                 case "ColumnWidthChanged"
                     this.onColumnWidthChanged(d);
+                case "GroupSpanMeasure"
+                    this.owner().Display.applyGroupSpanMeasurements(d);
                 case "CellHover"
                     if this.hasTooltips()
                         this.applyTooltipPayload(double(d.row), double(d.col));
@@ -274,12 +300,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            if owner.Column.didBridgeWidthsChange(d.widths)
-                owner.Column.updateStoresFromBridgeWidths(d.widths);
-                owner.Display.applyColumnWidth();
-            else
-                this.restore();
-            end
+            owner.Display.handleBridgeColumnWidths(d.widths);
         end
 
         function tf = hasTooltips(this)
