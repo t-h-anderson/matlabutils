@@ -70,6 +70,8 @@
   var groupColumnSpans   = [];
   var groupColumnSpanState = [];
   var spanScrollListener = null;
+  var spanResizeListener = null;
+  var spanRenderFrame    = null;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -175,13 +177,16 @@
     if (cols.length === 0) return;
     resizeObserver = new ResizeObserver(onResize);
     cols.forEach(function(col) { resizeObserver.observe(col); });
+    var root = findTableRoot();
+    if (root && root.nodeType === 1) resizeObserver.observe(root);
   }
 
   // ---- ResizeObserver callback ----
 
   function onResize() {
-    if (callbackSuppressed) return;
     if (!htmlComponent) return;
+    requestSpanRender();
+    if (callbackSuppressed) return;
     var cols = findColumns();
     if (cols.length === 0) return;
     var widths = colWidthsFromDOM(cols);
@@ -644,26 +649,60 @@
     }
   }
 
-  function onSpanScroll() {
+  function hasGroupSpans() {
     if ((!groupHeaderSpans || groupHeaderSpans.length === 0) &&
-        (!groupColumnSpans || groupColumnSpans.length === 0)) return;
+        (!groupColumnSpans || groupColumnSpans.length === 0)) return false;
+    return true;
+  }
+
+  function renderGroupSpans() {
+    if (!hasGroupSpans()) return;
     renderGroupHeaderSpans();
     renderGroupColumnSpans();
   }
 
+  function requestSpanRender() {
+    if (!hasGroupSpans()) return;
+    if (!window.requestAnimationFrame) {
+      renderGroupSpans();
+      return;
+    }
+    if (spanRenderFrame !== null) return;
+    spanRenderFrame = window.requestAnimationFrame(function() {
+      spanRenderFrame = null;
+      renderGroupSpans();
+    });
+  }
+
+  function onSpanLayoutChange() {
+    requestSpanRender();
+  }
+
   function attachSpanScroll() {
-    if (spanScrollListener) return;
     var pd = parentDocument();
     if (!pd) return;
-    spanScrollListener = onSpanScroll;
-    pd.addEventListener("scroll", spanScrollListener, true);
+    if (!spanScrollListener) {
+      spanScrollListener = onSpanLayoutChange;
+      pd.addEventListener("scroll", spanScrollListener, true);
+    }
+    if (!spanResizeListener && pd.defaultView) {
+      spanResizeListener = onSpanLayoutChange;
+      pd.defaultView.addEventListener("resize", spanResizeListener, true);
+    }
   }
 
   function detachSpanScroll() {
-    if (!spanScrollListener) return;
     var pd = parentDocument();
-    if (pd) pd.removeEventListener("scroll", spanScrollListener, true);
+    if (pd && spanScrollListener) pd.removeEventListener("scroll", spanScrollListener, true);
+    if (pd && pd.defaultView && spanResizeListener) {
+      pd.defaultView.removeEventListener("resize", spanResizeListener, true);
+    }
     spanScrollListener = null;
+    spanResizeListener = null;
+    if (spanRenderFrame !== null && window.cancelAnimationFrame) {
+      window.cancelAnimationFrame(spanRenderFrame);
+    }
+    spanRenderFrame = null;
   }
 
   // ---- Custom popup (replaces native title) ----------------------
@@ -959,13 +998,15 @@
 
     htmlComponent.addEventListener("SetGroupHeaderSpans", function(event) {
       groupHeaderSpans = normaliseGroupHeaderSpans(event.Data || {});
-      if (groupHeaderSpans.length > 0) attachSpanScroll();
+      if (hasGroupSpans()) attachSpanScroll();
+      else detachSpanScroll();
       renderGroupHeaderSpans();
     });
 
     htmlComponent.addEventListener("SetGroupColumnSpans", function(event) {
       groupColumnSpans = normaliseGroupColumnSpans(event.Data || {});
-      if (groupColumnSpans.length > 0) attachSpanScroll();
+      if (hasGroupSpans()) attachSpanScroll();
+      else detachSpanScroll();
       renderGroupColumnSpans();
     });
 
