@@ -3,6 +3,8 @@ classdef UITableBackend < gwidgets.internal.table.backend.TableBackend
 
     properties (Access = private)
         Grid (1,:) matlab.ui.container.GridLayout {mustBeScalarOrEmpty}
+        GroupHeaderRows_ (1,:) double = zeros(1,0)
+        GroupHeaderLevels_ (1,:) double = zeros(1,0)
     end
 
     methods
@@ -81,7 +83,14 @@ classdef UITableBackend < gwidgets.internal.table.backend.TableBackend
                 propertyName (1,1) string
             end
 
-            value = this.Component.(propertyName);
+            switch propertyName
+                case "GroupHeaderRows"
+                    value = this.GroupHeaderRows_;
+                case "GroupHeaderLevels"
+                    value = this.GroupHeaderLevels_;
+                otherwise
+                    value = this.Component.(propertyName);
+            end
         end
 
         function setBackendProperty(this, propertyName, value)
@@ -91,7 +100,14 @@ classdef UITableBackend < gwidgets.internal.table.backend.TableBackend
                 value
             end
 
-            this.Component.(propertyName) = value;
+            switch propertyName
+                case "GroupHeaderRows"
+                    this.GroupHeaderRows_ = reshape(double(value), 1, []);
+                case "GroupHeaderLevels"
+                    this.GroupHeaderLevels_ = reshape(double(value), 1, []);
+                otherwise
+                    this.Component.(propertyName) = value;
+            end
         end
     end
 end

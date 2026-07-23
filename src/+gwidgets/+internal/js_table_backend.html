@@ -5,6 +5,38 @@
     :root {
       color-scheme: light;
       font: 12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --table-bg: #fff;
+      --table-text: #222;
+      --table-border: #d6d6d6;
+      --header-bg: #f5f5f5;
+      --selected-bg: #d9ecff;
+      --selected-outline: #6aa7e8;
+      --editable-bg: #fffdf2;
+      --menu-bg: #fff;
+      --menu-text: #222;
+      --menu-border: #b8b8b8;
+      --menu-hover-bg: #e7f1ff;
+      --menu-disabled-text: #9a9a9a;
+      --menu-shadow: rgba(0, 0, 0, 0.18);
+      --submenu-border: #e1e1e1;
+    }
+
+    body[data-theme="dark"] {
+      color-scheme: dark;
+      --table-bg: #212121;
+      --table-text: #f1f1f1;
+      --table-border: #555;
+      --header-bg: #2f2f2f;
+      --selected-bg: #174a73;
+      --selected-outline: #5b9bd5;
+      --editable-bg: #2e2a1f;
+      --menu-bg: #2b2b2b;
+      --menu-text: #f1f1f1;
+      --menu-border: #666;
+      --menu-hover-bg: #3f5872;
+      --menu-disabled-text: #8b8b8b;
+      --menu-shadow: rgba(0, 0, 0, 0.45);
+      --submenu-border: #555;
     }
 
     body {
@@ -17,7 +49,8 @@
       width: 100vw;
       height: 100vh;
       overflow: auto;
-      background: #fff;
+      background: var(--table-bg);
+      color: var(--table-text);
     }
 
     table {
@@ -31,20 +64,22 @@
       min-width: 24px;
       height: 24px;
       padding: 2px 6px;
-      border: 1px solid #d6d6d6;
+      border: 1px solid var(--table-border);
       box-sizing: border-box;
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
       vertical-align: middle;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     th {
       position: sticky;
       top: 0;
       z-index: 1;
-      background: #f5f5f5;
-      color: #222;
+      background: var(--header-bg);
+      color: var(--table-text);
       font-weight: 600;
       text-align: left;
     }
@@ -53,13 +88,79 @@
     tr.selected-row td,
     th.selected-column,
     td.selected-column {
-      background: #d9ecff;
-      outline: 1px solid #6aa7e8;
+      background: var(--selected-bg);
+      outline: 1px solid var(--selected-outline);
       outline-offset: -1px;
     }
 
     td[contenteditable="true"] {
-      background: #fffdf2;
+      background: var(--editable-bg);
+    }
+
+    td.group-header-cell {
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .context-menu {
+      position: fixed;
+      z-index: 10000;
+      min-width: 160px;
+      max-width: 320px;
+      display: none;
+      padding: 4px 0;
+      border: 1px solid var(--menu-border);
+      background: var(--menu-bg);
+      box-shadow: 0 4px 14px var(--menu-shadow);
+      color: var(--menu-text);
+    }
+
+    .context-menu ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .context-menu li {
+      position: relative;
+      padding: 4px 12px;
+      cursor: default;
+      white-space: nowrap;
+    }
+
+    .context-menu li[data-enabled="true"][data-action]:hover {
+      background: var(--menu-hover-bg);
+    }
+
+    .context-menu li[data-enabled="false"] {
+      color: var(--menu-disabled-text);
+    }
+
+    .context-menu li ul {
+      position: absolute;
+      top: -5px;
+      left: 100%;
+      min-width: 160px;
+      display: none;
+      padding: 4px 0;
+      border: 1px solid var(--menu-border);
+      background: var(--menu-bg);
+      box-shadow: 0 4px 14px var(--menu-shadow);
+    }
+
+    .context-menu li.open > ul,
+    .context-menu li:hover > ul {
+      display: block;
+    }
+
+    .context-menu li.has-children {
+      padding-right: 24px;
+    }
+
+    .context-menu li.has-children::after {
+      position: absolute;
+      right: 8px;
+      content: ">";
     }
   </style>
   <script>
@@ -77,9 +178,23 @@
     columnEditable: [],
     columnSortable: [],
     columnWidth: [],
+    groupHeaderRows: [],
+    groupHeaderLevels: [],
     tooltip: "",
+    contextMenu: [],
+    theme: "light",
     styles: []
   };
+  var lastClientX = 0;
+  var lastClientY = 0;
+  var tooltipEl = null;
+  var pendingTooltipProbe = null;
+  var contextMenuEl = null;
+  var contextMenuRow = 0;
+  var contextMenuCol = 0;
+  var dragSelect = null;
+  var suppressNextClickSelection = false;
+  var handledProbeIds = {};
 
   function asArray(value) {
     if (!value) return [];
@@ -120,6 +235,7 @@
 
   function render(payload) {
     state = Object.assign(state, payload || {});
+    applyTheme(state.theme);
     var root = document.getElementById("root");
     root.textContent = "";
 
@@ -131,15 +247,45 @@
     root.appendChild(table);
   }
 
+  function applyTheme(theme) {
+    var normalised = String(theme || "light").toLowerCase();
+    if (normalised !== "dark") normalised = "light";
+    document.body.dataset.theme = normalised;
+  }
+
   function renderColgroup(table) {
     if (!state.columnWidth || state.columnWidth.length === 0) return;
     var colgroup = document.createElement("colgroup");
-    state.columnWidth.forEach(function(width) {
+    cssColumnWidths(state.columnWidth).forEach(function(width) {
       var col = document.createElement("col");
-      if (width && String(width).endsWith("px")) col.style.width = String(width);
+      if (width) col.style.width = width;
       colgroup.appendChild(col);
     });
     table.appendChild(colgroup);
+  }
+
+  function cssColumnWidths(widths) {
+    var values = asArray(widths).map(function(width) {
+      return String(width == null ? "" : width).trim();
+    });
+    var weights = values.map(relativeWeight);
+    var totalWeight = weights.reduce(function(total, weight) {
+      return total + weight;
+    }, 0);
+
+    return values.map(function(width, idx) {
+      if (!width || width.toLowerCase() === "auto") return "";
+      if (weights[idx] > 0 && totalWeight > 0) {
+        return ((100*weights[idx])/totalWeight).toFixed(6).replace(/\.?0+$/, "") + "%";
+      }
+      return width;
+    });
+  }
+
+  function relativeWeight(width) {
+    var match = String(width || "").trim().match(/^(\d+(?:\.\d+)?)x$/i);
+    if (!match) return 0;
+    return Number(match[1]);
   }
 
   function renderHeader(table) {
@@ -149,8 +295,11 @@
       var th = document.createElement("th");
       th.textContent = name;
       th.dataset.col = idx + 1;
+      th.title = state.tooltip || "";
       applyCssText(th, cssForCell(0, idx + 1));
       if (isColumnSelected(idx + 1)) th.classList.add("selected-column");
+      attachTooltipEvents(th, 0, idx + 1);
+      attachContextMenuEvent(th, 0, idx + 1);
       th.addEventListener("click", function(event) {
         if (indexedBoolean(state.columnSortable, idx)) {
           send({
@@ -175,6 +324,11 @@
       var row = document.createElement("tr");
       var displayRow = rowIdx + 1;
       if (isRowSelected(displayRow)) row.classList.add("selected-row");
+      if (isGroupHeaderRow(displayRow)) {
+        renderGroupHeaderRow(row, rowValues, displayRow);
+        tbody.appendChild(row);
+        return;
+      }
       asArray(rowValues).forEach(function(value, colIdx) {
         var displayCol = colIdx + 1;
         var td = document.createElement("td");
@@ -183,6 +337,9 @@
         td.dataset.col = displayCol;
         td.title = state.tooltip || "";
         applyCssText(td, cssForCell(displayRow, displayCol));
+        attachTooltipEvents(td, displayRow, displayCol);
+        attachContextMenuEvent(td, displayRow, displayCol);
+        attachCellDragSelection(td, displayRow, displayCol);
         if (isCellSelected(displayRow, displayCol)) td.classList.add("selected");
         if (isColumnSelected(displayCol)) td.classList.add("selected-column");
         if (indexedBoolean(state.columnEditable, colIdx)) {
@@ -192,6 +349,12 @@
           });
         }
         td.addEventListener("click", function(event) {
+          if (suppressNextClickSelection) {
+            suppressNextClickSelection = false;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           send({ event: "CellClicked", row: displayRow, col: displayCol });
           selectCell(displayRow, displayCol, event);
         });
@@ -203,6 +366,331 @@
       tbody.appendChild(row);
     });
     table.appendChild(tbody);
+  }
+
+  function renderGroupHeaderRow(row, rowValues, displayRow) {
+    var td = document.createElement("td");
+    td.textContent = groupHeaderLabel(rowValues);
+    td.dataset.row = displayRow;
+    td.dataset.col = 1;
+    td.dataset.groupHeader = "true";
+    td.dataset.groupLevel = groupHeaderLevel(displayRow);
+    td.colSpan = Math.max((state.columns || []).length, 1);
+    td.className = "group-header-cell group-level-" + td.dataset.groupLevel;
+    td.title = state.tooltip || td.textContent || "";
+    applyCssText(td, cssForCell(displayRow, 1));
+    attachTooltipEvents(td, displayRow, 1);
+    attachContextMenuEvent(td, displayRow, 1);
+    td.addEventListener("click", function() {
+      send({ event: "CellClicked", row: displayRow, col: 1 });
+    });
+    td.addEventListener("dblclick", function() {
+      send({ event: "CellDoubleClicked", row: displayRow, col: 1 });
+    });
+    row.appendChild(td);
+  }
+
+  function attachCellDragSelection(el, row, col) {
+    el.addEventListener("mousedown", function(event) {
+      if (event.button !== 0 || state.selectionType !== "cell") return;
+      beginDragSelection(row, col, event);
+    });
+    el.addEventListener("mouseenter", function(event) {
+      updateDragSelection(row, col, event);
+    });
+  }
+
+  function beginDragSelection(row, col, event) {
+    if (state.multiselect === "off") return;
+    hideContextMenu();
+    event.preventDefault();
+    dragSelect = {
+      startRow: Number(row),
+      startCol: Number(col),
+      endRow: Number(row),
+      endCol: Number(col),
+      moved: false
+    };
+    document.addEventListener("mouseup", finishDragSelection, true);
+    paintDragSelection(rectSelectionPairs(dragSelect));
+  }
+
+  function updateDragSelection(row, col, event) {
+    if (!dragSelect || state.selectionType !== "cell") return;
+    event.preventDefault();
+    if (dragSelect.endRow !== Number(row) || dragSelect.endCol !== Number(col)) {
+      dragSelect.moved = true;
+    }
+    dragSelect.endRow = Number(row);
+    dragSelect.endCol = Number(col);
+    paintDragSelection(rectSelectionPairs(dragSelect));
+  }
+
+  function finishDragSelection(event) {
+    document.removeEventListener("mouseup", finishDragSelection, true);
+    if (!dragSelect) return;
+    var pairs = rectSelectionPairs(dragSelect);
+    var didMove = dragSelect.moved;
+    dragSelect = null;
+    if (!didMove) return;
+
+    if (event) event.preventDefault();
+    suppressNextClickSelection = true;
+    state.selection = pairs;
+    send({ event: "SelectionChanged", indices: pairs });
+    render(state);
+  }
+
+  function rectSelectionPairs(selection) {
+    var rowStart = Math.min(selection.startRow, selection.endRow);
+    var rowEnd = Math.max(selection.startRow, selection.endRow);
+    var colStart = Math.min(selection.startCol, selection.endCol);
+    var colEnd = Math.max(selection.startCol, selection.endCol);
+    var pairs = [];
+    for (var row = rowStart; row <= rowEnd; row++) {
+      for (var col = colStart; col <= colEnd; col++) {
+        if (!isGroupHeaderRow(row)) pairs.push([row, col]);
+      }
+    }
+    return pairs;
+  }
+
+  function paintDragSelection(pairs) {
+    Array.prototype.forEach.call(document.querySelectorAll("tbody td.selected"), function(td) {
+      td.classList.remove("selected");
+    });
+    pairs.forEach(function(pair) {
+      var td = cellAt(pair[0], pair[1]);
+      if (td && td.dataset.groupHeader !== "true") td.classList.add("selected");
+    });
+  }
+
+  function attachTooltipEvents(el, row, col) {
+    el.addEventListener("mouseenter", function(event) {
+      handleTooltipEnter(event, row, col);
+    });
+    el.addEventListener("mousemove", function(event) {
+      handleTooltipMove(event);
+    });
+    el.addEventListener("mouseleave", function() {
+      hideTooltip();
+      send({ event: "CellLeave" });
+    });
+  }
+
+  function handleTooltipEnter(event, row, col) {
+    lastClientX = event.clientX || 0;
+    lastClientY = event.clientY || 0;
+    hideTooltip();
+    send({ event: "CellHover", row: row, col: col });
+  }
+
+  function handleTooltipMove(event) {
+    lastClientX = event.clientX || lastClientX;
+    lastClientY = event.clientY || lastClientY;
+    positionTooltipNearCursor();
+  }
+
+  function ensureTooltipEl() {
+    if (tooltipEl && tooltipEl.isConnected) return tooltipEl;
+    tooltipEl = document.createElement("div");
+    tooltipEl.id = "gwidgets-tooltip";
+    tooltipEl.style.cssText = tooltipBaseCss() + "display:none;";
+    document.body.appendChild(tooltipEl);
+    return tooltipEl;
+  }
+
+  function tooltipBaseCss() {
+    return [
+      "position:fixed",
+      "z-index:9999",
+      "pointer-events:none",
+      "white-space:pre",
+      "font-family:sans-serif"
+    ].join(";") + ";";
+  }
+
+  function hideTooltip() {
+    if (tooltipEl) tooltipEl.style.display = "none";
+  }
+
+  function positionTooltipNearCursor() {
+    if (!tooltipEl || tooltipEl.style.display === "none") return;
+    var w = tooltipEl.offsetWidth || 0;
+    var h = tooltipEl.offsetHeight || 0;
+    var viewW = document.documentElement.clientWidth || window.innerWidth;
+    var viewH = document.documentElement.clientHeight || window.innerHeight;
+    var x = lastClientX + 12;
+    var y = lastClientY + 16;
+    if (x + w + 8 > viewW) x = Math.max(0, lastClientX - w - 12);
+    if (y + h + 8 > viewH) y = Math.max(0, lastClientY - h - 12);
+    tooltipEl.style.left = x + "px";
+    tooltipEl.style.top = y + "px";
+  }
+
+  function renderTooltipBlocks(blocks) {
+    var el = ensureTooltipEl();
+    var blockList = asArray(blocks);
+    if (blockList.length === 0) {
+      hideTooltip();
+      return;
+    }
+
+    el.style.cssText = tooltipBaseCss();
+    while (el.firstChild) el.removeChild(el.firstChild);
+    blockList.forEach(function(block, idx) {
+      var blockDiv = document.createElement("div");
+      if (block && block.containerCss) blockDiv.style.cssText = String(block.containerCss);
+      if (idx > 0) blockDiv.style.marginTop = "2px";
+      asArray(block && block.lines).forEach(function(line) {
+        var lineDiv = document.createElement("div");
+        lineDiv.textContent = line && line.text ? String(line.text) : "";
+        if (line && line.css) lineDiv.style.cssText = String(line.css);
+        blockDiv.appendChild(lineDiv);
+      });
+      el.appendChild(blockDiv);
+    });
+    el.style.display = "block";
+    positionTooltipNearCursor();
+  }
+
+  function attachContextMenuEvent(el, row, col) {
+    el.addEventListener("contextmenu", function(event) {
+      event.preventDefault();
+      showContextMenu(row, col, event.clientX || 0, event.clientY || 0);
+    });
+  }
+
+  function ensureContextMenuEl() {
+    if (contextMenuEl && contextMenuEl.isConnected) return contextMenuEl;
+    contextMenuEl = document.createElement("div");
+    contextMenuEl.id = "gwidgets-context-menu";
+    contextMenuEl.className = "context-menu";
+    document.body.appendChild(contextMenuEl);
+    return contextMenuEl;
+  }
+
+  function hideContextMenu() {
+    if (contextMenuEl) contextMenuEl.style.display = "none";
+  }
+
+  function showContextMenu(row, col, x, y) {
+    var items = asArray(state.contextMenu);
+    if (items.length === 0) {
+      hideContextMenu();
+      return;
+    }
+
+    contextMenuRow = Number(row || 0);
+    contextMenuCol = Number(col || 0);
+    var el = ensureContextMenuEl();
+    el.textContent = "";
+    el.appendChild(renderContextMenuList(items, ""));
+    el.style.left = Math.max(0, Number(x || 0)) + "px";
+    el.style.top = Math.max(0, Number(y || 0)) + "px";
+    el.style.display = "block";
+  }
+
+  function renderContextMenuList(items, parentPath) {
+    var ul = document.createElement("ul");
+    asArray(items).forEach(function(item) {
+      var li = document.createElement("li");
+      var text = String(item && item.text ? item.text : "");
+      var path = parentPath ? parentPath + " > " + text : text;
+      var action = String(item && item.action ? item.action : "");
+      var enabled = item && item.enabled !== false;
+      li.textContent = text;
+      li.dataset.path = path;
+      li.dataset.enabled = enabled ? "true" : "false";
+      if (action) {
+        li.dataset.action = action;
+        li.dataset.value = JSON.stringify(asArray(item.value).map(String));
+      }
+      if (enabled && action) {
+        li.addEventListener("click", function(event) {
+          event.stopPropagation();
+          send({
+            event: "ContextMenuAction",
+            action: action,
+            value: JSON.parse(li.dataset.value || "[]"),
+            row: contextMenuRow,
+            col: contextMenuCol
+          });
+          hideContextMenu();
+        });
+      }
+
+      var children = asArray(item && item.children);
+      if (children.length > 0) {
+        li.classList.add("has-children");
+        li.addEventListener("mouseenter", function(event) {
+          event.stopPropagation();
+          openContextMenuBranch(li);
+        });
+        li.addEventListener("mouseleave", function() {
+          li.classList.remove("open");
+        });
+        li.appendChild(renderContextMenuList(children, path));
+      }
+      ul.appendChild(li);
+    });
+    return ul;
+  }
+
+  function openContextMenuBranch(item) {
+    var siblings = item.parentElement ? item.parentElement.children : [];
+    Array.prototype.forEach.call(siblings, function(sibling) {
+      if (sibling !== item) sibling.classList.remove("open");
+    });
+    item.classList.add("open");
+    positionSubmenu(item);
+  }
+
+  function positionSubmenu(item) {
+    var submenu = childLists(item)[0];
+    if (!submenu) return;
+    submenu.style.left = "100%";
+    submenu.style.right = "auto";
+    submenu.style.top = "-5px";
+
+    var rect = submenu.getBoundingClientRect();
+    var viewW = document.documentElement.clientWidth || window.innerWidth;
+    var viewH = document.documentElement.clientHeight || window.innerHeight;
+    if (rect.right > viewW && item.getBoundingClientRect().left > rect.width) {
+      submenu.style.left = "auto";
+      submenu.style.right = "100%";
+    }
+    if (rect.bottom > viewH) {
+      submenu.style.top = Math.min(-5, viewH - rect.bottom - 5) + "px";
+    }
+  }
+
+  function childLists(item) {
+    return Array.prototype.filter.call(item.children, function(child) {
+      return String(child.tagName || "").toUpperCase() === "UL";
+    });
+  }
+
+  function groupHeaderLabel(rowValues) {
+    var values = asArray(rowValues);
+    for (var i = 0; i < values.length; i++) {
+      if (values[i] !== undefined && values[i] !== null && String(values[i]) !== "") {
+        return String(values[i]);
+      }
+    }
+    return "";
+  }
+
+  function isGroupHeaderRow(row) {
+    return asArray(state.groupHeaderRows).map(Number).indexOf(Number(row)) >= 0;
+  }
+
+  function groupHeaderLevel(row) {
+    var rows = asArray(state.groupHeaderRows).map(Number);
+    var levels = asArray(state.groupHeaderLevels).map(Number);
+    var idx = rows.indexOf(Number(row));
+    if (idx < 0 || !Number.isFinite(levels[idx]) || levels[idx] <= 0) return 1;
+    return levels[idx];
   }
 
   function tableRows() {
@@ -396,6 +884,14 @@
 
   function handleProbe(request) {
     try {
+      var probeId = String(request.id || "");
+      if (probeId && handledProbeIds[probeId]) {
+        if (pendingTooltipProbe && String(pendingTooltipProbe.id || "") === probeId) return;
+        sendDeferredProbeResult(request);
+        return;
+      }
+      if (probeId) handledProbeIds[probeId] = true;
+
       var payload = request.payload || {};
       switch (String(request.probe || "")) {
         case "Snapshot":
@@ -403,6 +899,10 @@
           break;
         case "ClickCell":
           clickCell(payload);
+          sendDeferredProbeResult(request);
+          break;
+        case "DragSelectCells":
+          dragSelectCells(payload);
           sendDeferredProbeResult(request);
           break;
         case "DoubleClickCell":
@@ -417,6 +917,25 @@
           clickHeader(payload);
           sendDeferredProbeResult(request);
           break;
+        case "HoverCell":
+          hoverCell(payload, request);
+          break;
+        case "ClearTooltip":
+          hideTooltip();
+          sendProbeResult(request, snapshot());
+          break;
+        case "OpenContextMenu":
+          openContextMenu(payload);
+          sendProbeResult(request, snapshot());
+          break;
+        case "HoverContextMenuItem":
+          hoverContextMenuItem(payload);
+          sendProbeResult(request, snapshot());
+          break;
+        case "SelectContextMenuItem":
+          selectContextMenuItem(payload);
+          sendDeferredProbeResult(request);
+          break;
         default:
           throw new Error("Unknown probe: " + String(request.probe || ""));
       }
@@ -427,20 +946,41 @@
 
   function sendDeferredProbeResult(request) {
     setTimeout(function() {
-      sendProbeResult(request, snapshot());
+      try {
+        sendProbeResult(request, snapshot());
+      } catch (err) {
+        sendProbeResult(request, { error: String(err && err.message ? err.message : err) });
+      }
     }, 25);
   }
 
   function snapshot() {
+    var root = document.getElementById("root");
     var table = document.querySelector("#root table");
+    var tooltip = tooltipSnapshot();
+    var contextMenu = contextMenuSnapshot();
+    var tableTitle = table ? table.title || "" : "";
+    var rootStyle = root ? window.getComputedStyle(root) : null;
     var headerTexts = [];
+    var headerTitles = [];
+    var headerBackgroundColors = [];
     var cellRows = [];
     var cellCols = [];
     var cellTexts = [];
+    var cellTitles = [];
     var cellClasses = [];
     var cellCssTexts = [];
     var cellBackgroundColors = [];
     var cellColors = [];
+    var colStyleWidths = [];
+    var headerWidths = [];
+    var groupHeaderRows = [];
+    var groupHeaderLabels = [];
+    var groupHeaderLevels = [];
+    var groupHeaderColSpans = [];
+    var groupHeaderCssTexts = [];
+    var groupHeaderBackgroundColors = [];
+    var groupHeaderColors = [];
     var editableRows = [];
     var editableCols = [];
     var selectedCellRows = [];
@@ -451,26 +991,60 @@
       return {
         rowCount: 0,
         columnCount: 0,
+        theme: String(document.body.dataset.theme || "light"),
+        tableBackgroundColor: rootStyle ? rootStyle.backgroundColor || "" : "",
+        tableTitle: tableTitle,
         headerTexts: headerTexts,
+        headerTitles: headerTitles,
+        headerBackgroundColors: headerBackgroundColors,
         cellRows: cellRows,
         cellCols: cellCols,
         cellTexts: cellTexts,
+        cellTitles: cellTitles,
         cellClasses: cellClasses,
         cellCssTexts: cellCssTexts,
         cellBackgroundColors: cellBackgroundColors,
         cellColors: cellColors,
+        colStyleWidths: colStyleWidths,
+        headerWidths: headerWidths,
+        groupHeaderRows: groupHeaderRows,
+        groupHeaderLabels: groupHeaderLabels,
+        groupHeaderLevels: groupHeaderLevels,
+        groupHeaderColSpans: groupHeaderColSpans,
+        groupHeaderCssTexts: groupHeaderCssTexts,
+        groupHeaderBackgroundColors: groupHeaderBackgroundColors,
+        groupHeaderColors: groupHeaderColors,
         editableRows: editableRows,
         editableCols: editableCols,
         selectedCellRows: selectedCellRows,
         selectedCellCols: selectedCellCols,
         selectedRows: selectedRows,
-        selectedColumns: selectedColumns
+        selectedColumns: selectedColumns,
+        tooltipVisible: tooltip.visible,
+        tooltipText: tooltip.text,
+        tooltipBlockCssTexts: tooltip.blockCssTexts,
+        tooltipLineTexts: tooltip.lineTexts,
+        tooltipLineCssTexts: tooltip.lineCssTexts,
+        contextMenuVisible: contextMenu.visible,
+        contextMenuTexts: contextMenu.texts,
+        contextMenuPaths: contextMenu.paths,
+        contextMenuEnabled: contextMenu.enabled,
+        contextMenuOpenPaths: contextMenu.openPaths,
+        contextMenuSubmenuDisplays: contextMenu.submenuDisplays,
+        contextMenuSubmenuPositions: contextMenu.submenuPositions,
+        contextMenuBackgroundColor: contextMenu.backgroundColor
       };
     }
 
     Array.prototype.forEach.call(table.querySelectorAll("thead th"), function(th) {
       headerTexts.push(th.textContent || "");
+      headerTitles.push(th.title || "");
+      headerBackgroundColors.push(window.getComputedStyle(th).backgroundColor || "");
+      headerWidths.push(th.getBoundingClientRect().width || 0);
       if (th.classList.contains("selected-column")) selectedColumns.push(Number(th.dataset.col));
+    });
+    Array.prototype.forEach.call(table.querySelectorAll("colgroup col"), function(col) {
+      colStyleWidths.push(col.style.width || "");
     });
     Array.prototype.forEach.call(table.querySelectorAll("tbody tr"), function(row) {
       if (row.classList.contains("selected-row")) {
@@ -485,10 +1059,20 @@
       cellRows.push(row);
       cellCols.push(col);
       cellTexts.push(td.textContent || "");
+      cellTitles.push(td.title || "");
       cellClasses.push(td.className || "");
       cellCssTexts.push(td.style.cssText || "");
       cellBackgroundColors.push(computedStyle.backgroundColor || "");
       cellColors.push(computedStyle.color || "");
+      if (td.dataset.groupHeader === "true") {
+        groupHeaderRows.push(row);
+        groupHeaderLabels.push(td.textContent || "");
+        groupHeaderLevels.push(Number(td.dataset.groupLevel || 1));
+        groupHeaderColSpans.push(Number(td.colSpan || 1));
+        groupHeaderCssTexts.push(td.style.cssText || "");
+        groupHeaderBackgroundColors.push(computedStyle.backgroundColor || "");
+        groupHeaderColors.push(computedStyle.color || "");
+      }
       if (td.isContentEditable || td.getAttribute("contenteditable") === "true") {
         editableRows.push(row);
         editableCols.push(col);
@@ -505,27 +1089,139 @@
     return {
       rowCount: table.querySelectorAll("tbody tr").length,
       columnCount: headerTexts.length,
+      theme: String(document.body.dataset.theme || "light"),
+      tableBackgroundColor: rootStyle ? rootStyle.backgroundColor || "" : "",
+      tableTitle: tableTitle,
       headerTexts: headerTexts,
+      headerTitles: headerTitles,
+      headerBackgroundColors: headerBackgroundColors,
       cellRows: cellRows,
       cellCols: cellCols,
       cellTexts: cellTexts,
+      cellTitles: cellTitles,
       cellClasses: cellClasses,
       cellCssTexts: cellCssTexts,
       cellBackgroundColors: cellBackgroundColors,
       cellColors: cellColors,
+      colStyleWidths: colStyleWidths,
+      headerWidths: headerWidths,
+      groupHeaderRows: groupHeaderRows,
+      groupHeaderLabels: groupHeaderLabels,
+      groupHeaderLevels: groupHeaderLevels,
+      groupHeaderColSpans: groupHeaderColSpans,
+      groupHeaderCssTexts: groupHeaderCssTexts,
+      groupHeaderBackgroundColors: groupHeaderBackgroundColors,
+      groupHeaderColors: groupHeaderColors,
       editableRows: editableRows,
       editableCols: editableCols,
       selectedCellRows: selectedCellRows,
       selectedCellCols: selectedCellCols,
       selectedRows: selectedRows,
-      selectedColumns: uniqueNumbers(selectedColumns)
+      selectedColumns: uniqueNumbers(selectedColumns),
+      tooltipVisible: tooltip.visible,
+      tooltipText: tooltip.text,
+      tooltipBlockCssTexts: tooltip.blockCssTexts,
+      tooltipLineTexts: tooltip.lineTexts,
+      tooltipLineCssTexts: tooltip.lineCssTexts,
+      contextMenuVisible: contextMenu.visible,
+      contextMenuTexts: contextMenu.texts,
+      contextMenuPaths: contextMenu.paths,
+      contextMenuEnabled: contextMenu.enabled,
+      contextMenuOpenPaths: contextMenu.openPaths,
+      contextMenuSubmenuDisplays: contextMenu.submenuDisplays,
+      contextMenuSubmenuPositions: contextMenu.submenuPositions,
+      contextMenuBackgroundColor: contextMenu.backgroundColor
     };
+  }
+
+  function tooltipSnapshot() {
+    var visible = !!(tooltipEl && tooltipEl.isConnected && tooltipEl.style.display !== "none");
+    var blockCssTexts = [];
+    var lineTexts = [];
+    var lineCssTexts = [];
+    if (tooltipEl && tooltipEl.isConnected) {
+      Array.prototype.forEach.call(tooltipEl.children, function(blockDiv) {
+        blockCssTexts.push(blockDiv.style.cssText || "");
+        Array.prototype.forEach.call(blockDiv.children, function(lineDiv) {
+          lineTexts.push(lineDiv.textContent || "");
+          lineCssTexts.push(lineDiv.style.cssText || "");
+        });
+      });
+    }
+    return {
+      visible: visible,
+      text: tooltipEl && tooltipEl.isConnected ? tooltipEl.textContent || "" : "",
+      blockCssTexts: blockCssTexts,
+      lineTexts: lineTexts,
+      lineCssTexts: lineCssTexts
+    };
+  }
+
+  function contextMenuSnapshot() {
+    var visible = !!(contextMenuEl && contextMenuEl.isConnected &&
+      contextMenuEl.style.display !== "none");
+    var texts = [];
+    var paths = [];
+    var enabled = [];
+    var openPaths = [];
+    var submenuDisplays = [];
+    var submenuPositions = [];
+    var backgroundColor = "";
+    if (contextMenuEl && contextMenuEl.isConnected) {
+      backgroundColor = window.getComputedStyle(contextMenuEl).backgroundColor || "";
+      Array.prototype.forEach.call(contextMenuEl.querySelectorAll("li"), function(li) {
+        texts.push(firstTextNode(li));
+        paths.push(li.dataset.path || "");
+        enabled.push(li.dataset.enabled !== "false");
+        if (li.classList.contains("open")) openPaths.push(li.dataset.path || "");
+        childLists(li).forEach(function(ul) {
+          var style = window.getComputedStyle(ul);
+          submenuDisplays.push(style.display || "");
+          submenuPositions.push(style.position || "");
+        });
+      });
+    }
+    return {
+      visible: visible,
+      texts: texts,
+      paths: paths,
+      enabled: enabled,
+      openPaths: openPaths,
+      submenuDisplays: submenuDisplays,
+      submenuPositions: submenuPositions,
+      backgroundColor: backgroundColor
+    };
+  }
+
+  function firstTextNode(el) {
+    for (var i = 0; i < el.childNodes.length; i++) {
+      if (el.childNodes[i].nodeType === Node.TEXT_NODE) return el.childNodes[i].nodeValue || "";
+    }
+    return "";
   }
 
   function clickCell(payload) {
     var cell = cellAt(payload.row, payload.col);
     if (!cell) throw new Error("Cell not found");
     cell.dispatchEvent(mouseEvent("click", payload));
+  }
+
+  function dragSelectCells(payload) {
+    var startCell = cellAt(payload.startRow, payload.startCol);
+    var endCell = cellAt(payload.endRow, payload.endCol);
+    if (!startCell || !endCell) throw new Error("Cell not found");
+    startCell.dispatchEvent(mouseEvent("mousedown", {
+      clientX: payload.startClientX || 24,
+      clientY: payload.startClientY || 24
+    }));
+    endCell.dispatchEvent(mouseEvent("mouseenter", {
+      clientX: payload.endClientX || 48,
+      clientY: payload.endClientY || 48
+    }));
+    document.dispatchEvent(mouseEvent("mouseup", {
+      clientX: payload.endClientX || 48,
+      clientY: payload.endClientY || 48
+    }));
   }
 
   function doubleClickCell(payload) {
@@ -547,15 +1243,76 @@
     header.dispatchEvent(mouseEvent("click", payload));
   }
 
+  function hoverCell(payload, request) {
+    var cell = cellAt(payload.row, payload.col);
+    if (!cell) throw new Error("Cell not found");
+    pendingTooltipProbe = request;
+    cell.dispatchEvent(mouseEvent("mouseenter", payload));
+  }
+
+  function openContextMenu(payload) {
+    var cell = cellAt(payload.row, payload.col);
+    if (!cell) throw new Error("Cell not found");
+    cell.dispatchEvent(mouseEvent("contextmenu", payload));
+  }
+
+  function hoverContextMenuItem(payload) {
+    if (!contextMenuEl || contextMenuEl.style.display === "none") {
+      openContextMenu(payload);
+    }
+
+    var path = String(payload.path || payload.text || "");
+    var parts = path.split(" > ");
+    var currentPath = "";
+    var item = null;
+    for (var i = 0; i < parts.length; i++) {
+      currentPath = currentPath ? currentPath + " > " + parts[i] : parts[i];
+      item = contextMenuItemByPath(currentPath);
+      if (!item) throw new Error("Context menu item not found: " + currentPath);
+      item.dispatchEvent(mouseEvent("mouseenter", payload));
+    }
+  }
+
+  function selectContextMenuItem(payload) {
+    if (!contextMenuEl || contextMenuEl.style.display === "none") {
+      openContextMenu(payload);
+    }
+
+    var path = String(payload.path || payload.text || "");
+    var item = contextMenuItemByPath(path);
+    if (!item) throw new Error("Context menu item not found: " + path);
+    if (item.dataset.enabled === "false") throw new Error("Context menu item is disabled: " + path);
+    item.dispatchEvent(mouseEvent("click", payload));
+  }
+
+  function contextMenuItemByPath(path) {
+    if (!contextMenuEl) return null;
+    var items = contextMenuEl.querySelectorAll("li");
+    for (var i = 0; i < items.length; i++) {
+      if ((items[i].dataset.path || "") === path || firstTextNode(items[i]) === path) {
+        return items[i];
+      }
+    }
+    return null;
+  }
+
   function cellAt(row, col) {
-    return document.querySelector(
+    if (Number(row) === 0) {
+      return document.querySelector("thead th[data-col='" + Number(col) + "']");
+    }
+    var cell = document.querySelector(
       "tbody td[data-row='" + Number(row) + "'][data-col='" + Number(col) + "']");
+    if (cell) return cell;
+    return document.querySelector(
+      "tbody td[data-row='" + Number(row) + "'][data-group-header='true']");
   }
 
   function mouseEvent(type, payload) {
     return new MouseEvent(type, {
       bubbles: true,
       cancelable: true,
+      clientX: Number(payload.clientX || 24),
+      clientY: Number(payload.clientY || 24),
       ctrlKey: !!payload.ctrlKey,
       metaKey: !!payload.metaKey,
       shiftKey: !!payload.shiftKey
@@ -564,8 +1321,19 @@
 
   function setup(component) {
     htmlComponent = component;
+    document.addEventListener("click", function() {
+      hideContextMenu();
+    });
     htmlComponent.addEventListener("Render", function(event) {
       render(event.Data || {});
+    });
+    htmlComponent.addEventListener("SetTooltip", function(event) {
+      renderTooltipBlocks((event.Data && event.Data.blocks) || []);
+      if (pendingTooltipProbe) {
+        var request = pendingTooltipProbe;
+        pendingTooltipProbe = null;
+        sendProbeResult(request, snapshot());
+      }
     });
     htmlComponent.addEventListener("Probe", function(event) {
       handleProbe(event.Data || {});

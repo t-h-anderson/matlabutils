@@ -15,6 +15,8 @@ classdef (Abstract) TableBackend < handle
         Multiselect
         Selection
         ColumnWidth
+        GroupHeaderRows
+        GroupHeaderLevels
         StyleConfigurations
         Tooltip
         ContextMenu
@@ -97,6 +99,22 @@ classdef (Abstract) TableBackend < handle
 
         function set.ColumnWidth(this, value)
             this.setBackendProperty("ColumnWidth", value);
+        end
+
+        function value = get.GroupHeaderRows(this)
+            value = this.getBackendProperty("GroupHeaderRows");
+        end
+
+        function set.GroupHeaderRows(this, value)
+            this.setBackendProperty("GroupHeaderRows", value);
+        end
+
+        function value = get.GroupHeaderLevels(this)
+            value = this.getBackendProperty("GroupHeaderLevels");
+        end
+
+        function set.GroupHeaderLevels(this, value)
+            this.setBackendProperty("GroupHeaderLevels", value);
         end
 
         function value = get.StyleConfigurations(this)

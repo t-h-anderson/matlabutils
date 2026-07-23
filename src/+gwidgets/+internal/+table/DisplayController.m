@@ -171,7 +171,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
 
             owner = this.owner();
             backend = owner.Graphics.Backend;
-            toUpdate = cell(1, 2*numel(vars));
+            toUpdate = cell(1, 6*numel(vars));
             nUpdates = 0;
             for iVar = 1:numel(vars)
                 currentVar = vars(iVar);
@@ -197,6 +197,18 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 if currentVar == "VisibleData" && ~isequal(backend.ColumnName, columnName)
                     nUpdates = nUpdates + 2;
                     toUpdate(nUpdates-1:nUpdates) = {"ColumnName", columnName};
+                end
+
+                if currentVar == "VisibleData"
+                    [groupHeaderRows, groupHeaderLevels] = this.groupHeadersForDisplay(owner);
+                    if ~isequal(backend.GroupHeaderRows, groupHeaderRows)
+                        nUpdates = nUpdates + 2;
+                        toUpdate(nUpdates-1:nUpdates) = {"GroupHeaderRows", groupHeaderRows};
+                    end
+                    if ~isequal(backend.GroupHeaderLevels, groupHeaderLevels)
+                        nUpdates = nUpdates + 2;
+                        toUpdate(nUpdates-1:nUpdates) = {"GroupHeaderLevels", groupHeaderLevels};
+                    end
                 end
             end
 
@@ -267,6 +279,32 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             data = gwidgets.internal.table.DisplayController.transposeVisibleData(data);
+        end
+
+        function [rows, levels] = groupHeadersForDisplay(this, owner)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+            end
+
+            if this.Orientation ~= "Normal"
+                rows = zeros(1,0);
+                levels = zeros(1,0);
+                return
+            end
+
+            rows = reshape(owner.Data.VisibleGroupHeaderRowIdx, 1, []);
+            levels = reshape(owner.Data.VisibleGroupHeaderLevels, 1, []);
+            if isempty(rows)
+                levels = zeros(1,0);
+                return
+            end
+
+            if numel(levels) ~= numel(rows)
+                levels = ones(1, numel(rows));
+            elseif all(levels == 0)
+                levels = ones(1, numel(rows));
+            end
         end
 
         function columnName = columnNamesForDisplay(this, data)

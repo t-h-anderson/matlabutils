@@ -11,9 +11,15 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
         Multiselect_ (1,1) matlab.lang.OnOffSwitchState = "on"
         Selection_ (:,:) double = zeros(0,2)
         ColumnWidth_ (1,:) cell = {}
+        GroupHeaderRows_ (1,:) double = zeros(1,0)
+        GroupHeaderLevels_ (1,:) double = zeros(1,0)
         StyleConfigurations_ (:,3) table = gwidgets.internal.table.backend.TableBackend.emptyStyleConfigurations()
         Tooltip_ (1,1) string = ""
         ContextMenu_
+        ContextMenuItems_ (1,:) cell = cell(1,0)
+        ContextMenuCallbacks_ (1,1) struct = struct()
+        ContextMenuCustomItems_ (1,:) matlab.ui.container.Menu = matlab.ui.container.Menu.empty(1,0)
+        ThemeListener (1,:) event.listener = event.listener.empty(1,0)
         ProbeCounter (1,1) double = 0
         ProbeResult (1,1) struct = struct("id", -1)
     end
@@ -39,6 +45,7 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 DataChangedFcn=@(src, ~)this.onData(src));
             this.Component.Layout.Column = 1;
             this.Component.Layout.Row = 3;
+            this.configureThemeListener(owner);
         end
 
         function setupBridge(~, ~)
@@ -46,9 +53,25 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             % DOM-scraping bridge used by matlab.ui.control.Table.
         end
 
-        function contextMenu = buildContextMenu(~, contextMenu, ~, ~, ~)
-            % MATLAB uicontextmenu cannot be attached inside uihtml. The JS
-            % backend will render its own context menu in a later slice.
+        function contextMenu = buildContextMenu(this, contextMenu, customItems, options, callbacks)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+                contextMenu
+                customItems (1,:) matlab.ui.container.Menu
+                options (1,1) struct
+                callbacks (1,1) struct
+            end
+
+            if ~isempty(customItems)
+                [customItems.Parent] = deal([]);
+                [customItems.Tag] = deal("graphicscomponentsTableContextMenu");
+            end
+
+            this.ContextMenuCustomItems_ = customItems;
+            this.ContextMenuCallbacks_ = callbacks;
+            this.ContextMenuItems_ = gwidgets.internal.table.backend.JSTableBackend.contextMenuItems( ...
+                options, customItems);
+            this.sendState();
         end
 
         function addStyle(this, style, target, index)
@@ -101,6 +124,12 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                     this.onDisplayDataChanged(data);
                 case "ColumnWidthChanged"
                     this.onColumnWidthChanged(data);
+                case "CellHover"
+                    this.onCellHover(data);
+                case "CellLeave"
+                    this.sendTooltipBlocks(cell(1,0));
+                case "ContextMenuAction"
+                    this.onContextMenuAction(data);
                 case "ProbeResult"
                     this.ProbeResult = data;
                 otherwise
@@ -113,7 +142,7 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 this (1,1) gwidgets.internal.table.backend.JSTableBackend
                 probeName (1,1) string
                 payload (1,1) struct = struct()
-                nvp.Timeout (1,1) double {mustBePositive} = 5
+                nvp.Timeout (1,1) double {mustBePositive} = 10
             end
 
             if ~this.isReady()
@@ -128,14 +157,17 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 "id", probeId, ...
                 "probe", char(probeName), ...
                 "payload", payload);
+            renderPayload = this.tablePayload();
 
-            isSent = false;
+            lastSendTime = -Inf;
             startTime = tic;
             while toc(startTime) < nvp.Timeout
-                if ~isSent
+                elapsedTime = toc(startTime);
+                if elapsedTime - lastSendTime >= 0.1
                     try
+                        sendEventToHTMLSource(this.Component, "Render", renderPayload);
                         sendEventToHTMLSource(this.Component, "Probe", request);
-                        isSent = true;
+                        lastSendTime = elapsedTime;
                     catch
                         % uihtml can exist before its browser document is accepting events.
                     end
@@ -174,13 +206,17 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 case "ColumnSortable"
                     value = this.ColumnSortable_;
                 case "SelectionType"
-                    value = this.SelectionType_;
+                    value = char(this.SelectionType_);
                 case "Multiselect"
                     value = this.Multiselect_;
                 case "Selection"
                     value = this.Selection_;
                 case "ColumnWidth"
                     value = this.ColumnWidth_;
+                case "GroupHeaderRows"
+                    value = this.GroupHeaderRows_;
+                case "GroupHeaderLevels"
+                    value = this.GroupHeaderLevels_;
                 case "StyleConfigurations"
                     value = this.StyleConfigurations_;
                 case "Tooltip"
@@ -217,6 +253,10 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                     this.Selection_ = value;
                 case "ColumnWidth"
                     this.ColumnWidth_ = gwidgets.internal.table.ColumnWidthController.normalizeColumnWidths(value);
+                case "GroupHeaderRows"
+                    this.GroupHeaderRows_ = reshape(double(value), 1, []);
+                case "GroupHeaderLevels"
+                    this.GroupHeaderLevels_ = reshape(double(value), 1, []);
                 case "StyleConfigurations"
                     this.StyleConfigurations_ = value;
                 case "Tooltip"
@@ -324,6 +364,34 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             owner.Display.handleBridgeColumnWidths(double(data.widths));
         end
 
+        function onCellHover(this, data)
+            owner = this.owner();
+            if isempty(owner) || ~isfield(data, "row") || ~isfield(data, "col")
+                this.sendTooltipBlocks(cell(1,0));
+                return
+            end
+
+            if isempty(owner.Tooltip.Tooltips)
+                this.sendTooltipBlocks(cell(1,0));
+                return
+            end
+
+            blocks = owner.Tooltip.resolveBlocks(double(data.row), double(data.col));
+            this.sendTooltipBlocks(blocks);
+        end
+
+        function sendTooltipBlocks(this, blocks)
+            if ~this.isReady()
+                return
+            end
+
+            try
+                sendEventToHTMLSource(this.Component, "SetTooltip", struct("blocks", {blocks}));
+            catch
+                % uihtml can be constructed before the browser side is ready.
+            end
+        end
+
         function eventData = interactionEvent(~, data)
             eventData = struct("InteractionInformation", struct( ...
                 "DisplayRow", double(data.row), ...
@@ -361,8 +429,158 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 "columnEditable", this.ColumnEditable_, ...
                 "columnSortable", this.ColumnSortable_, ...
                 "columnWidth", {this.columnWidthPayload()}, ...
+                "groupHeaderRows", this.GroupHeaderRows_, ...
+                "groupHeaderLevels", this.GroupHeaderLevels_, ...
                 "tooltip", char(this.Tooltip_), ...
+                "contextMenu", {this.ContextMenuItems_}, ...
+                "theme", char(this.themePayload()), ...
                 "styles", {this.stylePayload()});
+        end
+
+        function configureThemeListener(this, owner)
+            delete(this.ThemeListener);
+            this.ThemeListener = event.listener.empty(1,0);
+
+            fig = ancestor(owner, "figure");
+            if isempty(fig)
+                return
+            end
+
+            try
+                this.ThemeListener = addlistener(fig, "ThemeChanged", @(~, ~)this.sendState());
+            catch
+                try
+                    this.ThemeListener = addlistener(fig, "Theme", "PostSet", @(~, ~)this.sendState());
+                catch
+                    % Older MATLAB releases do not expose figure theme notifications.
+                end
+            end
+        end
+
+        function theme = themePayload(this)
+            theme = "light";
+            owner = this.owner();
+            if isempty(owner)
+                return
+            end
+
+            fig = ancestor(owner, "figure");
+            if isempty(fig) || ~isprop(fig, "Theme")
+                return
+            end
+
+            try
+                theme = string(fig.Theme.BaseColorStyle);
+            catch
+                theme = this.themeFromFigureColor(fig);
+            end
+
+            if theme ~= "dark"
+                theme = "light";
+            end
+        end
+
+        function theme = themeFromFigureColor(~, fig)
+            theme = "light";
+            try
+                color = double(fig.Color);
+            catch
+                % Some parent figures may not expose a numeric Color fallback.
+                return
+            end
+
+            if numel(color) == 3 && mean(color) < 0.5
+                theme = "dark";
+            end
+        end
+
+        function onContextMenuAction(this, data)
+            if ~isfield(data, "action") || isempty(fieldnames(this.ContextMenuCallbacks_))
+                return
+            end
+
+            callbacks = this.ContextMenuCallbacks_;
+            action = string(data.action);
+            eventData = this.contextMenuEventData(data);
+            value = this.contextMenuValue(data);
+
+            switch action
+                case "SetGroups"
+                    callbacks.SetGroups(value);
+                case "AddGroups"
+                    callbacks.AddGroups(value);
+                case "RemoveGroups"
+                    callbacks.RemoveGroups(value);
+                case "ToggleGroupingMode"
+                    callbacks.ToggleGroupingMode([], []);
+                case "ToggleShowEmptyGroups"
+                    callbacks.ToggleShowEmptyGroups([], []);
+                case "SortAscend"
+                    callbacks.SortAscend([], eventData);
+                case "SortDescend"
+                    callbacks.SortDescend([], eventData);
+                case "SortNone"
+                    callbacks.SortNone([], eventData);
+                case "CellSelection"
+                    callbacks.CellSelection([], []);
+                case "RowSelection"
+                    callbacks.RowSelection([], []);
+                case "ColumnSelection"
+                    callbacks.ColumnSelection([], []);
+                case "ToggleRowFilter"
+                    callbacks.ToggleRowFilter([], []);
+                case "AutoResizeColumns"
+                    callbacks.AutoResizeColumns([], []);
+                case "ToggleDragging"
+                    callbacks.ToggleDragging([], []);
+                case "CustomItem"
+                    this.invokeCustomMenuItem(value);
+                otherwise
+                    % Unknown menu actions are ignored for forward compatibility.
+            end
+        end
+
+        function eventData = contextMenuEventData(~, data)
+            row = 0;
+            col = 0;
+            if isfield(data, "row")
+                row = double(data.row);
+            end
+            if isfield(data, "col")
+                col = double(data.col);
+            end
+
+            eventData = struct("InteractionInformation", struct( ...
+                "DisplayRow", row, ...
+                "DisplayColumn", col));
+        end
+
+        function value = contextMenuValue(~, data)
+            value = strings(1,0);
+            if ~isfield(data, "value") || isempty(data.value)
+                return
+            end
+
+            rawValue = data.value;
+            value = string(rawValue);
+            value = reshape(value, 1, []);
+        end
+
+        function invokeCustomMenuItem(this, value)
+            if isempty(value)
+                return
+            end
+
+            itemIndex = str2double(value(1));
+            if isnan(itemIndex) || itemIndex < 1 || itemIndex > numel(this.ContextMenuCustomItems_)
+                return
+            end
+
+            item = this.ContextMenuCustomItems_(itemIndex);
+            if isempty(item.MenuSelectedFcn)
+                return
+            end
+            item.MenuSelectedFcn(item, []);
         end
 
         function names = displayColumnNames(this)
@@ -429,6 +647,197 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
     end
 
     methods (Static, Access = private)
+        function items = contextMenuItems(options, customItems)
+            arguments
+                options (1,1) struct
+                customItems (1,:) matlab.ui.container.Menu
+            end
+
+            toggleItems = gwidgets.internal.table.backend.JSTableBackend.toggleMenuItems(options);
+            itemCells = cell(1, 3 + numel(toggleItems) + numel(customItems));
+            nItems = 0;
+            groupingItem = gwidgets.internal.table.backend.JSTableBackend.groupingMenuItem(options);
+            if ~isempty(groupingItem)
+                nItems = nItems + 1;
+                itemCells{nItems} = groupingItem;
+            end
+
+            sortItem = gwidgets.internal.table.backend.JSTableBackend.sortMenuItem(options);
+            if ~isempty(sortItem)
+                nItems = nItems + 1;
+                itemCells{nItems} = sortItem;
+            end
+
+            selectionItem = gwidgets.internal.table.backend.JSTableBackend.selectionMenuItem(options);
+            if ~isempty(selectionItem)
+                nItems = nItems + 1;
+                itemCells{nItems} = selectionItem;
+            end
+
+            nToggleItems = numel(toggleItems);
+            itemCells(nItems+1:nItems+nToggleItems) = toggleItems;
+            nItems = nItems + nToggleItems;
+
+            for iItem = 1:numel(customItems)
+                nItems = nItems + 1;
+                itemCells{nItems} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    string(customItems(iItem).Text), "CustomItem", string(iItem), ...
+                    string(customItems(iItem).Enable) ~= "off", cell(1,0));
+            end
+
+            items = itemCells(1:nItems);
+        end
+
+        function item = groupingMenuItem(options)
+            item = [];
+            if ~(options.HasChangeGroupingVariable || options.HasToggleShowEmptyGroups)
+                return
+            end
+
+            children = cell(1,0);
+            if options.HasChangeGroupingVariable
+                children{end+1} = gwidgets.internal.table.backend.JSTableBackend.variableMenuItem( ...
+                    "Set", "SetGroups", options.DataVariables, options.DataVariableNames, ...
+                    options.SelectedGroupingVariables, options.SelectedGroupingVariableNames, "All");
+                children{end+1} = gwidgets.internal.table.backend.JSTableBackend.variableMenuItem( ...
+                    "Add", "AddGroups", options.DataVariables, options.DataVariableNames, ...
+                    options.SelectedGroupingVariables, options.SelectedGroupingVariableNames, "All");
+
+                [removeVariables, removeNames] = gwidgets.internal.table.backend.JSTableBackend.selectedRemoveItems( ...
+                    options);
+                children{end+1} = gwidgets.internal.table.backend.JSTableBackend.variableMenuItem( ...
+                    "Remove", "RemoveGroups", options.GroupingVariables, options.GroupingVariableNames, ...
+                    removeVariables, removeNames, "All");
+
+                modeText = "Use nested groups";
+                if options.GroupingMode == "Nested"
+                    modeText = "Use flat groups";
+                end
+                children{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    modeText, "ToggleGroupingMode", strings(1,0), true, cell(1,0));
+            end
+
+            if options.HasToggleShowEmptyGroups
+                children{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "Show/hide empty groups", "ToggleShowEmptyGroups", strings(1,0), true, cell(1,0));
+            end
+
+            item = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                "Grouping", "", strings(1,0), true, children);
+        end
+
+        function item = sortMenuItem(options)
+            item = [];
+            if ~(options.HasColumnSorting && any(options.ColumnSortable))
+                return
+            end
+
+            children = { ...
+                gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "Ascending", "SortAscend", strings(1,0), true, cell(1,0)), ...
+                gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "Descending", "SortDescend", strings(1,0), true, cell(1,0)), ...
+                gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "None", "SortNone", strings(1,0), true, cell(1,0))};
+            item = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                "Sort", "", strings(1,0), true, children);
+        end
+
+        function item = selectionMenuItem(options)
+            item = [];
+            if numel(options.SupportedSelectionTypes) <= 1
+                return
+            end
+
+            children = cell(1,0);
+            if any(options.SupportedSelectionTypes == "cell")
+                children{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "Cell", "CellSelection", strings(1,0), true, cell(1,0));
+            end
+            if any(options.SupportedSelectionTypes == "row")
+                children{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "Row", "RowSelection", strings(1,0), true, cell(1,0));
+            end
+            if any(options.SupportedSelectionTypes == "column")
+                children{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "Column", "ColumnSelection", strings(1,0), true, cell(1,0));
+            end
+
+            item = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                "Selection Mode", "", strings(1,0), true, children);
+        end
+
+        function items = toggleMenuItems(options)
+            items = cell(1,0);
+            if options.HasToggleFilter
+                items{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "Show/hide row filter", "ToggleRowFilter", strings(1,0), true, cell(1,0));
+            end
+
+            if options.HasAutoResizeColumns
+                items{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    "Auto-resize columns", "AutoResizeColumns", strings(1,0), true, cell(1,0));
+            end
+
+            if options.HasToggleDragging
+                menuText = "Enable row dragging";
+                if options.DragEnabled
+                    menuText = "Disable row dragging";
+                end
+                items{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    menuText, "ToggleDragging", strings(1,0), true, cell(1,0));
+            end
+        end
+
+        function item = variableMenuItem(label, action, variables, names, selectedVariables, selectedNames, allText)
+            children = cell(1, 2 + numel(variables));
+            children{1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                allText, action, variables, true, cell(1,0));
+
+            selectedEnabled = ~isempty(selectedVariables);
+            children{2} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                gwidgets.internal.table.backend.JSTableBackend.selectedActionText(selectedNames), ...
+                action, selectedVariables, selectedEnabled, cell(1,0));
+
+            for iVariable = 1:numel(variables)
+                children{2+iVariable} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    names(iVariable), action, variables(iVariable), true, cell(1,0));
+            end
+
+            item = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                label, "", strings(1,0), true, children);
+        end
+
+        function [variables, names] = selectedRemoveItems(options)
+            isSelected = ismember(options.SelectedGroupingVariables, options.GroupingVariables);
+            variables = options.SelectedGroupingVariables(isSelected);
+            names = options.SelectedGroupingVariableNames(isSelected);
+        end
+
+        function text = selectedActionText(selectedNames)
+            text = "Selected";
+            if ~isempty(selectedNames)
+                text = "Selected (" + strjoin(selectedNames, ", ") + ")";
+            end
+        end
+
+        function item = menuItem(text, action, value, enabled, children)
+            arguments
+                text (1,1) string
+                action (1,1) string
+                value (1,:) string
+                enabled (1,1) logical
+                children (1,:) cell
+            end
+
+            item = struct( ...
+                "text", char(text), ...
+                "action", char(action), ...
+                "value", {cellstr(value)}, ...
+                "enabled", enabled, ...
+                "children", {children});
+        end
+
         function values = displayValues(data)
             values = cell(height(data), width(data));
             for iRow = 1:height(data)

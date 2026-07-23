@@ -73,20 +73,82 @@ classdef tJavaScriptRender < matlab.unittest.TestCase
             testCase.verifyEqual(t.Sort.Direction, "Ascend")
             testCase.verifyEqual(t.DisplayData.Value, [1; 2; 3])
         end
+
+        function tContextMenuSubmenusPopOut(testCase)
+            data = table(["A"; "B"], ["x"; "y"], VariableNames=["Group", "Label"]);
+            [t, backend] = test.unit.gwidgets.Table.tJavaScriptRender.createTable(testCase, data);
+            t.GroupingVariable = "Group";
+            t.HasChangeGroupingVariable = true;
+
+            backend.probeBrowser("OpenContextMenu", struct("row", 1, "col", 1));
+            snapshot = backend.probeBrowser( ...
+                "HoverContextMenuItem", struct("row", 1, "col", 1, "path", "Grouping > Set"));
+
+            openPaths = test.unit.gwidgets.Table.tJavaScriptRender.rowString(snapshot.contextMenuOpenPaths);
+            displays = test.unit.gwidgets.Table.tJavaScriptRender.rowString(snapshot.contextMenuSubmenuDisplays);
+            positions = test.unit.gwidgets.Table.tJavaScriptRender.rowString(snapshot.contextMenuSubmenuPositions);
+
+            testCase.verifyTrue(any(openPaths == "Grouping > Set"))
+            testCase.verifyTrue(any(displays == "block"))
+            testCase.verifyTrue(any(positions == "absolute"))
+        end
+
+        function tUsesFigureThemeStatus(testCase)
+            data = table([1; 2], VariableNames="Value");
+            [~, backend] = test.unit.gwidgets.Table.tJavaScriptRender.createTable( ...
+                testCase, data, Theme="dark");
+
+            snapshot = backend.probeBrowser("Snapshot");
+
+            testCase.verifyEqual(string(snapshot.theme), "dark")
+            testCase.verifyNotEqual(string(snapshot.tableBackgroundColor), "rgb(255, 255, 255)")
+        end
+
+        function tDragSelectCellsSelectsRectangle(testCase)
+            data = array2table(reshape(1:9, 3, 3), VariableNames=["A", "B", "C"]);
+            [t, backend] = test.unit.gwidgets.Table.tJavaScriptRender.createTable(testCase, data);
+
+            backend.probeBrowser("DragSelectCells", struct( ...
+                "startRow", 1, ...
+                "startCol", 1, ...
+                "endRow", 2, ...
+                "endCol", 2));
+
+            testCase.verifyEqual(t.Selection, [1 1; 1 2; 2 1; 2 2])
+        end
     end
 
     methods (Static, Access = private)
-        function [t, backend] = createTable(testCase, data)
+        function [t, backend, fig] = createTable(testCase, data, nvp)
             arguments
                 testCase (1,1) matlab.unittest.TestCase
                 data (:,:) table
+                nvp.Theme (1,1) string = ""
             end
 
             fig = uifigure(Visible="off");
             testCase.addTeardown(@()delete(fig));
+            if nvp.Theme ~= ""
+                test.unit.gwidgets.Table.tJavaScriptRender.setFigureTheme(testCase, fig, nvp.Theme);
+            end
             t = gwidgets.Table(Parent=fig, Backend="JavaScript", Data=data);
             testCase.addTeardown(@()delete(t));
             backend = t.UITable.Graphics.Backend;
+        end
+
+        function setFigureTheme(testCase, fig, theme)
+            arguments
+                testCase (1,1) matlab.unittest.TestCase
+                fig (1,1) matlab.ui.Figure
+                theme (1,1) string {mustBeMember(theme, ["light", "dark"])}
+            end
+
+            if ~isprop(fig, "Theme")
+                testCase.assumeFail("Figure themes are not available in this MATLAB release.")
+            end
+
+            fig.Theme = theme;
+            drawnow()
         end
 
         function value = rowString(value)
