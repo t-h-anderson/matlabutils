@@ -277,11 +277,11 @@ classdef TooltipController < gwidgets.internal.table.TableController
     methods (Access = private)
         function applyTextToDisplay(this)
             owner = this.owner();
-            if isempty(owner) || isempty(owner.Graphics.DisplayTable)
+            if isempty(owner) || isempty(owner.Graphics.Backend) || ~owner.Graphics.Backend.isReady()
                 return
             end
 
-            owner.Graphics.DisplayTable.Tooltip = this.Text_;
+            owner.Graphics.Backend.Tooltip = this.Text_;
         end
 
         function owner = requireOwner(this)

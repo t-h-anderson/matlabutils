@@ -40,6 +40,7 @@ classdef Table < matlab.mixin.SetGet
         SelectionControl (1,1) gwidgets.internal.table.SelectionController
         TooltipControl (1,1) gwidgets.internal.table.TooltipController
         Drag (1,1) gwidgets.internal.table.DragController
+        Backend (1,1) string
     end
 
     properties (Dependent)
@@ -69,7 +70,7 @@ classdef Table < matlab.mixin.SetGet
     end
 
     properties (Dependent, Hidden, SetAccess = private)
-        DisplayTable (1,:) matlab.ui.control.Table
+        DisplayTable
         FilterController (1,:) gwidgets.internal.table.FilterController
         Grid (1,:) matlab.ui.container.GridLayout
         GroupLabel (1,:) matlab.ui.control.Label
@@ -155,9 +156,13 @@ classdef Table < matlab.mixin.SetGet
                 namedArgs.?gwidgets.Table
                 namedArgs.ShowRowFilter (1,1) logical = false
                 namedArgs.GroupHeaderStyle = gwidgets.Table.defaultGroupHeaderStyle
+                namedArgs.Backend (1,1) string {mustBeMember(namedArgs.Backend, ["UITable", "JavaScript"])} = "UITable"
             end
 
-            this.UITable_ = gwidgets.UITable();
+            backend = namedArgs.Backend;
+            namedArgs = rmfield(namedArgs, "Backend");
+
+            this.UITable_ = gwidgets.UITable(Backend=backend);
             this.UITable_.setConstructionRefreshSuppressed(true);
             cleanupObj = onCleanup(@()this.UITable_.setConstructionRefreshSuppressed(false));
 
@@ -253,6 +258,10 @@ classdef Table < matlab.mixin.SetGet
 
         function val = get.Drag(this)
             val = this.UITable_.Drag;
+        end
+
+        function val = get.Backend(this)
+            val = this.UITable_.Backend;
         end
 
         function val = get.Data(this)

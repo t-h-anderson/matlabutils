@@ -54,11 +54,11 @@ classdef SelectionController < gwidgets.internal.table.TableController
         end
 
         function val = get.Type(this)
-            val = this.owner().Graphics.DisplayTable.SelectionType;
+            val = this.owner().Graphics.Backend.SelectionType;
         end
 
         function set.Type(this, val)
-            this.owner().Graphics.DisplayTable.SelectionType = val;
+            this.owner().Graphics.Backend.SelectionType = val;
             this.clear();
 
             if this.owner().doControllerUpdate("SelectionType")
@@ -67,11 +67,11 @@ classdef SelectionController < gwidgets.internal.table.TableController
         end
 
         function val = get.Multiselect(this)
-            val = this.owner().Graphics.DisplayTable.Multiselect;
+            val = this.owner().Graphics.Backend.Multiselect;
         end
 
         function set.Multiselect(this, val)
-            this.owner().Graphics.DisplayTable.Multiselect = val;
+            this.owner().Graphics.Backend.Multiselect = val;
             this.clear();
         end
 
@@ -471,7 +471,8 @@ classdef SelectionController < gwidgets.internal.table.TableController
 
         function refreshVisibleSelection(this)
             owner = this.owner();
-            if isempty(owner.Graphics.DisplayTable) || isempty(owner.Data.FoldedDataToVisibleMap)
+            if isempty(owner.Graphics.Backend) || ~owner.Graphics.Backend.isReady() ...
+                    || isempty(owner.Data.FoldedDataToVisibleMap)
                 return
             end
 
@@ -483,9 +484,9 @@ classdef SelectionController < gwidgets.internal.table.TableController
             this.IsSettingProgrammatically = true;
             cleanupObj = onCleanup(@()this.clearProgrammaticFlag());
             try
-                owner.Graphics.DisplayTable.Selection = selection;
+                owner.Graphics.Backend.Selection = selection;
             catch
-                owner.Graphics.DisplayTable.Selection = [];
+                owner.Graphics.Backend.Selection = [];
             end
             delete(cleanupObj);
             if owner.Menu.HasChangeGroupingVariable
@@ -526,7 +527,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
                 return
             end
 
-            values = this.owner().Graphics.DisplayTable.Data{:, colIdx};
+            values = this.owner().Graphics.Backend.Data{:, colIdx};
             if iscategorical(values)
                 this.owner().Filter.CategoricalVariables = categories(values);
             else
@@ -568,7 +569,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
         function sz = displaySelectionSize(this)
             owner = this.owner();
             if owner.Display.Orientation == "Transposed"
-                sz = size(owner.Graphics.DisplayTable.Data);
+                sz = size(owner.Graphics.Backend.Data);
             else
                 sz = size(owner.Data.Visible);
             end

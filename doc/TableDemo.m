@@ -19,7 +19,7 @@ T.Note = string(T.Note);
 fig = uifigure('Name','Table Widget Demo');
 gl = uigridlayout(fig, [1,1]);
 %[text] Construct the Table widget using name-value pairs supported by the class 
-tb = gwidgets.UITable(Parent=gl, Data=T);
+tb = gwidgets.UITable(Parent=gl, Data=T, Backend="JavaScript");
 %%
 %[text] ### Enable features
 %[text] Enable the row filter control 

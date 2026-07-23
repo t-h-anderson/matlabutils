@@ -68,17 +68,17 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            displayTable = owner.Graphics.DisplayTable;
+            backend = owner.Graphics.Backend;
 
             owner.Bridge.suppress();
             visWidths = this.visibleColumnWidths(owner);
-            if ~isequal(displayTable.ColumnWidth, visWidths)
+            if ~isequal(backend.ColumnWidth, visWidths)
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
-                displayTable.ColumnWidth = {"Auto"};
+                backend.ColumnWidth = {"Auto"};
                 owner.forceRefresh();
-                displayTable.ColumnWidth = visWidths;
+                backend.ColumnWidth = visWidths;
             end
             owner.Bridge.restore();
         end
@@ -170,7 +170,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            displayTable = owner.Graphics.DisplayTable;
+            backend = owner.Graphics.Backend;
             toUpdate = cell(1, 2*numel(vars));
             nUpdates = 0;
             for iVar = 1:numel(vars)
@@ -178,14 +178,14 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 newVal = this.propertyValue(owner, currentVar);
 
                 if currentVar == "VisibleData"
-                    currentVal = displayTable.DisplayData;
+                    currentVal = backend.DisplayData;
                     newVal = gwidgets.internal.table.DisplayController.visibleDataForTable( ...
                         newVal, this.updateState(owner));
                     columnName = this.columnNamesForDisplay(newVal);
                     newVal = this.orientVisibleData(newVal);
                     newVar = "Data";
                 else
-                    currentVal = displayTable.(currentVar);
+                    currentVal = backend.(currentVar);
                     newVar = currentVar;
                 end
 
@@ -194,14 +194,14 @@ classdef DisplayController < gwidgets.internal.table.TableController
                     toUpdate(nUpdates-1:nUpdates) = {newVar, newVal};
                 end
 
-                if currentVar == "VisibleData" && ~isequal(displayTable.ColumnName, columnName)
+                if currentVar == "VisibleData" && ~isequal(backend.ColumnName, columnName)
                     nUpdates = nUpdates + 2;
                     toUpdate(nUpdates-1:nUpdates) = {"ColumnName", columnName};
                 end
             end
 
             if nUpdates > 0
-                set(displayTable, toUpdate{1:nUpdates});
+                backend.setProperties(toUpdate(1:nUpdates));
             end
         end
     end
@@ -332,7 +332,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 owner (1,1) gwidgets.UITable
             end
 
-            displayData = owner.Graphics.DisplayTable.Data;
+            displayData = owner.Graphics.Backend.Data;
             if width(displayData) == 0
                 widths = {};
                 return
@@ -378,7 +378,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 pixelWidths (1,:) double
             end
 
-            displayData = owner.Graphics.DisplayTable.Data;
+            displayData = owner.Graphics.Backend.Data;
             allDataNames = owner.Column.DataNames;
             nData = numel(allDataNames);
             visibleMask = false(1, nData);

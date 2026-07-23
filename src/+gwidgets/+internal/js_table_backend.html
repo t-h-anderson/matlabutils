@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    :root {
+      color-scheme: light;
+      font: 12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    .table-wrap {
+      width: 100vw;
+      height: 100vh;
+      overflow: auto;
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      min-width: 24px;
+      height: 24px;
+      padding: 2px 6px;
+      border: 1px solid #d6d6d6;
+      box-sizing: border-box;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f5f5f5;
+      color: #222;
+      font-weight: 600;
+      text-align: left;
+    }
+
+    td.selected,
+    tr.selected-row td,
+    th.selected-column,
+    td.selected-column {
+      background: #d9ecff;
+      outline: 1px solid #6aa7e8;
+      outline-offset: -1px;
+    }
+
+    td[contenteditable="true"] {
+      background: #fffdf2;
+    }
+  </style>
+  <script>
+  var htmlComponent = null;
+  var state = {
+    columns: [],
+    values: [],
+    rowCount: 0,
+    cellRows: [],
+    cellCols: [],
+    cellValues: [],
+    selectionType: "cell",
+    multiselect: "on",
+    selection: [],
+    columnEditable: [],
+    columnSortable: [],
+    columnWidth: [],
+    tooltip: "",
+    styles: []
+  };
+
+  function asArray(value) {
+    if (!value) return [];
+    if (!Array.isArray(value)) return [value];
+    return value;
+  }
+
+  function flatten(value) {
+    var result = [];
+    asArray(value).forEach(function(item) {
+      if (Array.isArray(item)) {
+        result = result.concat(flatten(item));
+      } else if (item !== undefined && item !== null && item !== "") {
+        result.push(item);
+      }
+    });
+    return result;
+  }
+
+  function normaliseTableRows(value) {
+    if (!value || !Array.isArray(value) || value.length === 0) return [];
+    if (Array.isArray(value[0])) return value;
+    return [value];
+  }
+
+  function send(data) {
+    if (htmlComponent) htmlComponent.Data = data;
+  }
+
+  function sendProbeResult(request, extra) {
+    var result = Object.assign({
+      event: "ProbeResult",
+      id: Number(request.id || -1),
+      probe: String(request.probe || "")
+    }, extra || {});
+    send(result);
+  }
+
+  function render(payload) {
+    state = Object.assign(state, payload || {});
+    var root = document.getElementById("root");
+    root.textContent = "";
+
+    var table = document.createElement("table");
+    table.title = state.tooltip || "";
+    renderColgroup(table);
+    renderHeader(table);
+    renderBody(table);
+    root.appendChild(table);
+  }
+
+  function renderColgroup(table) {
+    if (!state.columnWidth || state.columnWidth.length === 0) return;
+    var colgroup = document.createElement("colgroup");
+    state.columnWidth.forEach(function(width) {
+      var col = document.createElement("col");
+      if (width && String(width).endsWith("px")) col.style.width = String(width);
+      colgroup.appendChild(col);
+    });
+    table.appendChild(colgroup);
+  }
+
+  function renderHeader(table) {
+    var thead = document.createElement("thead");
+    var row = document.createElement("tr");
+    state.columns.forEach(function(name, idx) {
+      var th = document.createElement("th");
+      th.textContent = name;
+      th.dataset.col = idx + 1;
+      applyCssText(th, cssForCell(0, idx + 1));
+      if (isColumnSelected(idx + 1)) th.classList.add("selected-column");
+      th.addEventListener("click", function(event) {
+        if (indexedBoolean(state.columnSortable, idx)) {
+          send({
+            event: "DisplayDataChanged",
+            interaction: "sort",
+            variable: state.columns[idx]
+          });
+        } else {
+          selectCell(1, idx + 1, event);
+        }
+      });
+      row.appendChild(th);
+    });
+    thead.appendChild(row);
+    table.appendChild(thead);
+  }
+
+  function renderBody(table) {
+    var tbody = document.createElement("tbody");
+    var rows = tableRows();
+    rows.forEach(function(rowValues, rowIdx) {
+      var row = document.createElement("tr");
+      var displayRow = rowIdx + 1;
+      if (isRowSelected(displayRow)) row.classList.add("selected-row");
+      asArray(rowValues).forEach(function(value, colIdx) {
+        var displayCol = colIdx + 1;
+        var td = document.createElement("td");
+        td.textContent = value == null ? "" : String(value);
+        td.dataset.row = displayRow;
+        td.dataset.col = displayCol;
+        td.title = state.tooltip || "";
+        applyCssText(td, cssForCell(displayRow, displayCol));
+        if (isCellSelected(displayRow, displayCol)) td.classList.add("selected");
+        if (isColumnSelected(displayCol)) td.classList.add("selected-column");
+        if (indexedBoolean(state.columnEditable, colIdx)) {
+          td.contentEditable = "true";
+          td.addEventListener("blur", function() {
+            send({ event: "CellEdited", row: displayRow, col: displayCol, value: td.textContent });
+          });
+        }
+        td.addEventListener("click", function(event) {
+          send({ event: "CellClicked", row: displayRow, col: displayCol });
+          selectCell(displayRow, displayCol, event);
+        });
+        td.addEventListener("dblclick", function() {
+          send({ event: "CellDoubleClicked", row: displayRow, col: displayCol });
+        });
+        row.appendChild(td);
+      });
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+  }
+
+  function tableRows() {
+    if (state.cellRows && state.cellRows.length > 0) {
+      return coordinateRows();
+    }
+    return normaliseTableRows(state.values);
+  }
+
+  function coordinateRows() {
+    var rowCount = Number(state.rowCount || 0);
+    var columnCount = (state.columns || []).length;
+    var rows = [];
+    for (var row = 1; row <= rowCount; row++) {
+      var rowValues = [];
+      for (var col = 1; col <= columnCount; col++) {
+        rowValues.push(cellValueAt(row, col));
+      }
+      rows.push(rowValues);
+    }
+    return rows;
+  }
+
+  function cellValueAt(row, col) {
+    var rows = asArray(state.cellRows).map(Number);
+    var cols = asArray(state.cellCols).map(Number);
+    var values = asArray(state.cellValues);
+    for (var i = 0; i < values.length; i++) {
+      if (rows[i] === row && cols[i] === col) return values[i];
+    }
+    return "";
+  }
+
+  function selectCell(row, col, event) {
+    var indices;
+    switch (state.selectionType) {
+      case "row":
+        indices = updateLinearSelection(selectionValues(), row, event).map(function(selectedRow) {
+          return [selectedRow, col];
+        });
+        state.selection = indices.map(function(idx) { return idx[0]; });
+        break;
+      case "column":
+        indices = updateLinearSelection(selectionValues(), col, event).map(function(selectedCol) {
+          return [row, selectedCol];
+        });
+        state.selection = indices.map(function(idx) { return idx[1]; });
+        break;
+      default:
+        indices = updateCellSelection(cellSelectionPairs(), [row, col], event);
+        state.selection = indices;
+    }
+    send({ event: "SelectionChanged", indices: indices });
+    render(state);
+  }
+
+  function isCellSelected(row, col) {
+    if (state.selectionType !== "cell") return false;
+    return cellSelectionPairs().some(function(idx) {
+      return idx[0] === row && idx[1] === col;
+    });
+  }
+
+  function isRowSelected(row) {
+    if (state.selectionType !== "row") return false;
+    return selectionValues().indexOf(row) >= 0;
+  }
+
+  function isColumnSelected(col) {
+    if (state.selectionType !== "column") return false;
+    return selectionValues().indexOf(col) >= 0;
+  }
+
+  function selectionValues() {
+    var selection = state.selection || [];
+    var values;
+    if (Array.isArray(selection) && selection.length > 0 && Array.isArray(selection[0])) {
+      values = selection.map(function(idx) {
+        return Number(state.selectionType === "row" ? idx[0] : idx[1]);
+      });
+    } else {
+      values = flatten(selection).map(Number);
+    }
+    return uniqueNumbers(values);
+  }
+
+  function cellSelectionPairs() {
+    var selection = state.selection || [];
+    var pairs = [];
+    if (Array.isArray(selection) && selection.length > 0 && Array.isArray(selection[0])) {
+      selection.forEach(function(idx) {
+        if (idx.length >= 2) pairs.push([Number(idx[0]), Number(idx[1])]);
+      });
+      return pairs;
+    }
+
+    var values = flatten(selection).map(Number);
+    for (var i = 0; i + 1 < values.length; i += 2) {
+      pairs.push([values[i], values[i + 1]]);
+    }
+    return pairs;
+  }
+
+  function updateLinearSelection(values, value, event) {
+    if (!isMultiEvent(event)) return [value];
+    if (values.indexOf(value) >= 0) {
+      return values.filter(function(existing) { return existing !== value; });
+    }
+    values.push(value);
+    return values;
+  }
+
+  function updateCellSelection(pairs, pair, event) {
+    if (!isMultiEvent(event)) return [pair];
+    var exists = pairs.some(function(existing) {
+      return existing[0] === pair[0] && existing[1] === pair[1];
+    });
+    if (exists) {
+      return pairs.filter(function(existing) {
+        return existing[0] !== pair[0] || existing[1] !== pair[1];
+      });
+    }
+    pairs.push(pair);
+    return pairs;
+  }
+
+  function isMultiEvent(event) {
+    return state.multiselect !== "off" && event && (event.ctrlKey || event.metaKey);
+  }
+
+  function uniqueNumbers(values) {
+    var result = [];
+    values.forEach(function(value) {
+      if (Number.isFinite(value) && result.indexOf(value) < 0) result.push(value);
+    });
+    return result;
+  }
+
+  function indexedBoolean(value, idx) {
+    if (Array.isArray(value)) return !!value[idx];
+    return !!value;
+  }
+
+  function cssForCell(row, col) {
+    var css = "";
+    asArray(state.styles).forEach(function(rule) {
+      if (!rule || !rule.css || !styleMatches(rule, row, col)) return;
+      css += ";" + String(rule.css);
+    });
+    return css;
+  }
+
+  function styleMatches(rule, row, col) {
+    switch (String(rule.target)) {
+      case "table":
+        return true;
+      case "row":
+        return row > 0 && containsIndex(rule.index, row);
+      case "column":
+        return containsIndex(rule.index, col);
+      case "cell":
+        return row > 0 && containsCellIndex(rule.index, row, col);
+      default:
+        return false;
+    }
+  }
+
+  function containsIndex(index, value) {
+    return flatten(index).map(Number).indexOf(value) >= 0;
+  }
+
+  function containsCellIndex(index, row, col) {
+    var pairs = [];
+    if (Array.isArray(index) && index.length > 0 && Array.isArray(index[0])) {
+      pairs = index;
+    } else {
+      var values = flatten(index).map(Number);
+      for (var i = 0; i + 1 < values.length; i += 2) {
+        pairs.push([values[i], values[i + 1]]);
+      }
+    }
+    return pairs.some(function(pair) {
+      return Number(pair[0]) === row && Number(pair[1]) === col;
+    });
+  }
+
+  function applyCssText(el, cssText) {
+    if (!cssText) return;
+    el.style.cssText += ";" + cssText;
+  }
+
+  function handleProbe(request) {
+    try {
+      var payload = request.payload || {};
+      switch (String(request.probe || "")) {
+        case "Snapshot":
+          sendProbeResult(request, snapshot());
+          break;
+        case "ClickCell":
+          clickCell(payload);
+          sendDeferredProbeResult(request);
+          break;
+        case "DoubleClickCell":
+          doubleClickCell(payload);
+          sendDeferredProbeResult(request);
+          break;
+        case "EditCell":
+          editCell(payload);
+          sendDeferredProbeResult(request);
+          break;
+        case "ClickHeader":
+          clickHeader(payload);
+          sendDeferredProbeResult(request);
+          break;
+        default:
+          throw new Error("Unknown probe: " + String(request.probe || ""));
+      }
+    } catch (err) {
+      sendProbeResult(request, { error: String(err && err.message ? err.message : err) });
+    }
+  }
+
+  function sendDeferredProbeResult(request) {
+    setTimeout(function() {
+      sendProbeResult(request, snapshot());
+    }, 25);
+  }
+
+  function snapshot() {
+    var table = document.querySelector("#root table");
+    var headerTexts = [];
+    var cellRows = [];
+    var cellCols = [];
+    var cellTexts = [];
+    var cellClasses = [];
+    var cellCssTexts = [];
+    var cellBackgroundColors = [];
+    var cellColors = [];
+    var editableRows = [];
+    var editableCols = [];
+    var selectedCellRows = [];
+    var selectedCellCols = [];
+    var selectedRows = [];
+    var selectedColumns = [];
+    if (!table) {
+      return {
+        rowCount: 0,
+        columnCount: 0,
+        headerTexts: headerTexts,
+        cellRows: cellRows,
+        cellCols: cellCols,
+        cellTexts: cellTexts,
+        cellClasses: cellClasses,
+        cellCssTexts: cellCssTexts,
+        cellBackgroundColors: cellBackgroundColors,
+        cellColors: cellColors,
+        editableRows: editableRows,
+        editableCols: editableCols,
+        selectedCellRows: selectedCellRows,
+        selectedCellCols: selectedCellCols,
+        selectedRows: selectedRows,
+        selectedColumns: selectedColumns
+      };
+    }
+
+    Array.prototype.forEach.call(table.querySelectorAll("thead th"), function(th) {
+      headerTexts.push(th.textContent || "");
+      if (th.classList.contains("selected-column")) selectedColumns.push(Number(th.dataset.col));
+    });
+    Array.prototype.forEach.call(table.querySelectorAll("tbody tr"), function(row) {
+      if (row.classList.contains("selected-row")) {
+        var firstCell = row.querySelector("td");
+        if (firstCell) selectedRows.push(Number(firstCell.dataset.row));
+      }
+    });
+    Array.prototype.forEach.call(table.querySelectorAll("tbody td"), function(td) {
+      var row = Number(td.dataset.row);
+      var col = Number(td.dataset.col);
+      var computedStyle = window.getComputedStyle(td);
+      cellRows.push(row);
+      cellCols.push(col);
+      cellTexts.push(td.textContent || "");
+      cellClasses.push(td.className || "");
+      cellCssTexts.push(td.style.cssText || "");
+      cellBackgroundColors.push(computedStyle.backgroundColor || "");
+      cellColors.push(computedStyle.color || "");
+      if (td.isContentEditable || td.getAttribute("contenteditable") === "true") {
+        editableRows.push(row);
+        editableCols.push(col);
+      }
+      if (td.classList.contains("selected")) {
+        selectedCellRows.push(row);
+        selectedCellCols.push(col);
+      }
+      if (td.classList.contains("selected-column") && selectedColumns.indexOf(col) < 0) {
+        selectedColumns.push(col);
+      }
+    });
+
+    return {
+      rowCount: table.querySelectorAll("tbody tr").length,
+      columnCount: headerTexts.length,
+      headerTexts: headerTexts,
+      cellRows: cellRows,
+      cellCols: cellCols,
+      cellTexts: cellTexts,
+      cellClasses: cellClasses,
+      cellCssTexts: cellCssTexts,
+      cellBackgroundColors: cellBackgroundColors,
+      cellColors: cellColors,
+      editableRows: editableRows,
+      editableCols: editableCols,
+      selectedCellRows: selectedCellRows,
+      selectedCellCols: selectedCellCols,
+      selectedRows: selectedRows,
+      selectedColumns: uniqueNumbers(selectedColumns)
+    };
+  }
+
+  function clickCell(payload) {
+    var cell = cellAt(payload.row, payload.col);
+    if (!cell) throw new Error("Cell not found");
+    cell.dispatchEvent(mouseEvent("click", payload));
+  }
+
+  function doubleClickCell(payload) {
+    var cell = cellAt(payload.row, payload.col);
+    if (!cell) throw new Error("Cell not found");
+    cell.dispatchEvent(mouseEvent("dblclick", payload));
+  }
+
+  function editCell(payload) {
+    var cell = cellAt(payload.row, payload.col);
+    if (!cell) throw new Error("Cell not found");
+    cell.textContent = payload.value == null ? "" : String(payload.value);
+    cell.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
+  }
+
+  function clickHeader(payload) {
+    var header = document.querySelector("thead th[data-col='" + Number(payload.col) + "']");
+    if (!header) throw new Error("Header not found");
+    header.dispatchEvent(mouseEvent("click", payload));
+  }
+
+  function cellAt(row, col) {
+    return document.querySelector(
+      "tbody td[data-row='" + Number(row) + "'][data-col='" + Number(col) + "']");
+  }
+
+  function mouseEvent(type, payload) {
+    return new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: !!payload.ctrlKey,
+      metaKey: !!payload.metaKey,
+      shiftKey: !!payload.shiftKey
+    });
+  }
+
+  function setup(component) {
+    htmlComponent = component;
+    htmlComponent.addEventListener("Render", function(event) {
+      render(event.Data || {});
+    });
+    htmlComponent.addEventListener("Probe", function(event) {
+      handleProbe(event.Data || {});
+    });
+    send({ event: "BackendReady" });
+  }
+  </script>
+</head>
+<body>
+  <div id="root" class="table-wrap"></div>
+</body>
+</html>

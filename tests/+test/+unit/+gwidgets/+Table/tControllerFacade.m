@@ -43,6 +43,18 @@ classdef tControllerFacade < matlab.unittest.TestCase
             testCase.verifyEqual(string(u.Graphics.DisplayTable.Data.Variable), ["Var1"; "Var2"])
         end
 
+        function tJavaScriptBackendConstructs(testCase)
+            fig = uifigure(Visible="off");
+            testCase.addTeardown(@()delete(fig));
+            data = table((1:3)', ["a"; "b"; "c"], VariableNames=["Value", "Label"]);
+
+            t = gwidgets.Table(Parent=fig, Backend="JavaScript", Data=data);
+
+            testCase.verifyEqual(t.Backend, "JavaScript")
+            testCase.verifyInstanceOf(t.DisplayTable, "matlab.ui.control.HTML")
+            testCase.verifyEqual(t.DisplayData, data)
+        end
+
         function tCreationAndCustomisationDoNotForceDrawnow(testCase)
             drawnowState = gwidgets.internal.Drawnow.make(true);
             fig = uifigure(Visible="off");

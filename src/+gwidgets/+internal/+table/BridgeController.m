@@ -34,7 +34,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 return
             end
 
-            this.setup(owner.Graphics.Grid, owner.Graphics.DisplayTable);
+            owner.Graphics.Backend.setupBridge(this);
         end
 
         function setup(this, grid, displayTable)
@@ -176,46 +176,56 @@ classdef BridgeController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            if isempty(owner) || isempty(owner.Graphics.DisplayTable) || ~isvalid(owner.Graphics.DisplayTable)
+            if isempty(owner) || isempty(owner.Graphics.Backend) || ~owner.Graphics.Backend.isReady()
                 this.send("SetGroupHeaderSpans", struct( ...
-                    "rows", zeros(1,0), "labels", {cell(1,0)}, "tooltips", {cell(1,0)}));
+                    "rows", zeros(1,0), "labels", {cell(1,0)}, ...
+                    "tooltips", {cell(1,0)}, "styles", {cell(1,0)}));
                 this.send("SetGroupColumnSpans", struct( ...
-                    "columns", zeros(1,0), "labels", {cell(1,0)}, "tooltips", {cell(1,0)}));
+                    "columns", zeros(1,0), "labels", {cell(1,0)}, ...
+                    "tooltips", {cell(1,0)}, "styles", {cell(1,0)}));
                 return
             end
 
             if owner.Display.Orientation == "Transposed"
                 this.send("SetGroupHeaderSpans", struct( ...
-                    "rows", zeros(1,0), "labels", {cell(1,0)}, "tooltips", {cell(1,0)}));
+                    "rows", zeros(1,0), "labels", {cell(1,0)}, ...
+                    "tooltips", {cell(1,0)}, "styles", {cell(1,0)}));
+                styleCss = owner.Style.groupHeaderOverlayCss(owner.Data.VisibleGroupHeaderRowIdx);
                 payload = gwidgets.internal.table.BridgeController.groupColumnSpanPayload( ...
-                    owner.Graphics.DisplayTable.Data, owner.Data.VisibleGroupHeaderRowIdx);
+                    owner.Graphics.Backend.Data, owner.Data.VisibleGroupHeaderRowIdx, styleCss);
                 this.send("SetGroupColumnSpans", payload);
             else
                 this.send("SetGroupColumnSpans", struct( ...
-                    "columns", zeros(1,0), "labels", {cell(1,0)}, "tooltips", {cell(1,0)}));
+                    "columns", zeros(1,0), "labels", {cell(1,0)}, ...
+                    "tooltips", {cell(1,0)}, "styles", {cell(1,0)}));
+                styleCss = owner.Style.groupHeaderOverlayCss(owner.Data.VisibleGroupHeaderRowIdx);
                 payload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
-                    owner.Graphics.DisplayTable.Data, owner.Data.VisibleGroupHeaderRowIdx);
+                    owner.Graphics.Backend.Data, owner.Data.VisibleGroupHeaderRowIdx, styleCss);
                 this.send("SetGroupHeaderSpans", payload);
             end
         end
     end
 
     methods (Static)
-        function payload = groupHeaderSpanPayload(displayData, rowIdx)
+        function payload = groupHeaderSpanPayload(displayData, rowIdx, styleCss)
             arguments
                 displayData (:,:) table
                 rowIdx (1,:) double
+                styleCss (1,:) string = strings(1,0)
             end
 
             if width(displayData) == 0 || isempty(rowIdx)
                 payload = struct( ...
                     "rows", zeros(1,0), ...
                     "labels", {cell(1,0)}, ...
-                    "tooltips", {cell(1,0)});
+                    "tooltips", {cell(1,0)}, ...
+                    "styles", {cell(1,0)});
                 return
             end
 
-            rowIdx = rowIdx(rowIdx >= 1 & rowIdx <= height(displayData));
+            valid = rowIdx >= 1 & rowIdx <= height(displayData);
+            rowIdx = rowIdx(valid);
+            styleCss = gwidgets.internal.table.BridgeController.validSpanCss(styleCss, valid);
             labels = strings(1, numel(rowIdx));
             for iRow = 1:numel(rowIdx)
                 labels(iRow) = gwidgets.internal.table.BridgeController.labelString(displayData{rowIdx(iRow), 1});
@@ -224,13 +234,15 @@ classdef BridgeController < gwidgets.internal.table.TableController
             payload = struct( ...
                 "rows", rowIdx, ...
                 "labels", {cellstr(labels)}, ...
-                "tooltips", {cellstr(labels)});
+                "tooltips", {cellstr(labels)}, ...
+                "styles", {cellstr(styleCss)});
         end
 
-        function payload = groupColumnSpanPayload(displayData, rowIdx)
+        function payload = groupColumnSpanPayload(displayData, rowIdx, styleCss)
             arguments
                 displayData (:,:) table
                 rowIdx (1,:) double
+                styleCss (1,:) string = strings(1,0)
             end
 
             columns = rowIdx + 1;
@@ -238,11 +250,14 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 payload = struct( ...
                     "columns", zeros(1,0), ...
                     "labels", {cell(1,0)}, ...
-                    "tooltips", {cell(1,0)});
+                    "tooltips", {cell(1,0)}, ...
+                    "styles", {cell(1,0)});
                 return
             end
 
-            columns = columns(columns >= 1 & columns <= width(displayData));
+            valid = columns >= 1 & columns <= width(displayData);
+            columns = columns(valid);
+            styleCss = gwidgets.internal.table.BridgeController.validSpanCss(styleCss, valid);
             labels = strings(1, numel(columns));
             for iColumn = 1:numel(columns)
                 labels(iColumn) = gwidgets.internal.table.BridgeController.labelString( ...
@@ -252,7 +267,8 @@ classdef BridgeController < gwidgets.internal.table.TableController
             payload = struct( ...
                 "columns", columns, ...
                 "labels", {cellstr(labels)}, ...
-                "tooltips", {cellstr(labels)});
+                "tooltips", {cellstr(labels)}, ...
+                "styles", {cellstr(styleCss)});
         end
     end
 
@@ -342,6 +358,21 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 label = string(value);
             else
                 label = string(value);
+            end
+        end
+
+        function styleCss = validSpanCss(styleCss, valid)
+            styleCss = reshape(string(styleCss), 1, []);
+            if isempty(styleCss)
+                styleCss = strings(1, nnz(valid));
+                return
+            end
+
+            if numel(styleCss) == numel(valid)
+                styleCss = styleCss(valid);
+            elseif numel(styleCss) ~= nnz(valid)
+                nStyles = min(numel(styleCss), nnz(valid));
+                styleCss = [styleCss(1:nStyles), strings(1, nnz(valid) - nStyles)];
             end
         end
     end

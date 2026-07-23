@@ -55,11 +55,11 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function val = get.Configurations(this)
-            val = this.owner().Graphics.DisplayTable.StyleConfigurations;
+            val = this.owner().Graphics.Backend.StyleConfigurations;
         end
 
         function set.Configurations(this, val)
-            this.owner().Graphics.DisplayTable.StyleConfigurations = val;
+            this.owner().Graphics.Backend.StyleConfigurations = val;
         end
 
         function val = get.GroupHeaderStyle(this)
@@ -74,8 +74,8 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function applyToDisplay(this)
-            displayTable = this.owner().Graphics.DisplayTable;
-            displayTable.removeStyle();
+            backend = this.owner().Graphics.Backend;
+            backend.removeStyle();
             styles = [this.Styles_, this.groupHeaderStylesForDisplay()];
 
             for iStyle = 1:numel(styles)
@@ -87,11 +87,37 @@ classdef StyleController < gwidgets.internal.table.TableController
                     index = this.owner().Selection.dataToDisplay(index, target);
                 end
                 [target, index] = this.orientStyleTarget(target, index);
-                displayTable.addStyle(style, target, index);
+                backend.addStyle(style, target, index);
             end
 
             this.owner().forceRefresh();
             this.owner().Bridge.applyGroupHeaderSpans();
+        end
+
+        function css = groupHeaderOverlayCss(this, rowIdx)
+            arguments
+                this (1,1) gwidgets.internal.table.StyleController
+                rowIdx (1,:) double
+            end
+
+            owner = this.owner();
+            css = strings(1, numel(rowIdx));
+            styles = this.groupHeaderStylesForDisplay();
+            for iStyle = 1:numel(styles)
+                thisStyle = styles(iStyle);
+                styleCss = gwidgets.internal.table.StyleController.overlayCss(thisStyle.Style);
+                if styleCss == ""
+                    continue
+                end
+
+                index = thisStyle.indices(owner);
+                if thisStyle.SelectionMode == gwidgets.table.SelectionMode.Data
+                    index = owner.Selection.dataToDisplay(index, thisStyle.Target);
+                end
+
+                match = this.groupHeaderStyleMatch(rowIdx, thisStyle.Target, index);
+                css(match) = css(match) + styleCss;
+            end
         end
     end
 
@@ -127,6 +153,33 @@ classdef StyleController < gwidgets.internal.table.TableController
                     index = [index(:, 2), index(:, 1) + 1];
                 otherwise
                     % Table-wide styles remain table-wide.
+            end
+        end
+
+        function match = groupHeaderStyleMatch(this, rowIdx, target, index)
+            arguments
+                this (1,1) gwidgets.internal.table.StyleController %#ok<INUSA>
+                rowIdx (1,:) double
+                target (1,1) string
+                index
+            end
+
+            match = false(1, numel(rowIdx));
+            if isempty(rowIdx)
+                return
+            end
+
+            switch target
+                case "table"
+                    match(:) = true;
+                case "row"
+                    match = ismember(rowIdx, reshape(index, 1, []));
+                case "cell"
+                    if size(index, 2) >= 1
+                        match = ismember(rowIdx, reshape(index(:, 1), 1, []));
+                    end
+                otherwise
+                    % Column styles do not apply to row-header text overlays.
             end
         end
     end
@@ -233,6 +286,56 @@ classdef StyleController < gwidgets.internal.table.TableController
     end
 
     methods (Static, Access = private)
+        function css = overlayCss(style)
+            arguments
+                style (1,1) matlab.ui.style.Style
+            end
+
+            parts = strings(1,0);
+            if ~isempty(style.BackgroundColor)
+                parts(end+1) = "background-color:" + gwidgets.table.TooltipStyle.cssColor(style.BackgroundColor);
+            end
+            if ~isempty(style.FontColor)
+                parts(end+1) = "color:" + gwidgets.table.TooltipStyle.cssColor(style.FontColor);
+            end
+            if gwidgets.internal.table.StyleController.hasTextValue(style.FontWeight)
+                parts(end+1) = "font-weight:" + string(style.FontWeight);
+            end
+            if gwidgets.internal.table.StyleController.hasTextValue(style.FontAngle)
+                parts(end+1) = "font-style:" + string(style.FontAngle);
+            end
+            if gwidgets.internal.table.StyleController.hasTextValue(style.FontName)
+                parts(end+1) = "font-family:" + string(style.FontName);
+            end
+            if gwidgets.internal.table.StyleController.hasTextValue(style.HorizontalAlignment)
+                alignment = string(style.HorizontalAlignment);
+                parts(end+1) = "text-align:" + alignment;
+                parts(end+1) = "justify-content:" + ...
+                    gwidgets.internal.table.StyleController.flexAlignment(alignment);
+            end
+
+            if isempty(parts)
+                css = "";
+            else
+                css = strjoin(parts, ";") + ";";
+            end
+        end
+
+        function tf = hasTextValue(value)
+            tf = ~isempty(value) && strlength(string(value)) > 0;
+        end
+
+        function value = flexAlignment(alignment)
+            switch alignment
+                case "center"
+                    value = "center";
+                case "right"
+                    value = "flex-end";
+                otherwise
+                    value = "flex-start";
+            end
+        end
+
         function rowIdx = groupHeaderRowsAtLevel(tbl, level)
             arguments
                 tbl (1,1) gwidgets.UITable

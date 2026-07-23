@@ -18,6 +18,10 @@ classdef UITable < gwidgets.internal.Reparentable
         Display (1,1) gwidgets.internal.table.DisplayController
     end
 
+    properties (SetAccess = private)
+        Backend (1,1) string {mustBeMember(Backend, ["UITable", "JavaScript"])} = "UITable"
+    end
+
     properties (Dependent, Access = private)
         Update (1,1) gwidgets.internal.table.UpdateController
     end
@@ -71,11 +75,15 @@ classdef UITable < gwidgets.internal.Reparentable
                 namedArgs.?gwidgets.UITable
                 namedArgs.Data (:,:) table = table.empty(0,0)
                 namedArgs.ShowRowFilter (1,1) logical = false
+                namedArgs.Backend (1,1) string {mustBeMember(namedArgs.Backend, ["UITable", "JavaScript"])} = "UITable"
             end
 
             this@gwidgets.internal.Reparentable();
 
-            this.createControllers();
+            this.Backend = namedArgs.Backend;
+            namedArgs = rmfield(namedArgs, "Backend");
+
+            this.createControllers(this.Backend);
 
             data = namedArgs.Data;
             namedArgs = rmfield(namedArgs, "Data");
@@ -318,7 +326,7 @@ classdef UITable < gwidgets.internal.Reparentable
     methods (Access = protected)
         function setup(this)
             %SETUP Initialize the component's graphics.
-            this.createSetupControllers();
+            this.createSetupControllers(this.Backend);
             this.Graphics.setup(this);
         end
 
@@ -345,14 +353,26 @@ classdef UITable < gwidgets.internal.Reparentable
     % Internal callbacks
     methods (Access = private)
 
-        function createSetupControllers(this)
+        function createSetupControllers(this, backendName)
+            arguments
+                this (1,1) gwidgets.UITable
+                backendName (1,1) string {mustBeMember(backendName, ["UITable", "JavaScript"])} = "UITable"
+            end
+
             if isempty(this.GraphicsApi_)
-                this.GraphicsApi_ = gwidgets.internal.table.GraphicsController();
+                this.GraphicsApi_ = gwidgets.internal.table.GraphicsController(Backend=backendName);
+            else
+                this.GraphicsApi_.configureBackend(backendName, this);
             end
         end
 
-        function createControllers(this)
-            this.createSetupControllers();
+        function createControllers(this, backendName)
+            arguments
+                this (1,1) gwidgets.UITable
+                backendName (1,1) string {mustBeMember(backendName, ["UITable", "JavaScript"])} = "UITable"
+            end
+
+            this.createSetupControllers(backendName);
             this.GraphicsApi_.attachOwner(this);
             this.FilterApi_ = gwidgets.internal.table.FilterController(this, this.Graphics.FilterComponent);
             this.UpdateController_ = gwidgets.internal.table.UpdateController(this);

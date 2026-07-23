@@ -21,9 +21,9 @@
   //                           — render or hide the popup; empty list hides.
   //                             Each block is a styled container <div>;
   //                             each line inside has its own per-line CSS.
-  //   SetGroupHeaderSpans {rows:[...], labels:[...], tooltips:[...]}
+  //   SetGroupHeaderSpans {rows:[...], labels:[...], tooltips:[...], styles:[...]}
   //                           — render group header labels over the full table row.
-  //   SetGroupColumnSpans {columns:[...], labels:[...], tooltips:[...]}
+  //   SetGroupColumnSpans {columns:[...], labels:[...], tooltips:[...], styles:[...]}
   //                           — render group header labels rotated over full table columns.
   //
   // Bridge reports (events sent FROM the bridge):
@@ -291,6 +291,7 @@
     var rows = normaliseArray(data && data.rows);
     var labels = normaliseArray(data && data.labels);
     var tooltips = normaliseArray(data && data.tooltips);
+    var styles = normaliseArray(data && data.styles);
     var result = [];
     for (var i = 0; i < rows.length; i++) {
       var row = parseInt(rows[i], 10);
@@ -299,7 +300,8 @@
       result.push({
         row: row,
         label: label,
-        tooltip: tooltips[i] === undefined || tooltips[i] === null ? label : String(tooltips[i])
+        tooltip: tooltips[i] === undefined || tooltips[i] === null ? label : String(tooltips[i]),
+        style: styles[i] === undefined || styles[i] === null ? "" : String(styles[i])
       });
     }
     return result;
@@ -343,6 +345,7 @@
     var columns = normaliseArray(data && data.columns);
     var labels = normaliseArray(data && data.labels);
     var tooltips = normaliseArray(data && data.tooltips);
+    var styles = normaliseArray(data && data.styles);
     var result = [];
     for (var i = 0; i < columns.length; i++) {
       var column = parseInt(columns[i], 10);
@@ -351,7 +354,8 @@
       result.push({
         column: column,
         label: label,
-        tooltip: tooltips[i] === undefined || tooltips[i] === null ? label : String(tooltips[i])
+        tooltip: tooltips[i] === undefined || tooltips[i] === null ? label : String(tooltips[i]),
+        style: styles[i] === undefined || styles[i] === null ? "" : String(styles[i])
       });
     }
     return result;
@@ -531,6 +535,11 @@
     return saved;
   }
 
+  function applyCssText(el, cssText) {
+    if (!el || !cssText) return;
+    el.style.cssText = el.style.cssText + ";" + cssText;
+  }
+
   function measureText(label, style) {
     var pd = parentDocument();
     if (!pd) return { width: 0, height: 0 };
@@ -691,6 +700,7 @@
       overlay.style.fontWeight = firstCellStyle.fontWeight;
       overlay.style.fontStyle = firstCellStyle.fontStyle;
       overlay.style.lineHeight = firstCellStyle.lineHeight;
+      applyCssText(overlay, span.style);
 
       var hiddenText = hideCellText(cells);
       var hiddenDividers = hideCellVerticalDividers(cells);
@@ -800,6 +810,7 @@
       overlay.style.fontWeight = firstCellStyle.fontWeight;
       overlay.style.fontStyle = firstCellStyle.fontStyle;
       overlay.style.lineHeight = firstCellStyle.lineHeight;
+      applyCssText(overlay, span.style);
 
       var label = pd.createElement("div");
       label.textContent = span.label;

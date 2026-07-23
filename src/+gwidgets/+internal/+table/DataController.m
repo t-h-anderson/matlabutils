@@ -82,12 +82,12 @@ classdef DataController < gwidgets.internal.table.TableController
 
         function val = get.Display(this)
             owner = this.owner();
-            if isempty(owner) || isempty(owner.Graphics.DisplayTable)
+            if isempty(owner) || isempty(owner.Graphics.Backend) || ~owner.Graphics.Backend.isReady()
                 val = table.empty(0,0);
                 return
             end
 
-            val = owner.Graphics.DisplayTable.Data;
+            val = owner.Graphics.Backend.Data;
         end
 
         function attachFilterController(this, filterController)
