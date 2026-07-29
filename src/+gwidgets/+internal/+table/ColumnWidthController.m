@@ -16,11 +16,11 @@ classdef ColumnWidthController
                 val = {};
             end
 
-            isAutoOrFit = cellfun( ...
-                @(v)isstring(v) && isscalar(v) && ismember(v, ["auto", "fit"]), ...
+            isAuto = cellfun( ...
+                @(v)isstring(v) && isscalar(v) && v == "auto", ...
                 val);
-            if any(isAutoOrFit)
-                val(isAutoOrFit) = {"1x"};
+            if any(isAuto)
+                val(isAuto) = {"1x"};
             end
         end
 
@@ -51,6 +51,10 @@ classdef ColumnWidthController
                     if isnumeric(v) && isscalar(v) && v > 0
                         types(i) = "Pixel";
                         px(i) = v;
+                        rel(i) = string(missing);
+                    elseif isstring(v) && isscalar(v) && lower(v) == "fit"
+                        types(i) = "Fit";
+                        px(i) = NaN;
                         rel(i) = string(missing);
                     else
                         types(i) = "Relative";
@@ -109,6 +113,56 @@ classdef ColumnWidthController
             stores = struct("Types", current.Types, "Pixel", px, "Relative", rel);
         end
 
+        function [stores, changed, countMatches] = updateFromBridgeResize( ...
+                pixelWidths, visibleMask, resizedMask, startPixelWidth, nData, current)
+            arguments
+                pixelWidths (1,:) double
+                visibleMask (1,:) logical
+                resizedMask (1,:) logical
+                startPixelWidth (1,1) double
+                nData (1,1) double
+                current (1,1) struct
+            end
+
+            if numel(pixelWidths) ~= sum(visibleMask) || numel(resizedMask) ~= nData || sum(resizedMask) ~= 1
+                stores = current;
+                changed = false;
+                countMatches = false;
+                return
+            end
+
+            countMatches = true;
+            types = gwidgets.internal.table.ColumnWidthController.extendStore(current.Types, "Relative", nData);
+            px = gwidgets.internal.table.ColumnWidthController.extendStore(current.Pixel, NaN, nData);
+            rel = gwidgets.internal.table.ColumnWidthController.extendStore(current.Relative, "1x", nData);
+            visIdxs = find(visibleMask);
+            resizedIdx = find(resizedMask, 1);
+            resizedVisibleIdx = find(visIdxs == resizedIdx, 1);
+            if isempty(resizedVisibleIdx)
+                stores = current;
+                changed = false;
+                countMatches = false;
+                return
+            end
+
+            for k = 1:numel(pixelWidths)
+                iData = visIdxs(k);
+                if resizedMask(iData) || types(iData) ~= "Pixel"
+                    px(iData) = pixelWidths(k);
+                end
+            end
+
+            if types(resizedIdx) == "Relative"
+                targetPixelWidth = pixelWidths(resizedVisibleIdx);
+                rel(resizedIdx) = gwidgets.internal.table.ColumnWidthController.resizedRelativeWidth( ...
+                    rel(resizedIdx), targetPixelWidth, startPixelWidth);
+            end
+
+            changed = ~isequaln(types, current.Types) || ~isequaln(px, current.Pixel) || ...
+                ~isequaln(rel, current.Relative);
+            stores = struct("Types", types, "Pixel", px, "Relative", rel);
+        end
+
         function val = buildMixedCell(mask, nData, current)
             arguments
                 mask (1,:) logical
@@ -131,6 +185,8 @@ classdef ColumnWidthController
                 i = maskIdxs(k);
                 if types(i) == "Pixel"
                     val{k} = px(i);
+                elseif types(i) == "Fit"
+                    val{k} = "fit";
                 else
                     r = rel(i);
                     if ismissing(r) || r == ""
@@ -239,6 +295,42 @@ classdef ColumnWidthController
             if g <= 0
                 g = 1;
             end
+        end
+
+        function value = resizedRelativeWidth(currentValue, targetPixelWidth, startPixelWidth)
+            currentWeight = gwidgets.internal.table.ColumnWidthController.relativeWeight(currentValue);
+            if ~isfinite(startPixelWidth) || startPixelWidth <= 0
+                startPixelWidth = targetPixelWidth/currentWeight;
+            end
+
+            newWeight = currentWeight*targetPixelWidth/startPixelWidth;
+            value = gwidgets.internal.table.ColumnWidthController.formatRelativeWeight(newWeight);
+        end
+
+        function weight = relativeWeight(value)
+            text = lower(strtrim(string(value)));
+            if ismissing(text) || text == ""
+                weight = 1;
+                return
+            end
+
+            if endsWith(text, "x")
+                text = extractBefore(text, strlength(text));
+            end
+            weight = str2double(text);
+            if ~isfinite(weight) || weight <= 0
+                weight = 1;
+            end
+        end
+
+        function value = formatRelativeWeight(weight)
+            if ~isfinite(weight) || weight <= 0
+                weight = 1;
+            end
+
+            text = regexprep(sprintf("%.6f", weight), "0+$", "");
+            text = regexprep(text, "\.$", "");
+            value = string(text) + "x";
         end
     end
 

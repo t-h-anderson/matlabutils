@@ -12,6 +12,7 @@ classdef UITable < gwidgets.internal.Reparentable
         Graphics (1,1) gwidgets.internal.table.GraphicsController
         Menu (1,1) gwidgets.internal.table.ContextMenuController
         Tooltip (1,1) gwidgets.internal.table.TooltipController
+        Metric (1,1) gwidgets.internal.table.MetricController
         Callback (1,1) gwidgets.internal.table.CallbackController
         Selection (1,1) gwidgets.internal.table.SelectionController
         Drag (1,1) gwidgets.internal.table.DragController
@@ -41,6 +42,7 @@ classdef UITable < gwidgets.internal.Reparentable
             ?gwidgets.internal.table.CallbackController, ...
             ?gwidgets.internal.table.BridgeController, ...
             ?gwidgets.internal.table.DragController, ...
+            ?gwidgets.internal.table.MetricController, ...
             ?gwidgets.internal.table.TooltipController}, ...
             SetAccess = private)
         Bridge (1,1) gwidgets.internal.table.BridgeController
@@ -60,6 +62,7 @@ classdef UITable < gwidgets.internal.Reparentable
         GraphicsApi_ (1,:) gwidgets.internal.table.GraphicsController {mustBeScalarOrEmpty}
         UpdateController_ (1,:) gwidgets.internal.table.UpdateController {mustBeScalarOrEmpty}
         TooltipController_ (1,:) gwidgets.internal.table.TooltipController {mustBeScalarOrEmpty}
+        MetricApi_ (1,:) gwidgets.internal.table.MetricController {mustBeScalarOrEmpty}
         CallbackApi_ (1,:) gwidgets.internal.table.CallbackController {mustBeScalarOrEmpty}
         SelectionApi_ (1,:) gwidgets.internal.table.SelectionController {mustBeScalarOrEmpty}
         DragApi_ (1,:) gwidgets.internal.table.DragController {mustBeScalarOrEmpty}
@@ -124,8 +127,12 @@ classdef UITable < gwidgets.internal.Reparentable
             this.Column.Editable = [];
             this.Update.addSuppression("DataColumnSortable", Times=1);
             this.Column.Sortable = [];
-            this.Update.addSuppression("DataColumnWidth", Times=1);
+            this.Update.addSuppression("DataColumnWidth", Times=5);
             this.Column.DataWidth = {};
+            this.Column.DataMinWidth = [];
+            this.Column.DataMaxWidth = [];
+            this.Column.TableMinWidth = NaN;
+            this.Column.TableMaxWidth = Inf;
 
             % Clear the styling
             this.Update.addSuppression("UpdateStyle", Times=1);
@@ -200,6 +207,10 @@ classdef UITable < gwidgets.internal.Reparentable
             val = this.TooltipController_;
         end
 
+        function val = get.Metric(this)
+            val = this.MetricApi_;
+        end
+
         function val = get.Callback(this)
             val = this.CallbackApi_;
         end
@@ -229,6 +240,7 @@ classdef UITable < gwidgets.internal.Reparentable
             ?gwidgets.internal.table.CallbackController, ...
             ?gwidgets.internal.table.BridgeController, ...
             ?gwidgets.internal.table.DragController, ...
+            ?gwidgets.internal.table.MetricController, ...
             ?gwidgets.internal.table.TooltipController})
         function addControllerUpdateSuppression(this, propertyName, nvp)
             arguments
@@ -271,10 +283,15 @@ classdef UITable < gwidgets.internal.Reparentable
     %% Filtering
     properties (Dependent)
         ShowRowFilter (1,1) logical
+        ShowGroupHeaderTooltips (1,1) logical
+        ShowMetrics (1,1) logical
+        MetricLocation (1,1) string
+        MetricDefinitions (1,:) gwidgets.table.MetricDefinition
     end
 
     properties (Access = protected)
         ShowRowFilter_ (1,1) logical = false
+        ShowGroupHeaderTooltips_ (1,1) logical = true
     end
 
     methods
@@ -304,6 +321,48 @@ classdef UITable < gwidgets.internal.Reparentable
             this.ShowRowFilter_ = state;
             this.Graphics.setRowFilterVisible(state);
 
+        end
+
+        function val = get.ShowGroupHeaderTooltips(this)
+            val = this.ShowGroupHeaderTooltips_;
+        end
+
+        function set.ShowGroupHeaderTooltips(this, state)
+            arguments
+                this (1,1) gwidgets.UITable
+                state (1,1) logical
+            end
+
+            if this.ShowGroupHeaderTooltips_ == state
+                return
+            end
+
+            this.ShowGroupHeaderTooltips_ = state;
+            this.refreshGroupHeaderTooltips();
+        end
+
+        function val = get.ShowMetrics(this)
+            val = this.Metric.Enabled;
+        end
+
+        function set.ShowMetrics(this, val)
+            this.Metric.Enabled = val;
+        end
+
+        function val = get.MetricLocation(this)
+            val = this.Metric.Location;
+        end
+
+        function set.MetricLocation(this, val)
+            this.Metric.Location = val;
+        end
+
+        function val = get.MetricDefinitions(this)
+            val = this.Metric.Definitions;
+        end
+
+        function set.MetricDefinitions(this, val)
+            this.Metric.Definitions = val;
         end
 
     end
@@ -385,6 +444,7 @@ classdef UITable < gwidgets.internal.Reparentable
             this.BridgeApi_ = gwidgets.internal.table.BridgeController(this);
             this.MenuApi_ = gwidgets.internal.table.ContextMenuController(this);
             this.TooltipController_ = gwidgets.internal.table.TooltipController(this);
+            this.MetricApi_ = gwidgets.internal.table.MetricController(this);
             this.CallbackApi_ = gwidgets.internal.table.CallbackController(this);
             this.SelectionApi_ = gwidgets.internal.table.SelectionController(this);
             this.DragApi_ = gwidgets.internal.table.DragController(this);
@@ -447,6 +507,24 @@ classdef UITable < gwidgets.internal.Reparentable
         function refreshAfterConstruction(this)
             if ~isempty(this.Parent)
                 this.forceRefresh();
+            end
+        end
+    end
+
+    methods (Access = private)
+        function refreshGroupHeaderTooltips(this)
+            hasBackend = ~isempty(this.GraphicsApi_) && ~isempty(this.GraphicsApi_.Backend) && ...
+                isvalid(this.GraphicsApi_.Backend);
+            if hasBackend
+                this.GraphicsApi_.Backend.refresh();
+            end
+
+            if ~isempty(this.BridgeApi_) && isvalid(this.BridgeApi_)
+                this.BridgeApi_.applyGroupHeaderSpans();
+            end
+
+            if ~isempty(this.MenuApi_) && isvalid(this.MenuApi_)
+                this.MenuApi_.refresh();
             end
         end
     end

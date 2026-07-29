@@ -32,6 +32,16 @@ classdef tColumnWidthParity < test.WithExampleTables
             testCase.verifyEqual(testCase.backendColumnWidth(t), {100, "1x", "2x", 80})
         end
 
+        function tFitDataWidthReachesBackend(testCase, Backend)
+            t = test.unit.gwidgets.Table.tColumnWidthParity.createTable(testCase, Backend);
+
+            t.DataColumnWidth = {"fit", "1x", 100, "2x"};
+
+            testCase.verifyEqual(t.DataColumnWidth, {"fit", "1x", 100, "2x"})
+            testCase.verifyEqual(t.DataColumnWidthTypes, ["Fit", "Relative", "Pixel", "Relative"])
+            testCase.verifyEqual(testCase.backendColumnWidth(t), {"fit", "1x", 100, "2x"})
+        end
+
         function tHiddenColumnWidthsArePreserved(testCase, Backend)
             t = test.unit.gwidgets.Table.tColumnWidthParity.createTable(testCase, Backend);
             t.DataColumnWidth = {100, 200, 150, 80};
@@ -68,6 +78,17 @@ classdef tColumnWidthParity < test.WithExampleTables
             testCase.verifyEqual(t.RelativeColumnWidths, ["4x", "2x", "6x", "3x"])
             testCase.verifyEqual(t.ColumnWidth, {120, "2x", "6x", 90})
             testCase.verifyEqual(testCase.backendColumnWidth(t), {120, "2x", "6x", 90})
+        end
+
+        function tResizeEditsOnlyTargetColumnWidth(testCase, Backend)
+            t = test.unit.gwidgets.Table.tColumnWidthParity.createTable(testCase, Backend);
+            t.DataColumnWidth = {"1x", "2x", "1x", 80};
+
+            t.UITable.Display.handleBridgeColumnResize(2, [100, 300, 100, 80], 200);
+
+            testCase.verifyEqual(t.ColumnWidth, {"1x", "3x", "1x", 80})
+            testCase.verifyEqual(t.DataColumnWidthTypes, ["Relative", "Relative", "Relative", "Pixel"])
+            testCase.verifyEqual(testCase.backendColumnWidth(t), {"1x", "3x", "1x", 80})
         end
 
         function tBridgeWidthEventMapsHiddenColumns(testCase, Backend)
@@ -109,9 +130,42 @@ classdef tColumnWidthParity < test.WithExampleTables
 
             t.DataColumnWidth = {"1x", "2x", "1x", "4x"};
 
-            testCase.verifyEqual( ...
-                testCase.renderedWidthTokens(t), ...
-                testCase.expectedRenderedWidthTokens(Backend, {"1x", "2x", "1x", "4x"}))
+            if Backend == "JavaScript"
+                t.TableMinWidth = 800;
+                tokens = testCase.renderedWidthTokens(t);
+                pixels = testCase.pixelValues(tokens);
+
+                testCase.verifyTrue(all(endsWith(tokens, "px")))
+                testCase.verifyEqual(sum(pixels), 800, AbsTol=8)
+                testCase.verifyEqual(pixels/sum(pixels), [1, 2, 1, 4]/8, AbsTol=0.02)
+            else
+                testCase.verifyEqual(testCase.renderedWidthTokens(t), ["1x", "2x", "1x", "4x"])
+            end
+        end
+
+        function tColumnConstraintsUseVisibleColumns(testCase, Backend)
+            t = test.unit.gwidgets.Table.tColumnWidthParity.createTable(testCase, Backend);
+            t.DataColumnMinWidth = [40, 50, 60, 70];
+            t.DataColumnMaxWidth = [140, 150, 160, 170];
+            t.HiddenColumnNames = "Categorical";
+
+            t.ColumnMinWidth = [45, 65, 75];
+            t.ColumnMaxWidth = [145, 165, 175];
+
+            testCase.verifyEqual(t.DataColumnMinWidth, [45, 50, 65, 75])
+            testCase.verifyEqual(t.DataColumnMaxWidth, [145, 150, 165, 175])
+            testCase.verifyEqual(t.ColumnMinWidth, [45, 65, 75])
+            testCase.verifyEqual(t.ColumnMaxWidth, [145, 165, 175])
+        end
+
+        function tTableWidthConstraintsRoundTrip(testCase, Backend)
+            t = test.unit.gwidgets.Table.tColumnWidthParity.createTable(testCase, Backend);
+
+            t.TableMinWidth = 320;
+            t.TableMaxWidth = 640;
+
+            testCase.verifyEqual(t.TableMinWidth, 320)
+            testCase.verifyEqual(t.TableMaxWidth, 640)
         end
     end
 
@@ -157,23 +211,6 @@ classdef tColumnWidthParity < test.WithExampleTables
             end
         end
 
-        function tokens = expectedRenderedWidthTokens(testCase, backend, widths)
-            arguments
-                testCase (1,1) test.unit.gwidgets.Table.tColumnWidthParity
-                backend (1,1) string
-                widths (1,:) cell
-            end
-
-            switch backend
-                case "JavaScript"
-                    tokens = testCase.cssWidthTokens(widths);
-                otherwise
-                    tokens = testCase.widthTokens(widths);
-            end
-        end
-    end
-
-    methods (Access = private)
         function tokens = widthTokens(testCase, widths)
             arguments
                 testCase (1,1) test.unit.gwidgets.Table.tColumnWidthParity %#ok<INUSA>
@@ -192,45 +229,17 @@ classdef tColumnWidthParity < test.WithExampleTables
             end
         end
 
-        function tokens = cssWidthTokens(testCase, widths)
-            arguments
-                testCase (1,1) test.unit.gwidgets.Table.tColumnWidthParity
-                widths (1,:) cell
-            end
-
-            tokens = testCase.widthTokens(widths);
-            weights = testCase.relativeWeights(tokens);
-            totalWeight = sum(weights);
-            for iWidth = 1:numel(tokens)
-                if weights(iWidth) > 0 && totalWeight > 0
-                    tokens(iWidth) = testCase.percentToken(100*weights(iWidth)/totalWeight);
-                end
-            end
-        end
-
-        function weights = relativeWeights(testCase, tokens)
+        function pixels = pixelValues(testCase, tokens)
             arguments
                 testCase (1,1) test.unit.gwidgets.Table.tColumnWidthParity %#ok<INUSA>
                 tokens (1,:) string
             end
 
-            weights = zeros(1, numel(tokens));
+            pixels = zeros(1, numel(tokens));
             for iWidth = 1:numel(tokens)
-                match = regexp(tokens(iWidth), "^(\d+(?:\.\d+)?)x$", "tokens", "once");
-                if ~isempty(match)
-                    weights(iWidth) = str2double(match{1});
-                end
+                token = extractBefore(tokens(iWidth), strlength(tokens(iWidth)) - 1);
+                pixels(iWidth) = str2double(token);
             end
-        end
-
-        function token = percentToken(testCase, value)
-            arguments
-                testCase (1,1) test.unit.gwidgets.Table.tColumnWidthParity %#ok<INUSA>
-                value (1,1) double
-            end
-
-            token = string(sprintf("%.6f", value));
-            token = string(regexprep(token, "\.?0+$", "")) + "%";
         end
     end
 

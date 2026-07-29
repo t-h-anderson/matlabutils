@@ -502,7 +502,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
         function updateCategoricalFilterVariables(this, displayIdx, selectionType)
             arguments
                 this (1,1) gwidgets.internal.table.SelectionController
-                displayIdx (:,2)
+                displayIdx (:,:) double
                 selectionType (1,1) string
             end
 

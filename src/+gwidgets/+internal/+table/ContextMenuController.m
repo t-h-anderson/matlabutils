@@ -7,9 +7,12 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
         HasToggleFilter
         HasChangeGroupingVariable
         HasToggleShowEmptyGroups
+        HasChangeDisplayOrientation
         HasColumnSorting
         HasAutoResizeColumns
         HasToggleDragging
+        HasToggleGroupHeaderTooltips
+        HasToggleTableMetrics
     end
 
     properties (Access = private)
@@ -19,9 +22,12 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
         HasToggleFilter_ (1,1) logical = false
         HasChangeGroupingVariable_ (1,1) logical = false
         HasToggleShowEmptyGroups_ (1,1) logical = false
+        HasChangeDisplayOrientation_ (1,1) logical = false
         HasColumnSorting_ (1,1) logical = false
         HasAutoResizeColumns_ (1,1) logical = true
         HasToggleDragging_ (1,1) logical = false
+        HasToggleGroupHeaderTooltips_ (1,1) logical = false
+        HasToggleTableMetrics_ (1,1) logical = false
     end
 
     methods
@@ -147,6 +153,15 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             this.refresh();
         end
 
+        function val = get.HasChangeDisplayOrientation(this)
+            val = this.HasChangeDisplayOrientation_;
+        end
+
+        function set.HasChangeDisplayOrientation(this, val)
+            this.HasChangeDisplayOrientation_ = val;
+            this.refresh();
+        end
+
         function val = get.HasColumnSorting(this)
             val = this.HasColumnSorting_;
         end
@@ -173,6 +188,24 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             this.HasToggleDragging_ = val;
             this.refresh();
         end
+
+        function val = get.HasToggleGroupHeaderTooltips(this)
+            val = this.HasToggleGroupHeaderTooltips_;
+        end
+
+        function set.HasToggleGroupHeaderTooltips(this, val)
+            this.HasToggleGroupHeaderTooltips_ = val;
+            this.refresh();
+        end
+
+        function val = get.HasToggleTableMetrics(this)
+            val = this.HasToggleTableMetrics_;
+        end
+
+        function set.HasToggleTableMetrics(this, val)
+            this.HasToggleTableMetrics_ = val;
+            this.refresh();
+        end
     end
 
     methods (Access = private)
@@ -185,13 +218,19 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             options = struct( ...
                 "HasChangeGroupingVariable", this.HasChangeGroupingVariable_, ...
                 "HasToggleShowEmptyGroups", this.HasToggleShowEmptyGroups_, ...
+                "HasChangeDisplayOrientation", this.HasChangeDisplayOrientation_, ...
                 "HasColumnSorting", this.HasColumnSorting_, ...
                 "ColumnSortable", columnSortable, ...
                 "SupportedSelectionTypes", this.SupportedSelectionTypes_, ...
                 "HasToggleFilter", this.HasToggleFilter_, ...
                 "HasAutoResizeColumns", this.HasAutoResizeColumns_, ...
                 "HasToggleDragging", this.HasToggleDragging_, ...
+                "HasToggleGroupHeaderTooltips", this.HasToggleGroupHeaderTooltips_, ...
+                "HasToggleTableMetrics", this.HasToggleTableMetrics_, ...
                 "DragEnabled", this.owner().Drag.Enabled, ...
+                "ShowGroupHeaderTooltips", this.owner().ShowGroupHeaderTooltips, ...
+                "ShowMetrics", this.owner().ShowMetrics, ...
+                "DisplayOrientation", this.owner().Display.Orientation, ...
                 "GroupingMode", this.owner().Group.Mode, ...
                 "GroupingVariables", this.owner().Group.By, ...
                 "GroupingVariableNames", this.owner().Column.dataToAliases(this.owner().Group.By), ...
@@ -224,7 +263,10 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
                 "ColumnSelection", @(~,~)owner.Selection.requestColumnSelection(), ...
                 "ToggleRowFilter", @(~,~)this.toggleRowFilter(), ...
                 "AutoResizeColumns", @(~,~)owner.Column.requestAutoResize(), ...
-                "ToggleDragging", @(~,~)this.toggleDragging());
+                "ToggleDragging", @(~,~)this.toggleDragging(), ...
+                "ToggleGroupHeaderTooltips", @(~,~)this.toggleGroupHeaderTooltips(), ...
+                "ToggleTableMetrics", @(~,~)this.toggleTableMetrics(), ...
+                "ToggleDisplayOrientation", @(~,~)this.toggleDisplayOrientation());
         end
 
         function toggleRowFilter(this)
@@ -235,6 +277,26 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
         function toggleDragging(this)
             owner = this.owner();
             owner.Drag.Enabled = ~owner.Drag.Enabled;
+            this.refresh();
+        end
+
+        function toggleGroupHeaderTooltips(this)
+            owner = this.owner();
+            owner.ShowGroupHeaderTooltips = ~owner.ShowGroupHeaderTooltips;
+        end
+
+        function toggleTableMetrics(this)
+            owner = this.owner();
+            owner.ShowMetrics = ~owner.ShowMetrics;
+        end
+
+        function toggleDisplayOrientation(this)
+            owner = this.owner();
+            if owner.Display.Orientation == "Normal"
+                owner.Display.Orientation = "Transposed";
+            else
+                owner.Display.Orientation = "Normal";
+            end
             this.refresh();
         end
 
@@ -478,6 +540,27 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
                     "Tag", "graphicscomponentsTableContextMenu");
             end
 
+            if options.HasChangeDisplayOrientation
+                uimenu("Parent", contextMenu, "Text", ...
+                    gwidgets.internal.table.ContextMenuController.displayOrientationMenuText(options), ...
+                    "MenuSelectedFcn", callbacks.ToggleDisplayOrientation, ...
+                    "Tag", "graphicscomponentsTableContextMenu");
+            end
+
+            if options.HasToggleGroupHeaderTooltips
+                uimenu("Parent", contextMenu, "Text", ...
+                    gwidgets.internal.table.ContextMenuController.groupHeaderTooltipMenuText(options), ...
+                    "MenuSelectedFcn", callbacks.ToggleGroupHeaderTooltips, ...
+                    "Tag", "graphicscomponentsTableContextMenu");
+            end
+
+            if options.HasToggleTableMetrics
+                uimenu("Parent", contextMenu, "Text", ...
+                    gwidgets.internal.table.ContextMenuController.tableMetricsMenuText(options), ...
+                    "MenuSelectedFcn", callbacks.ToggleTableMetrics, ...
+                    "Tag", "graphicscomponentsTableContextMenu");
+            end
+
             if options.HasAutoResizeColumns
                 uimenu("Parent", contextMenu, "Text", "Auto-resize columns", ...
                     "MenuSelectedFcn", callbacks.AutoResizeColumns, ...
@@ -492,6 +575,39 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
                 uimenu("Parent", contextMenu, "Text", menuText, ...
                     "MenuSelectedFcn", callbacks.ToggleDragging, ...
                     "Tag", "graphicscomponentsTableContextMenu");
+            end
+        end
+
+        function text = displayOrientationMenuText(options)
+            arguments
+                options (1,1) struct
+            end
+
+            text = "Transpose table";
+            if options.DisplayOrientation == "Transposed"
+                text = "Untranspose table";
+            end
+        end
+
+        function text = groupHeaderTooltipMenuText(options)
+            arguments
+                options (1,1) struct
+            end
+
+            text = "Show group header tooltips";
+            if options.ShowGroupHeaderTooltips
+                text = "Hide group header tooltips";
+            end
+        end
+
+        function text = tableMetricsMenuText(options)
+            arguments
+                options (1,1) struct
+            end
+
+            text = "Show table metrics";
+            if options.ShowMetrics
+                text = "Hide table metrics";
             end
         end
     end

@@ -152,6 +152,44 @@ classdef (Abstract) TableBackend < handle
             end
         end
 
+        function token = beginStateUpdate(this)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.TableBackend
+            end
+
+            unusedInput = this; %#ok<NASGU>
+            token = [];
+        end
+
+        function cancelStateUpdate(this, token)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.TableBackend
+                token = []
+            end
+
+            unusedInputs = {this, token}; %#ok<NASGU>
+        end
+
+        function endStateUpdate(this, token)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.TableBackend
+                token = []
+            end
+
+            unusedInput = token; %#ok<NASGU>
+            this.refresh();
+        end
+
+        function refresh(this)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.TableBackend
+            end
+
+            if ~isvalid(this)
+                return
+            end
+        end
+
     end
 
     methods (Abstract)

@@ -6,7 +6,7 @@ classdef tColumnWidthBridge < test.WithExampleTables
     %
     % Column width model
     % ------------------
-    %   Every column has a type ("Pixel" or "Relative") stored in
+    %   Every column has a type ("Pixel", "Fit", or "Relative") stored in
     %   DataColumnWidthTypes_.  Two parallel stores always reflect both views:
     %
     %     PixelDataColumnWidths_    – actual pixel value; NaN for Relative until
@@ -14,7 +14,7 @@ classdef tColumnWidthBridge < test.WithExampleTables
     %     RelativeDataColumnWidths_ – "Nx" weight; missing for Pixel columns
     %                                 until the bridge reports the first drag.
     %
-    %   "auto" and "fit" are normalised to "1x" Relative.
+    %   "auto" is normalised to "1x" Relative. "fit" keeps Fit semantics.
     %   The GCD of all resolved pixel widths is used to express relative weights
     %   as small integers (e.g. [200, 110, 220] px → GCD=10 → ["20x","11x","22x"]).
     %
@@ -52,10 +52,10 @@ classdef tColumnWidthBridge < test.WithExampleTables
         end
 
         function tNormalizeCellPassThrough(testCase)
-            % "auto" and "fit" are converted to "1x" during normalisation.
-            input  = {100, "auto", "2x"};
+            % "auto" is converted to "1x"; "fit" remains a distinct token.
+            input  = {100, "auto", "fit", "2x"};
             result = gwidgets.Table.normalizeColumnWidths(input);
-            testCase.verifyEqual(result, {100, "1x", "2x"})
+            testCase.verifyEqual(result, {100, "1x", "fit", "2x"})
         end
 
         function tNormalizeAutoToRelative(testCase)
@@ -63,9 +63,9 @@ classdef tColumnWidthBridge < test.WithExampleTables
             testCase.verifyEqual(result, {"1x"})
         end
 
-        function tNormalizeFitToRelative(testCase)
+        function tNormalizeFitPreserved(testCase)
             result = gwidgets.Table.normalizeColumnWidths("fit");
-            testCase.verifyEqual(result, {"1x"})
+            testCase.verifyEqual(result, {"fit"})
         end
 
         function tNormalizeEmptyReturnsEmpty(testCase)
@@ -136,11 +136,11 @@ classdef tColumnWidthBridge < test.WithExampleTables
             testCase.verifyEqual(t.DataColumnWidth,        {100, "1x", "2x", "3x"})
         end
 
-        function tAutoAndFitTreatedAsRelative(testCase)
+        function tAutoTreatedAsRelativeAndFitPreserved(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
             t.DataColumnWidth = {"auto", "fit", "1x", 100};
-            testCase.verifyEqual(t.DataColumnWidthTypes,   ["Relative","Relative","Relative","Pixel"])
-            testCase.verifyEqual(t.DataColumnWidth,        {"1x","1x","1x",100})
+            testCase.verifyEqual(t.DataColumnWidthTypes,   ["Relative","Fit","Relative","Pixel"])
+            testCase.verifyEqual(t.DataColumnWidth,        {"1x","fit","1x",100})
         end
 
         function tEmptySetResetsToAllRelative(testCase)
@@ -182,10 +182,106 @@ classdef tColumnWidthBridge < test.WithExampleTables
 
         function tColumnWidthTypesReturnsVisibleSubset(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
-            t.DataColumnWidth = {100, "1x", 200, "2x"};
+            t.DataColumnWidth = {100, "1x", "fit", "2x"};
             t.HiddenColumnNames = "Categorical";  % hide col 2
 
-            testCase.verifyEqual(t.ColumnWidthTypes, ["Pixel","Pixel","Relative"])
+            testCase.verifyEqual(t.ColumnWidthTypes, ["Pixel","Fit","Relative"])
+        end
+
+    end
+
+    % ------------------------------------------------------------------ %
+    %  Column width constraints
+    % ------------------------------------------------------------------ %
+    methods (Test)
+
+        function tDefaultColumnConstraints(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+
+            testCase.verifyEqual(t.ColumnMinWidth, [24, 24, 24, 24])
+            testCase.verifyEqual(t.ColumnMaxWidth, [Inf, Inf, Inf, Inf])
+            testCase.verifyEqual(t.DataColumnMinWidth, [24, 24, 24, 24])
+            testCase.verifyEqual(t.DataColumnMaxWidth, [Inf, Inf, Inf, Inf])
+        end
+
+        function tColumnConstraintReturnsVisibleSubset(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+            t.DataColumnMinWidth = [40, 50, 60, 70];
+            t.DataColumnMaxWidth = [140, 150, 160, 170];
+            t.HiddenColumnNames = "Categorical";  % hide col 2
+
+            testCase.verifyEqual(t.ColumnMinWidth, [40, 60, 70])
+            testCase.verifyEqual(t.ColumnMaxWidth, [140, 160, 170])
+        end
+
+        function tSetColumnConstraintPreservesHiddenColumns(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+            t.DataColumnMinWidth = [40, 50, 60, 70];
+            t.DataColumnMaxWidth = [140, 150, 160, 170];
+            t.HiddenColumnNames = "Categorical";  % hide col 2
+
+            t.ColumnMinWidth = [45, 65, 75];
+            t.ColumnMaxWidth = [145, 165, 175];
+
+            testCase.verifyEqual(t.DataColumnMinWidth, [45, 50, 65, 75])
+            testCase.verifyEqual(t.DataColumnMaxWidth, [145, 150, 165, 175])
+        end
+
+        function tScalarAndEmptyConstraints(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+
+            t.DataColumnMinWidth = 30;
+            t.DataColumnMaxWidth = 200;
+
+            testCase.verifyEqual(t.DataColumnMinWidth, [30, 30, 30, 30])
+            testCase.verifyEqual(t.DataColumnMaxWidth, [200, 200, 200, 200])
+
+            t.DataColumnMinWidth = [];
+            t.DataColumnMaxWidth = [];
+
+            testCase.verifyEqual(t.DataColumnMinWidth, [24, 24, 24, 24])
+            testCase.verifyEqual(t.DataColumnMaxWidth, [Inf, Inf, Inf, Inf])
+        end
+
+        function tInvalidColumnConstraintSizeErrors(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+
+            testCase.verifyError(@()setDataMinWidth(t, [30, 40]), ...
+                "GraphicsWidgets:Table:DataColumnMinWidthSize")
+            testCase.verifyError(@()setDataMaxWidth(t, [100, 120]), ...
+                "GraphicsWidgets:Table:DataColumnMaxWidthSize")
+        end
+
+        function tInvalidColumnConstraintOrderErrors(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+            t.DataColumnMinWidth = [40, 50, 60, 70];
+
+            testCase.verifyError(@()setDataMaxWidth(t, [100, 49, 100, 100]), ...
+                "GraphicsWidgets:Table:ColumnWidthConstraint")
+        end
+
+        function tTableWidthConstraints(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+
+            t.TableMinWidth = 400;
+            t.TableMaxWidth = 800;
+
+            testCase.verifyEqual(t.TableMinWidth, 400)
+            testCase.verifyEqual(t.TableMaxWidth, 800)
+
+            t.TableMinWidth = [];
+            t.TableMaxWidth = [];
+
+            testCase.verifyTrue(isnan(t.TableMinWidth))
+            testCase.verifyEqual(t.TableMaxWidth, Inf)
+        end
+
+        function tInvalidTableWidthConstraintOrderErrors(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());  % 4 cols
+            t.TableMinWidth = 400;
+
+            testCase.verifyError(@()setTableMaxWidth(t, 399), ...
+                "GraphicsWidgets:Table:TableWidthConstraint")
         end
 
     end
@@ -328,4 +424,16 @@ classdef tColumnWidthBridge < test.WithExampleTables
 
     end
 
+end
+
+function setDataMinWidth(t, value)
+    t.DataColumnMinWidth = value;
+end
+
+function setDataMaxWidth(t, value)
+    t.DataColumnMaxWidth = value;
+end
+
+function setTableMaxWidth(t, value)
+    t.TableMaxWidth = value;
 end

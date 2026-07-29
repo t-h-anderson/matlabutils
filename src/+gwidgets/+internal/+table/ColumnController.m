@@ -5,6 +5,12 @@ classdef ColumnController < gwidgets.internal.table.TableController
         Width
         DataWidth
         DefaultWidths
+        MinWidth
+        MaxWidth
+        DataMinWidth
+        DataMaxWidth
+        TableMinWidth
+        TableMaxWidth
         PixelDataWidths
         RelativeDataWidths
         DataWidthTypes
@@ -33,6 +39,10 @@ classdef ColumnController < gwidgets.internal.table.TableController
         RelativeDataWidths_ (1,:) string
         DataWidthTypes_ (1,:) string
         DefaultWidths_ (1,:) cell
+        DataMinWidths_ (1,:) double
+        DataMaxWidths_ (1,:) double
+        TableMinWidth_ (1,1) double = NaN
+        TableMaxWidth_ (1,1) double = Inf
     end
 
     methods
@@ -110,6 +120,100 @@ classdef ColumnController < gwidgets.internal.table.TableController
                     "Size of DefaultColumnWidths must match the number of data columns, be scalar, or be empty");
             end
             this.DefaultWidths_ = val;
+        end
+
+        function val = get.MinWidth(this)
+            val = this.resolvedMinWidths(this.Visible);
+        end
+
+        function set.MinWidth(this, val)
+            this.setMinWidthStore(val, this.Visible, "GraphicsWidgets:Table:ColumnMinWidthSize");
+            this.requestUpdate("DataColumnWidth", "Interaction");
+        end
+
+        function val = get.MaxWidth(this)
+            val = this.resolvedMaxWidths(this.Visible);
+        end
+
+        function set.MaxWidth(this, val)
+            this.setMaxWidthStore(val, this.Visible, "GraphicsWidgets:Table:ColumnMaxWidthSize");
+            this.requestUpdate("DataColumnWidth", "Interaction");
+        end
+
+        function val = get.DataMinWidth(this)
+            val = this.resolvedMinWidths(true(1, this.nData()));
+        end
+
+        function set.DataMinWidth(this, val)
+            this.setMinWidthStore(val, true(1, this.nData()), "GraphicsWidgets:Table:DataColumnMinWidthSize");
+            this.requestUpdate("DataColumnWidth", "Interaction");
+        end
+
+        function val = get.DataMaxWidth(this)
+            val = this.resolvedMaxWidths(true(1, this.nData()));
+        end
+
+        function set.DataMaxWidth(this, val)
+            this.setMaxWidthStore(val, true(1, this.nData()), "GraphicsWidgets:Table:DataColumnMaxWidthSize");
+            this.requestUpdate("DataColumnWidth", "Interaction");
+        end
+
+        function val = get.TableMinWidth(this)
+            val = this.TableMinWidth_;
+        end
+
+        function set.TableMinWidth(this, val)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                val (1,:) double
+            end
+
+            if isempty(val)
+                val = NaN;
+            end
+            if isscalar(val) && isnan(val)
+                val = NaN;
+            end
+            if ~isscalar(val) || (~isnan(val) && (~isfinite(val) || val < 0))
+                error("GraphicsWidgets:Table:TableMinWidth", ...
+                    "TableMinWidth must be a nonnegative scalar or NaN.");
+            end
+            if isfinite(this.TableMaxWidth_) && ~isnan(val) && this.TableMaxWidth_ < val
+                error("GraphicsWidgets:Table:TableWidthConstraint", ...
+                    "TableMaxWidth must be greater than or equal to TableMinWidth.");
+            end
+
+            this.TableMinWidth_ = val;
+            this.requestUpdate("DataColumnWidth", "Interaction");
+        end
+
+        function val = get.TableMaxWidth(this)
+            val = this.TableMaxWidth_;
+        end
+
+        function set.TableMaxWidth(this, val)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                val (1,:) double
+            end
+
+            if isempty(val)
+                val = Inf;
+            end
+            if isscalar(val) && isnan(val)
+                val = Inf;
+            end
+            if ~isscalar(val) || val < 0
+                error("GraphicsWidgets:Table:TableMaxWidth", ...
+                    "TableMaxWidth must be a nonnegative scalar, Inf, or NaN.");
+            end
+            if isfinite(val) && ~isnan(this.TableMinWidth_) && val < this.TableMinWidth_
+                error("GraphicsWidgets:Table:TableWidthConstraint", ...
+                    "TableMaxWidth must be greater than or equal to TableMinWidth.");
+            end
+
+            this.TableMaxWidth_ = val;
+            this.requestUpdate("DataColumnWidth", "Interaction");
         end
 
         function val = get.PixelDataWidths(this)
@@ -358,6 +462,47 @@ classdef ColumnController < gwidgets.internal.table.TableController
             this.applyWidthStores(stores);
         end
 
+        function changed = updateBridgeResizeForMask(this, pixelWidths, visibleMask, resizedMask, startPixelWidth)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                pixelWidths (1,:) double
+                visibleMask (1,:) logical
+                resizedMask (1,:) logical
+                startPixelWidth (1,1) double
+            end
+
+            nData = this.nData();
+            [stores, changed, countMatches] = gwidgets.internal.table.ColumnWidthController.updateFromBridgeResize( ...
+                pixelWidths, visibleMask, resizedMask, startPixelWidth, nData, this.widthStores());
+            if ~countMatches
+                this.owner().Bridge.reattach();
+                return
+            end
+            this.applyWidthStores(stores);
+        end
+
+        function changed = setPixelWidthsForMask(this, pixelWidths, visibleMask)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                pixelWidths (1,:) double
+                visibleMask (1,:) logical
+            end
+
+            nData = this.nData();
+            if numel(pixelWidths) ~= sum(visibleMask)
+                this.owner().Bridge.reattach();
+                changed = false;
+                return
+            end
+
+            current = this.widthStores();
+            stores = gwidgets.internal.table.ColumnWidthController.setStores( ...
+                num2cell(pixelWidths), visibleMask, nData, current);
+            changed = ~isequaln(stores.Types, current.Types) || ~isequaln(stores.Pixel, current.Pixel) || ...
+                ~isequaln(stores.Relative, current.Relative);
+            this.applyWidthStores(stores);
+        end
+
         function applyBridgeWidths(this, pixelWidths)
             arguments
                 this (1,1) gwidgets.internal.table.ColumnController
@@ -525,6 +670,133 @@ classdef ColumnController < gwidgets.internal.table.TableController
         function val = resolvedTypes(this, mask)
             val = gwidgets.internal.table.ColumnWidthController.resolvedTypes( ...
                 mask, this.nData(), this.widthStores());
+        end
+
+        function val = resolvedMinWidths(this, mask)
+            val = this.resolvedConstraint(this.DataMinWidths_, mask, 24);
+        end
+
+        function val = resolvedMaxWidths(this, mask)
+            val = this.resolvedConstraint(this.DataMaxWidths_, mask, Inf);
+        end
+
+        function val = resolvedConstraint(this, store, mask, defaultValue)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                store (1,:) double
+                mask (1,:) logical
+                defaultValue (1,1) double
+            end
+
+            nData = this.nData();
+            if isempty(store)
+                store = repelem(defaultValue, 1, nData);
+            elseif numel(store) < nData
+                store = [store, repelem(defaultValue, 1, nData - numel(store))];
+            elseif numel(store) > nData
+                store = store(1:nData);
+            end
+            val = store(mask);
+        end
+
+        function setMinWidthStore(this, val, mask, errorId)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                val (1,:) double
+                mask (1,:) logical
+                errorId (1,1) string
+            end
+
+            val = this.normaliseConstraintInput(val, mask, 24, errorId, AllowInf=false);
+            minStore = this.setConstraintValues(this.DataMinWidths_, val, mask, 24);
+            maxStore = this.DataMaxWidths_;
+            this.validateColumnConstraints(minStore, maxStore);
+            this.DataMinWidths_ = this.compactConstraintStore(minStore, 24);
+        end
+
+        function setMaxWidthStore(this, val, mask, errorId)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                val (1,:) double
+                mask (1,:) logical
+                errorId (1,1) string
+            end
+
+            val = this.normaliseConstraintInput(val, mask, Inf, errorId, AllowInf=true);
+            minStore = this.DataMinWidths_;
+            maxStore = this.setConstraintValues(this.DataMaxWidths_, val, mask, Inf);
+            this.validateColumnConstraints(minStore, maxStore);
+            this.DataMaxWidths_ = this.compactConstraintStore(maxStore, Inf);
+        end
+
+        function val = normaliseConstraintInput(this, val, mask, defaultValue, errorId, nvp)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController %#ok<INUSA>
+                val (1,:) double
+                mask (1,:) logical
+                defaultValue (1,1) double
+                errorId (1,1) string
+                nvp.AllowInf (1,1) logical = false
+            end
+
+            nTarget = sum(mask);
+            if isempty(val)
+                val = repelem(defaultValue, 1, nTarget);
+                return
+            end
+            if isscalar(val)
+                val = repelem(val, 1, nTarget);
+            end
+            if numel(val) ~= nTarget
+                error(errorId, ...
+                    "Size of column width constraint must match the selected columns, be scalar, or be empty.");
+            end
+            if any(isnan(val)) || any(val < 0) || (~nvp.AllowInf && any(~isfinite(val)))
+                error("GraphicsWidgets:Table:ColumnWidthConstraint", ...
+                    "Column width constraints must be nonnegative finite values.");
+            end
+        end
+
+        function store = setConstraintValues(this, store, val, mask, defaultValue)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                store (1,:) double
+                val (1,:) double
+                mask (1,:) logical
+                defaultValue (1,1) double
+            end
+
+            nData = this.nData();
+            store = this.resolvedConstraint(store, true(1, nData), defaultValue);
+            store(mask) = val;
+        end
+
+        function validateColumnConstraints(this, minStore, maxStore)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController
+                minStore (1,:) double
+                maxStore (1,:) double
+            end
+
+            nData = this.nData();
+            minStore = this.resolvedConstraint(minStore, true(1, nData), 24);
+            maxStore = this.resolvedConstraint(maxStore, true(1, nData), Inf);
+            if any(maxStore < minStore)
+                error("GraphicsWidgets:Table:ColumnWidthConstraint", ...
+                    "Column maximum widths must be greater than or equal to column minimum widths.");
+            end
+        end
+
+        function store = compactConstraintStore(this, store, defaultValue)
+            arguments
+                this (1,1) gwidgets.internal.table.ColumnController %#ok<INUSA>
+                store (1,:) double
+                defaultValue (1,1) double
+            end
+
+            if all(store == defaultValue | (isnan(store) & isnan(defaultValue)))
+                store = double.empty(1,0);
+            end
         end
 
         function validateColumnNames(this, values, validNames, errorId)

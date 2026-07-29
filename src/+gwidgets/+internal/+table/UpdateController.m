@@ -52,6 +52,10 @@ classdef UpdateController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
+            backend = owner.Graphics.Backend;
+            stateUpdateToken = backend.beginStateUpdate();
+            cleanupObj = onCleanup(@()backend.cancelStateUpdate(stateUpdateToken));
+
             % Keep this controller as the phase sequencer. Phase-specific
             % implementation should move behind the owning controllers.
             updating = false;
@@ -90,6 +94,8 @@ classdef UpdateController < gwidgets.internal.table.TableController
                 owner.Display.updateInteraction();
             end
 
+            delete(cleanupObj);
+            backend.endStateUpdate(stateUpdateToken);
             owner.forceRefresh();
         end
     end

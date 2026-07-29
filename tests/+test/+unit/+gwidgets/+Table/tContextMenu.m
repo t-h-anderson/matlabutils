@@ -47,6 +47,56 @@ classdef tContextMenu < test.WithFigureFixture & test.WithExampleTables
             testCase.verifyEmpty(items)
         end
 
+        function tDisplayOrientationMenuAbsentByDefault(testCase)
+            fh = testCase.figureFixture("Type", "uifigure");
+            t = gwidgets.Table(Parent=fh, Data=testCase.stringData());
+
+            testCase.verifyEmpty(findall(t.ContextMenu, "Text", "Transpose table"))
+            testCase.verifyEmpty(findall(t.ContextMenu, "Text", "Untranspose table"))
+        end
+
+        function tDisplayOrientationMenuTogglesOrientation(testCase)
+            fh = testCase.figureFixture("Type", "uifigure");
+            t = gwidgets.Table(Parent=fh, ...
+                Data=testCase.stringData(), ...
+                HasChangeDisplayOrientation=true);
+
+            item = findall(t.ContextMenu, "Text", "Transpose table");
+            testCase.assertNumElements(item, 1)
+
+            item.MenuSelectedFcn(item, []);
+
+            testCase.verifyEqual(t.DisplayOrientation, "Transposed")
+            item = findall(t.ContextMenu, "Text", "Untranspose table");
+            testCase.assertNumElements(item, 1)
+
+            item.MenuSelectedFcn(item, []);
+
+            testCase.verifyEqual(t.DisplayOrientation, "Normal")
+            testCase.verifyNumElements(findall(t.ContextMenu, "Text", "Transpose table"), 1)
+        end
+
+        function tTableMetricsMenuTogglesState(testCase)
+            fh = testCase.figureFixture("Type", "uifigure");
+            t = gwidgets.Table(Parent=fh, ...
+                Data=testCase.stringData(), ...
+                HasToggleTableMetrics=true);
+
+            item = findall(t.ContextMenu, "Text", "Show table metrics");
+            testCase.assertNumElements(item, 1)
+
+            item.MenuSelectedFcn(item, []);
+
+            testCase.verifyTrue(t.ShowMetrics)
+            item = findall(t.ContextMenu, "Text", "Hide table metrics");
+            testCase.assertNumElements(item, 1)
+
+            item.MenuSelectedFcn(item, []);
+
+            testCase.verifyFalse(t.ShowMetrics)
+            testCase.verifyNumElements(findall(t.ContextMenu, "Text", "Show table metrics"), 1)
+        end
+
         function tGroupingMenuSupportsMultiGroupActions(testCase)
             fh = testCase.figureFixture("Type", "uifigure");
             t = gwidgets.Table(Parent=fh, ...

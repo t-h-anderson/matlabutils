@@ -121,9 +121,8 @@ classdef TableTooltip
                     if isa(result, "gwidgets.table.TooltipStyle") && isscalar(result)
                         sty = result;
                     end
-                catch ME
-                    warning("GraphicsWidgets:TableTooltip:StyleFunctionError", ...
-                        "Tooltip style function failed; using the default style. Original error: %s", ME.message);
+                catch
+                    % Style functions are optional presentation; failed styles fall back to the base tooltip style.
                 end
             elseif ~isempty(this.Style)
                 sty = this.Style;

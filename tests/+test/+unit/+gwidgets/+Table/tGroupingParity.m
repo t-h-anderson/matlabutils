@@ -70,6 +70,41 @@ classdef tGroupingParity < test.WithExampleTables
             testCase.verifyTrue(all(contains(renderState.Styles, "background-color")))
             testCase.verifyGreaterThan(numel(unique(renderState.Styles)), 1)
         end
+
+        function tTransposedGroupHeadersRenderRotated(testCase, Backend)
+            if string(Backend) ~= "JavaScript"
+                return
+            end
+
+            t = test.unit.gwidgets.Table.tGroupingParity.createTable( ...
+                testCase, Backend, test.WithExampleTables.categoricalData());
+            t.GroupingVariable = "Var2";
+            t.DisplayOrientation = "Transposed";
+
+            renderState = testCase.groupColumnRenderState(t);
+            expected = testCase.groupColumnLabels(t);
+
+            testCase.verifyEqual(renderState.Columns, t.UITable.Data.VisibleGroupHeaderRowIdx + 1)
+            testCase.verifyEqual(renderState.Labels, expected)
+            testCase.verifyTrue(all(contains(renderState.Transforms, "rotate(-90deg)")))
+        end
+
+        function tTransposedGroupHeaderClickTogglesOpenState(testCase, Backend)
+            t = test.unit.gwidgets.Table.tGroupingParity.createTable( ...
+                testCase, Backend, test.WithExampleTables.categoricalData());
+            t.GroupingVariable = "Var2";
+            t.DisplayOrientation = "Transposed";
+            firstHeaderRow = t.UITable.Data.VisibleGroupHeaderRowIdx(1);
+            firstGroup = t.DisplayGroups(1);
+
+            testCase.clickGroupHeader(t, firstHeaderRow);
+
+            testCase.verifyEqual(t.OpenGroups, firstGroup)
+
+            testCase.clickGroupHeader(t, firstHeaderRow);
+
+            testCase.verifyEmpty(t.OpenGroups)
+        end
     end
 
     methods
@@ -106,13 +141,21 @@ classdef tGroupingParity < test.WithExampleTables
                 row (1,1) double
             end
 
+            displayRow = row;
+            displayColumn = 1;
+            if t.DisplayOrientation == "Transposed"
+                displayRow = 1;
+                displayColumn = row + 1;
+            end
+
             switch t.Backend
                 case "JavaScript"
-                    t.UITable.Graphics.Backend.probeBrowser("ClickCell", struct("row", row, "col", 1));
+                    t.UITable.Graphics.Backend.probeBrowser( ...
+                        "ClickCell", struct("row", displayRow, "col", displayColumn));
                 otherwise
                     eventData = struct("InteractionInformation", struct( ...
-                        "DisplayRow", row, ...
-                        "DisplayColumn", 1));
+                        "DisplayRow", displayRow, ...
+                        "DisplayColumn", displayColumn));
                     t.UITable.Callback.onCellClicked([], eventData);
             end
         end
@@ -124,6 +167,33 @@ classdef tGroupingParity < test.WithExampleTables
             end
 
             payload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
+                t.UITable.Graphics.Backend.Data, ...
+                t.UITable.Data.VisibleGroupHeaderRowIdx);
+            labels = reshape(string(payload.labels), 1, []);
+        end
+
+        function renderState = groupColumnRenderState(testCase, t)
+            arguments
+                testCase (1,1) test.unit.gwidgets.Table.tGroupingParity %#ok<INUSA>
+                t (1,1) gwidgets.Table
+            end
+
+            snapshot = t.UITable.Graphics.Backend.probeBrowser("Snapshot");
+            renderState = struct( ...
+                "Columns", reshape(double(snapshot.groupHeaderColumns), 1, []), ...
+                "Labels", reshape(string(snapshot.groupHeaderColumnLabels), 1, []), ...
+                "Levels", reshape(double(snapshot.groupHeaderColumnLevels), 1, []), ...
+                "Styles", reshape(string(snapshot.groupHeaderColumnCssTexts), 1, []), ...
+                "Transforms", reshape(string(snapshot.groupHeaderColumnTransforms), 1, []));
+        end
+
+        function labels = groupColumnLabels(testCase, t)
+            arguments
+                testCase (1,1) test.unit.gwidgets.Table.tGroupingParity %#ok<INUSA>
+                t (1,1) gwidgets.Table
+            end
+
+            payload = gwidgets.internal.table.BridgeController.groupColumnSpanPayload( ...
                 t.UITable.Graphics.Backend.Data, ...
                 t.UITable.Data.VisibleGroupHeaderRowIdx);
             labels = reshape(string(payload.labels), 1, []);

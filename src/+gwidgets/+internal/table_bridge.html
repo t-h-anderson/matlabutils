@@ -650,7 +650,13 @@
 
     lastClientX = evt.clientX;
     lastClientY = evt.clientY;
-    renderGroupSpanTooltip(overlay.getAttribute("data-gwidgets-tooltip") || overlay.textContent, overlay);
+    var tooltip = overlay.getAttribute("data-gwidgets-tooltip");
+    if (!tooltip) {
+      hideGroupSpanTooltip();
+      return false;
+    }
+
+    renderGroupSpanTooltip(tooltip, overlay);
     return true;
   }
 
@@ -677,7 +683,7 @@
       var overlay = rowEl.ownerDocument.createElement("div");
       overlay.className = "gwidgets-group-header-span";
       overlay.textContent = span.label;
-      overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || span.label || "");
+      overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || "");
       overlay.style.cssText = [
         "position:absolute",
         "left:0",
@@ -790,7 +796,7 @@
       var overlay = pd.createElement("div");
       overlay.className = "gwidgets-group-column-span";
       overlay.textContent = span.label;
-      overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || span.label || "");
+      overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || "");
       overlay.style.cssText = [
         "position:fixed",
         "left:" + rect.left + "px",

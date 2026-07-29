@@ -156,6 +156,26 @@ classdef tGrouping < test.WithExampleTables
             testCase.verifyEqual(string(payload.tooltips), string(payload.labels))
         end
 
+        function tGroupSpanPayloadTooltipsCanBeDisabled(testCase)
+            data = table( ...
+                ["B"; "A"; "A"; "B"], ...
+                ["x"; "x"; "y"; "x"], ...
+                [1; 2; 3; 4], ...
+                VariableNames=["G1", "G2", "Value"]);
+            t = gwidgets.Table(Data=data, GroupingVariable=["G1", "G2"], GroupingMode="Nested");
+            t.OpenGroups = "A";
+            groupRows = t.UITable.Data.VisibleGroupHeaderRowIdx;
+
+            rowPayload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
+                t.DisplayTable.Data, groupRows, strings(1,0), ShowTooltips=false);
+            t.DisplayOrientation = "Transposed";
+            columnPayload = gwidgets.internal.table.BridgeController.groupColumnSpanPayload( ...
+                t.DisplayTable.Data, groupRows, strings(1,0), ShowTooltips=false);
+
+            testCase.verifyEqual(string(rowPayload.tooltips), strings(1, numel(rowPayload.labels)))
+            testCase.verifyEqual(string(columnPayload.tooltips), strings(1, numel(columnPayload.labels)))
+        end
+
         function tUngroupedTable(testCase)
             data = testCase.stringData();
             t = gwidgets.Table(Data=data);

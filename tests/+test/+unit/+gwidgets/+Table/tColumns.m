@@ -285,6 +285,27 @@ classdef tColumns < test.WithExampleTables
             testCase.verifyEqual(t.DataColumnWidth, {"1x", "1x", "1x", "1x"})
         end
 
+        function tTransposedGroupColumnsDefaultToPixelWidths(testCase)
+            t = gwidgets.Table( ...
+                Data=testCase.multivariableData(), ...
+                GroupingVariable="Categorical", ...
+                DisplayOrientation="Transposed");
+
+            headerColumns = t.UITable.Data.VisibleGroupHeaderRowIdx + 1;
+            widths = t.DisplayTable.ColumnWidth(headerColumns);
+            isPixelWidth = cellfun(@(width)isnumeric(width) && isscalar(width), widths);
+            pixelWidths = zeros(1, numel(widths));
+            for iWidth = 1:numel(widths)
+                if isPixelWidth(iWidth)
+                    pixelWidths(iWidth) = double(widths{iWidth});
+                end
+            end
+
+            testCase.verifyTrue(all(isPixelWidth))
+            testCase.verifyGreaterThanOrEqual(pixelWidths, repelem(36, 1, numel(pixelWidths)))
+            testCase.verifyEqual(t.DataColumnWidth, {"1x", "1x", "1x", "1x"})
+        end
+
         function tNormalSyntheticGroupResizeDoesNotMutateDataWidths(testCase)
             data = table(categorical(["a"; "bb"; "a"]), VariableNames="GroupOnly");
             t = gwidgets.Table(Data=data, GroupingVariable="GroupOnly");

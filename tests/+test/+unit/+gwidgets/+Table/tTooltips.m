@@ -209,6 +209,7 @@ classdef tTooltips < test.WithExampleTables
             t = gwidgets.Table(Data=testCase.multivariableData());
             t.addTooltip("col", "column", 1, "Style", @(ctx) error("boom"));
 
+            testCase.verifyWarningFree(@()t.simulateBridgeHover(1, 1));
             [text, sty] = t.simulateBridgeHover(1, 1);
             testCase.verifyEqual(text, "col")
             testCase.verifyEqual(sty.BackgroundColor, ...
@@ -454,6 +455,13 @@ classdef tTooltips < test.WithExampleTables
             result = t.simulateBridgeHover(2, 1);
             testCase.verifyThat(result, ...
                 matlab.unittest.constraints.ContainsSubstring("tooltip error"));
+        end
+
+        function tFunctionTooltipMissingTextIsEmpty(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            t.addTooltip(@(~)missing, "cell", [2 1]);
+
+            testCase.verifyEqual(t.simulateBridgeHover(2, 1), "")
         end
 
         function tHoverJoinsCellAndRow(testCase)

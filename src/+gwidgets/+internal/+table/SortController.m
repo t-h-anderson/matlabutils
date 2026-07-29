@@ -116,17 +116,15 @@ classdef SortController < gwidgets.internal.table.TableController
                 direction (1,1) string {mustBeMember(direction, ["Ascend", "Descend", "None"])}
             end
 
+            vars = this.sortVariablesFromContext(displayRow, displayColumn);
+            if isempty(vars)
+                return
+            end
+
             owner = this.owner();
             owner.addControllerUpdateSuppression("SortDirection", Times=1);
             this.Direction = direction;
-
-            if ismember(displayRow, owner.Data.VisibleGroupHeaderRowIdx)
-                vars = owner.Group.By;
-            else
-                vars = owner.Data.GroupedVariables(this.sortColumnFromContext(displayColumn));
-            end
-
-            this.By = vars;
+            this.ByData = vars;
         end
 
         function result = sortData(this, dataController)
@@ -174,6 +172,58 @@ classdef SortController < gwidgets.internal.table.TableController
                 otherwise
                     colIdx = displayColumn;
             end
+        end
+
+        function vars = sortVariablesFromContext(this, displayRow, displayColumn)
+            arguments
+                this (1,1) gwidgets.internal.table.SortController
+                displayRow (1,1) double
+                displayColumn (1,1) double
+            end
+
+            owner = this.owner();
+            if owner.Display.Orientation == "Transposed"
+                vars = this.sortVariableFromTransposedContext(displayRow);
+                return
+            end
+
+            if displayRow == 0
+                colIdx = displayColumn;
+            elseif ismember(displayRow, owner.Data.VisibleGroupHeaderRowIdx)
+                vars = owner.Group.By;
+                return
+            else
+                colIdx = this.sortColumnFromContext(displayColumn);
+            end
+
+            colIdx = colIdx(colIdx >= 1 & colIdx <= numel(owner.Data.GroupedVariables));
+            vars = owner.Data.GroupedVariables(colIdx);
+        end
+
+        function vars = sortVariableFromTransposedContext(this, displayRow)
+            arguments
+                this (1,1) gwidgets.internal.table.SortController
+                displayRow (1,1) double
+            end
+
+            vars = string.empty(1,0);
+            owner = this.owner();
+            displayData = owner.Graphics.Backend.Data;
+            if displayRow < 1 || displayRow > height(displayData) || width(displayData) < 1
+                return
+            end
+
+            variableName = displayData{displayRow, 1};
+            if iscell(variableName) && isscalar(variableName)
+                variableName = variableName{1};
+            end
+
+            variableName = string(variableName);
+            if ismissing(variableName) || variableName == ""
+                return
+            end
+
+            vars = owner.Column.aliasesToData(variableName);
         end
     end
 

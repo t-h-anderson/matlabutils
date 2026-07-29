@@ -53,6 +53,21 @@ end
 
 end
 
+function performanceTask(~)
+%PERFORMANCETASK Run performance benchmarks.
+
+originalPath = path();
+cleanupObj = onCleanup(@() path(originalPath));
+
+addpath(genpath("src"));
+addpath("tests");
+
+suite = testsuite("tests/+test/+performance", IncludeSubfolders=true);
+results = runperf(suite);
+disp(results)
+
+end
+
 function packageTask(~)
 %PACKAGETASK Package the MATLAB toolbox project.
 

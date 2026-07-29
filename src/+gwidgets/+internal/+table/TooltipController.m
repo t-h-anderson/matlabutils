@@ -63,6 +63,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
             if didEnableHover
                 owner.Bridge.enableHover();
             end
+            this.refreshDisplayState(owner);
         end
 
         function didDisableHover = remove(this, orderNum)
@@ -79,9 +80,10 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 this.Tooltips(orderNum) = [];
             end
             didDisableHover = wasNotEmpty && isempty(this.Tooltips);
-            if didDisableHover && ~isempty(owner)
+            if didDisableHover && ~isempty(owner) && ~owner.Metric.Enabled
                 owner.Bridge.disableHover();
             end
+            this.refreshDisplayState(owner);
         end
 
         function didEnableHover = addTooltip(this, text, tableTarget, targetIndicesOrFunction, nvp)
@@ -144,6 +146,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 displayColumn (1,1) double
             end
 
+            owner = this.requireOwner();
             groups = this.resolveGroups(displayRow, displayColumn);
             blocks = cell(1, numel(groups));
             for k = 1:numel(groups)
@@ -151,13 +154,14 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 lineCells = cell(1, numel(group.Lines));
                 for j = 1:numel(group.Lines)
                     lineCells{j} = struct( ...
-                        "text", char(group.Lines(j).Text), ...
-                        "css", char(group.Lines(j).LineStyle.lineCss()));
+                        "text", this.textPayload(group.Lines(j).Text), ...
+                        "css", this.textPayload(group.Lines(j).LineStyle.lineCss()));
                 end
                 blocks{k} = struct( ...
-                    "containerCss", char(group.ContainerStyle.containerCss()), ...
+                    "containerCss", this.textPayload(group.ContainerStyle.containerCss()), ...
                     "lines", {lineCells});
             end
+            blocks = [blocks, owner.Metric.resolveBlocks(displayRow, displayColumn)];
         end
 
         function groups = resolveGroups(this, displayRow, displayColumn)
@@ -236,6 +240,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
                     allLines(lineIndex) = groups(k).Lines(j).Text;
                 end
             end
+            allLines(ismissing(allLines)) = "";
             text = strjoin(allLines, newline);
             style = groups(1).Lines(1).LineStyle;
         end
@@ -282,6 +287,19 @@ classdef TooltipController < gwidgets.internal.table.TableController
             end
 
             owner.Graphics.Backend.Tooltip = this.Text_;
+        end
+
+        function refreshDisplayState(this, owner)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController %#ok<INUSA>
+                owner (1,:) gwidgets.UITable
+            end
+
+            if isempty(owner) || isempty(owner.Graphics.Backend) || ~owner.Graphics.Backend.isReady()
+                return
+            end
+
+            owner.Graphics.Backend.refresh();
         end
 
         function owner = requireOwner(this)
@@ -336,6 +354,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
         end
 
         function matches = collectMatches(this, owner, displayRow, displayColumn)
+            [displayRow, displayColumn] = this.logicalDisplayCoordinates(owner, displayRow, displayColumn);
             priorities = ["cell", "row", "column", "table"];
             nTooltips = numel(this.Tooltips);
             if nTooltips == 0
@@ -354,6 +373,9 @@ classdef TooltipController < gwidgets.internal.table.TableController
                     idx = tt.indices(owner);
                     if tt.Target ~= "table" && tt.SelectionMode == gwidgets.table.SelectionMode.Data && ~isempty(idx)
                         idx = owner.Selection.dataToDisplay(idx, tt.Target);
+                        if owner.Display.Orientation == "Transposed" && tt.Target == "cell"
+                            idx = this.transposedCellsToLogical(idx);
+                        end
                     end
                 catch ME
                     if owner.Bridge.DiagEnabled
@@ -408,9 +430,37 @@ classdef TooltipController < gwidgets.internal.table.TableController
             matches = matches(1:nMatches);
         end
 
-        function value = cellValueForHover(this, owner, displayRow, displayColumn)
+        function idx = transposedCellsToLogical(this, idx)
             arguments
                 this (1,1) gwidgets.internal.table.TooltipController %#ok<INUSA>
+                idx (:,2) double
+            end
+
+            idx = [idx(:, 2) - 1, idx(:, 1)];
+            idx(idx(:, 1) < 1 | idx(:, 2) < 1, :) = [];
+        end
+
+        function [row, column] = logicalDisplayCoordinates(this, owner, displayRow, displayColumn)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController %#ok<INUSA>
+                owner (1,1) gwidgets.UITable
+                displayRow (1,1) double
+                displayColumn (1,1) double
+            end
+
+            row = displayRow;
+            column = displayColumn;
+            if owner.Display.Orientation ~= "Transposed"
+                return
+            end
+
+            row = displayColumn - 1;
+            column = displayRow;
+        end
+
+        function value = cellValueForHover(this, owner, displayRow, displayColumn)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController
                 owner (1,1) gwidgets.UITable
                 displayRow (1,1) double
                 displayColumn (1,1) double
@@ -421,7 +471,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 return
             end
 
-            data = owner.Data.Display;
+            data = this.logicalDisplayData(owner);
             if displayRow > size(data, 1) || displayColumn > width(data)
                 return
             end
@@ -503,6 +553,36 @@ classdef TooltipController < gwidgets.internal.table.TableController
             if isempty(dataIndex) || ~isscalar(dataIndex)
                 dataIndex = NaN;
             end
+        end
+
+        function data = logicalDisplayData(this, owner)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController %#ok<INUSA>
+                owner (1,1) gwidgets.UITable
+            end
+
+            state = struct( ...
+                "VisibleDataColumnNames", owner.Column.VisibleDataNames, ...
+                "GroupingVariable", owner.Group.By, ...
+                "VisibleGroupHeaderRowIdx", owner.Data.VisibleGroupHeaderRowIdx, ...
+                "DataColumnNames", owner.Column.DataNames, ...
+                "ColumnNames", owner.Column.Names);
+            data = gwidgets.internal.table.DisplayController.visibleDataForTable(owner.Data.Visible, state);
+        end
+
+        function text = textPayload(this, value)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController %#ok<INUSA>
+                value
+            end
+
+            value = string(value);
+            value(ismissing(value)) = "";
+            if ~isscalar(value)
+                value = strjoin(reshape(value, 1, []), newline);
+            end
+
+            text = char(value);
         end
     end
 

@@ -22,6 +22,11 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
         ThemeListener (1,:) event.listener = event.listener.empty(1,0)
         ProbeCounter (1,1) double = 0
         ProbeResult (1,1) struct = struct("id", -1)
+        RenderResult (1,1) struct = struct("stateRevision", -1)
+        HasSentState (1,1) logical = false
+        StateDirty (1,1) logical = true
+        StateSendSuppressionDepth (1,1) double = 0
+        StateRevision (1,1) double = 0
     end
 
     methods
@@ -53,6 +58,53 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             % DOM-scraping bridge used by matlab.ui.control.Table.
         end
 
+        function setProperties(this, propertyValues)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+                propertyValues (1,:) cell
+            end
+
+            stateUpdateToken = this.beginStateUpdate();
+            cleanupObj = onCleanup(@()this.cancelStateUpdate(stateUpdateToken));
+
+            for iProperty = 1:2:numel(propertyValues)
+                this.setBackendProperty(string(propertyValues{iProperty}), propertyValues{iProperty+1});
+            end
+
+            delete(cleanupObj);
+            this.endStateUpdate(stateUpdateToken);
+        end
+
+        function token = beginStateUpdate(this)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+            end
+
+            token = this.StateSendSuppressionDepth;
+            this.StateSendSuppressionDepth = this.StateSendSuppressionDepth + 1;
+        end
+
+        function cancelStateUpdate(this, token)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+                token (1,1) double
+            end
+
+            this.StateSendSuppressionDepth = token;
+        end
+
+        function endStateUpdate(this, token)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+                token (1,1) double
+            end
+
+            this.StateSendSuppressionDepth = token;
+            if this.StateSendSuppressionDepth == 0 && this.StateDirty
+                this.sendState();
+            end
+        end
+
         function contextMenu = buildContextMenu(this, contextMenu, customItems, options, callbacks)
             arguments
                 this (1,1) gwidgets.internal.table.backend.JSTableBackend
@@ -67,11 +119,13 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 [customItems.Tag] = deal("graphicscomponentsTableContextMenu");
             end
 
-            this.ContextMenuCustomItems_ = customItems;
+            [customMenuItems, customLeafItems] = ...
+                gwidgets.internal.table.backend.JSTableBackend.customMenuItems(customItems);
+            this.ContextMenuCustomItems_ = customLeafItems;
             this.ContextMenuCallbacks_ = callbacks;
             this.ContextMenuItems_ = gwidgets.internal.table.backend.JSTableBackend.contextMenuItems( ...
-                options, customItems);
-            this.sendState();
+                options, customMenuItems);
+            this.requestStateSend();
         end
 
         function addStyle(this, style, target, index)
@@ -85,7 +139,7 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             newConfig = table(categorical(target), {index}, style, ...
                 VariableNames=["Target", "TargetIndex", "Style"]);
             this.StyleConfigurations_ = [this.StyleConfigurations_; newConfig];
-            this.sendState();
+            this.requestStateSend();
         end
 
         function removeStyle(this)
@@ -94,7 +148,37 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             end
 
             this.StyleConfigurations_ = gwidgets.internal.table.backend.TableBackend.emptyStyleConfigurations();
-            this.sendState();
+            this.requestStateSend();
+        end
+
+        function refresh(this)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+            end
+
+            this.requestStateSend();
+        end
+
+        function requestAutoResizeColumns(this)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+            end
+
+            if ~this.isReady()
+                this.StateDirty = true;
+                return
+            end
+
+            if this.StateDirty || ~this.HasSentState
+                this.sendState();
+            end
+
+            try
+                sendEventToHTMLSource(this.Component, "AutoResizeColumns", struct());
+            catch
+                % uihtml can be constructed before the browser side is ready.
+                this.StateDirty = true;
+            end
         end
     end
 
@@ -120,21 +204,61 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                     this.onSelectionChanged(data);
                 case "CellEdited"
                     this.onCellEdited(data);
+                case "CellsPasted"
+                    this.onCellsPasted(data);
                 case "DisplayDataChanged"
                     this.onDisplayDataChanged(data);
                 case "ColumnWidthChanged"
                     this.onColumnWidthChanged(data);
+                case "AutoResizeColumnWidths"
+                    this.onAutoResizeColumnWidths(data);
                 case "CellHover"
                     this.onCellHover(data);
                 case "CellLeave"
                     this.sendTooltipBlocks(cell(1,0));
                 case "ContextMenuAction"
                     this.onContextMenuAction(data);
+                case "TableDragStart"
+                    this.onTableDragStart(data);
+                case "TableDrop"
+                    this.onTableDrop(data);
                 case "ProbeResult"
                     this.ProbeResult = data;
+                case "RenderComplete"
+                    this.RenderResult = data;
                 otherwise
                     % Unknown browser events are ignored for forward compatibility.
             end
+        end
+
+        function result = waitForBrowserRender(this, nvp)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+                nvp.Timeout (1,1) double {mustBePositive} = 10
+            end
+
+            if ~this.isReady()
+                error("GraphicsWidgets:Table:RenderUnavailable", ...
+                    "The JavaScript table backend is not ready for render synchronization.");
+            end
+
+            if this.StateDirty || ~this.HasSentState
+                this.sendState();
+            end
+
+            targetRevision = this.StateRevision;
+            startTime = tic;
+            while toc(startTime) < nvp.Timeout
+                drawnow();
+                result = this.RenderResult;
+                if isstruct(result) && isfield(result, "stateRevision") && ...
+                        double(result.stateRevision) >= targetRevision
+                    return
+                end
+            end
+
+            error("GraphicsWidgets:Table:RenderTimeout", ...
+                "Timed out waiting for JavaScript table render revision %d.", targetRevision);
         end
 
         function result = probeBrowser(this, probeName, payload, nvp)
@@ -157,17 +281,41 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 "id", probeId, ...
                 "probe", char(probeName), ...
                 "payload", payload);
-            renderPayload = this.tablePayload();
 
-            lastSendTime = -Inf;
+            renderPayload = [];
+            hasRenderPayload = false;
+            renderRequired = this.StateDirty || ~this.HasSentState;
+            renderSent = false;
+            lastRenderTime = -Inf;
+            lastProbeTime = -Inf;
             startTime = tic;
             while toc(startTime) < nvp.Timeout
                 elapsedTime = toc(startTime);
-                if elapsedTime - lastSendTime >= 0.1
+                shouldSendRender = renderRequired || (~renderSent && elapsedTime >= 0.25) || ...
+                    (renderSent && elapsedTime - lastRenderTime >= 1);
+                if shouldSendRender
+                    if ~hasRenderPayload
+                        renderPayload = this.tablePayload();
+                        hasRenderPayload = true;
+                    end
                     try
                         sendEventToHTMLSource(this.Component, "Render", renderPayload);
+                        this.HasSentState = true;
+                        this.StateDirty = false;
+                        renderSent = true;
+                        renderRequired = false;
+                        lastRenderTime = elapsedTime;
+                    catch
+                        % uihtml can exist before its browser document is accepting events.
+                        renderSent = false;
+                        renderRequired = true;
+                        this.StateDirty = true;
+                    end
+                end
+                if this.isRenderCurrent() && elapsedTime - lastProbeTime >= 0.1
+                    try
                         sendEventToHTMLSource(this.Component, "Probe", request);
-                        lastSendTime = elapsedTime;
+                        lastProbeTime = elapsedTime;
                     catch
                         % uihtml can exist before its browser document is accepting events.
                     end
@@ -179,6 +327,12 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                     if isfield(result, "error")
                         error("GraphicsWidgets:Table:ProbeError", ...
                             "JavaScript table probe failed: %s", string(result.error));
+                    end
+                    if this.isStaleProbeResult(result, probeName)
+                        renderRequired = true;
+                        renderSent = false;
+                        this.ProbeResult = struct("id", -1);
+                        continue
                     end
                     return
                 end
@@ -267,7 +421,7 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                     error("GraphicsWidgets:Table:BackendProperty", ...
                         "Unsupported JS backend property: %s", propertyName);
             end
-            this.sendState();
+            this.requestStateSend();
         end
     end
 
@@ -317,7 +471,15 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 return
             end
 
-            source = struct("SelectionType", char(this.SelectionType_));
+            selectionType = this.SelectionType_;
+            if isfield(data, "selectionType")
+                selectionType = string(data.selectionType);
+                if any(selectionType == ["cell", "row", "column"]) && selectionType ~= this.SelectionType_
+                    owner.Selection.Type = selectionType;
+                end
+            end
+
+            source = struct("SelectionType", char(selectionType));
             eventData = struct("Indices", double(data.indices));
             owner.Callback.onSelection(source, eventData);
         end
@@ -330,8 +492,34 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
 
             row = double(data.row);
             col = double(data.col);
+            this.applyCellEdit(owner, row, col, string(data.value));
+        end
+
+        function onCellsPasted(this, data)
+            owner = this.owner();
+            if isempty(owner) || ~isfield(data, "rows") || ~isfield(data, "cols") || ~isfield(data, "values")
+                return
+            end
+
+            rows = reshape(double(data.rows), 1, []);
+            cols = reshape(double(data.cols), 1, []);
+            values = reshape(string(data.values), 1, []);
+            nValues = min([numel(rows), numel(cols), numel(values)]);
+            for iValue = 1:nValues
+                this.applyCellEdit(owner, rows(iValue), cols(iValue), values(iValue));
+            end
+        end
+
+        function applyCellEdit(this, owner, row, col, editData)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.JSTableBackend
+                owner (1,1) gwidgets.UITable
+                row (1,1) double
+                col (1,1) double
+                editData (1,1) string
+            end
+
             previousData = this.previousData(row, col);
-            editData = string(data.value);
             newData = gwidgets.internal.table.backend.JSTableBackend.coerceEditData(editData, previousData);
 
             eventData = struct( ...
@@ -361,7 +549,44 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 return
             end
 
+            if isfield(data, "column")
+                startWidth = NaN;
+                if isfield(data, "startWidth")
+                    startWidth = double(data.startWidth);
+                end
+                owner.Display.handleBridgeColumnResize( ...
+                    double(data.column), double(data.widths), startWidth);
+                return
+            end
+
             owner.Display.handleBridgeColumnWidths(double(data.widths));
+        end
+
+        function onAutoResizeColumnWidths(this, data)
+            owner = this.owner();
+            if isempty(owner) || ~isfield(data, "widths")
+                return
+            end
+
+            owner.Display.handleAutoResizeColumnWidths(double(data.widths));
+        end
+
+        function onTableDragStart(this, data)
+            owner = this.owner();
+            if isempty(owner)
+                return
+            end
+
+            owner.Drag.onBridgeDragStart(data);
+        end
+
+        function onTableDrop(this, data)
+            owner = this.owner();
+            if isempty(owner)
+                return
+            end
+
+            owner.Drag.onBridgeDrop(data);
         end
 
         function onCellHover(this, data)
@@ -371,7 +596,7 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 return
             end
 
-            if isempty(owner.Tooltip.Tooltips)
+            if isempty(owner.Tooltip.Tooltips) && ~owner.Metric.Enabled
                 this.sendTooltipBlocks(cell(1,0));
                 return
             end
@@ -398,43 +623,101 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 "DisplayColumn", double(data.col)));
         end
 
+        function requestStateSend(this)
+            if ~this.StateDirty
+                this.StateRevision = this.StateRevision + 1;
+            end
+            this.StateDirty = true;
+            if this.StateSendSuppressionDepth > 0
+                return
+            end
+
+            this.sendState();
+        end
+
         function sendState(this)
             if ~this.isReady()
+                this.StateDirty = true;
                 return
             end
 
             payload = this.tablePayload();
             try
                 sendEventToHTMLSource(this.Component, "Render", payload);
+                this.HasSentState = true;
+                this.StateDirty = false;
             catch
                 % uihtml can be constructed before the browser side is ready.
+                this.StateDirty = true;
             end
         end
 
         function payload = tablePayload(this)
             data = this.Data_;
             displayColumnNames = this.displayColumnNames();
-            [cellRows, cellCols, cellValues] = ...
-                gwidgets.internal.table.backend.JSTableBackend.displayCellPayload(data);
+            cellValues = gwidgets.internal.table.backend.JSTableBackend.displayCellValues(data);
+            cellRows = zeros(1,0);
+            cellCols = zeros(1,0);
+            values = cell(0,0);
             payload = struct( ...
                 "columns", {cellstr(displayColumnNames)}, ...
-                "values", {this.displayValues(data)}, ...
+                "values", {values}, ...
+                "stateRevision", this.StateRevision, ...
                 "rowCount", height(data), ...
                 "cellRows", cellRows, ...
                 "cellCols", cellCols, ...
                 "cellValues", {cellstr(cellValues)}, ...
+                "cellLayout", "rowMajor", ...
                 "selectionType", char(this.SelectionType_), ...
                 "multiselect", char(string(this.Multiselect_)), ...
                 "selection", this.Selection_, ...
                 "columnEditable", this.ColumnEditable_, ...
                 "columnSortable", this.ColumnSortable_, ...
+                "displayOrientation", char(this.displayOrientationPayload()), ...
+                "rowSortVariables", {cellstr(this.rowSortVariablesPayload())}, ...
+                "rowSortable", this.rowSortablePayload(), ...
+                "sortByColumn", {cellstr(this.sortByColumnPayload())}, ...
+                "sortDirection", char(this.sortDirectionPayload()), ...
                 "columnWidth", {this.columnWidthPayload()}, ...
+                "columnWidthType", {cellstr(this.columnWidthTypesPayload())}, ...
+                "columnPixelWidth", this.columnPixelWidthPayload(), ...
+                "columnMinWidth", this.columnMinWidthPayload(), ...
+                "columnMaxWidth", this.columnMaxWidthPayload(), ...
+                "tableMinWidth", this.tableMinWidthPayload(), ...
+                "tableMaxWidth", this.tableMaxWidthPayload(), ...
                 "groupHeaderRows", this.GroupHeaderRows_, ...
                 "groupHeaderLevels", this.GroupHeaderLevels_, ...
+                "groupHeaderColumns", this.groupHeaderColumnsPayload(), ...
+                "groupHeaderColumnLevels", this.groupHeaderColumnLevelsPayload(), ...
                 "tooltip", char(this.Tooltip_), ...
+                "hasCustomTooltip", this.hasCustomTooltipPayload(), ...
+                "showGroupHeaderTooltips", this.showGroupHeaderTooltipsPayload(), ...
                 "contextMenu", {this.ContextMenuItems_}, ...
+                "dragEnabled", this.dragEnabledPayload(), ...
+                "dragMoveKey", char(this.dragMoveKeyPayload()), ...
+                "dragCopyKey", char(this.dragCopyKeyPayload()), ...
                 "theme", char(this.themePayload()), ...
                 "styles", {this.stylePayload()});
+        end
+
+        function tf = isStaleProbeResult(this, result, probeName)
+            if probeName ~= "Snapshot"
+                tf = false;
+                return
+            end
+
+            if ~isfield(result, "stateRevision")
+                tf = this.StateRevision > 0;
+                return
+            end
+
+            resultRevision = double(result.stateRevision);
+            tf = resultRevision < this.StateRevision;
+        end
+
+        function tf = isRenderCurrent(this)
+            tf = isstruct(this.RenderResult) && isfield(this.RenderResult, "stateRevision") && ...
+                double(this.RenderResult.stateRevision) >= this.StateRevision;
         end
 
         function configureThemeListener(this, owner)
@@ -447,10 +730,10 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             end
 
             try
-                this.ThemeListener = addlistener(fig, "ThemeChanged", @(~, ~)this.sendState());
+                this.ThemeListener = addlistener(fig, "ThemeChanged", @(~, ~)this.requestStateSend());
             catch
                 try
-                    this.ThemeListener = addlistener(fig, "Theme", "PostSet", @(~, ~)this.sendState());
+                    this.ThemeListener = addlistener(fig, "Theme", "PostSet", @(~, ~)this.requestStateSend());
                 catch
                     % Older MATLAB releases do not expose figure theme notifications.
                 end
@@ -494,6 +777,130 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             end
         end
 
+        function enabled = dragEnabledPayload(this)
+            enabled = false;
+            owner = this.owner();
+            if ~isempty(owner)
+                enabled = owner.Drag.Enabled;
+            end
+        end
+
+        function key = dragMoveKeyPayload(this)
+            key = "";
+            owner = this.owner();
+            if ~isempty(owner)
+                key = owner.Drag.MoveDragKey;
+            end
+        end
+
+        function key = dragCopyKeyPayload(this)
+            key = "";
+            owner = this.owner();
+            if ~isempty(owner)
+                key = owner.Drag.CopyDragKey;
+            end
+        end
+
+        function tf = hasCustomTooltipPayload(this)
+            tf = false;
+            owner = this.owner();
+            if ~isempty(owner)
+                tf = ~isempty(owner.Tooltip.Tooltips) || owner.Metric.Enabled;
+            end
+        end
+
+        function tf = showGroupHeaderTooltipsPayload(this)
+            tf = true;
+            owner = this.owner();
+            if ~isempty(owner)
+                tf = owner.ShowGroupHeaderTooltips;
+            end
+        end
+
+        function orientation = displayOrientationPayload(this)
+            orientation = "Normal";
+            owner = this.owner();
+            if ~isempty(owner)
+                orientation = owner.Display.Orientation;
+            end
+        end
+
+        function variables = rowSortVariablesPayload(this)
+            variables = strings(1,0);
+            owner = this.owner();
+            if isempty(owner) || owner.Display.Orientation ~= "Transposed" || width(this.Data_) < 1
+                return
+            end
+
+            variables = reshape(string(this.Data_{:, 1}), 1, []);
+        end
+
+        function sortable = rowSortablePayload(this)
+            sortable = false(1,0);
+            owner = this.owner();
+            variables = this.rowSortVariablesPayload();
+            if isempty(owner) || isempty(variables)
+                return
+            end
+
+            dataNames = owner.Column.aliasesToData(variables);
+            allDataNames = owner.Column.DataNames;
+            dataSortable = owner.Column.DataSortable;
+            sortable = false(1, numel(dataNames));
+            for iName = 1:numel(dataNames)
+                idx = find(allDataNames == dataNames(iName), 1);
+                if ~isempty(idx)
+                    sortable(iName) = dataSortable(idx);
+                end
+            end
+        end
+
+        function columns = sortByColumnPayload(this)
+            columns = strings(1,0);
+            owner = this.owner();
+            if ~isempty(owner)
+                columns = reshape(owner.Sort.By, 1, []);
+            end
+        end
+
+        function direction = sortDirectionPayload(this)
+            direction = "None";
+            owner = this.owner();
+            if ~isempty(owner)
+                direction = owner.Sort.Direction;
+            end
+        end
+
+        function columns = groupHeaderColumnsPayload(this)
+            columns = zeros(1,0);
+            owner = this.owner();
+            if isempty(owner) || owner.Display.Orientation ~= "Transposed"
+                return
+            end
+
+            columns = reshape(owner.Data.VisibleGroupHeaderRowIdx, 1, []) + 1;
+        end
+
+        function levels = groupHeaderColumnLevelsPayload(this)
+            levels = zeros(1,0);
+            owner = this.owner();
+            if isempty(owner) || owner.Display.Orientation ~= "Transposed"
+                return
+            end
+
+            levels = reshape(owner.Data.VisibleGroupHeaderLevels, 1, []);
+            if isempty(levels)
+                return
+            end
+
+            columns = this.groupHeaderColumnsPayload();
+            if numel(levels) ~= numel(columns)
+                levels = ones(1, numel(columns));
+            elseif all(levels == 0)
+                levels = ones(1, numel(columns));
+            end
+        end
+
         function onContextMenuAction(this, data)
             if ~isfield(data, "action") || isempty(fieldnames(this.ContextMenuCallbacks_))
                 return
@@ -533,8 +940,14 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                     callbacks.AutoResizeColumns([], []);
                 case "ToggleDragging"
                     callbacks.ToggleDragging([], []);
+                case "ToggleGroupHeaderTooltips"
+                    callbacks.ToggleGroupHeaderTooltips([], []);
+                case "ToggleTableMetrics"
+                    callbacks.ToggleTableMetrics([], []);
+                case "ToggleDisplayOrientation"
+                    callbacks.ToggleDisplayOrientation([], []);
                 case "CustomItem"
-                    this.invokeCustomMenuItem(value);
+                    this.invokeCustomMenuItem(value, eventData);
                 otherwise
                     % Unknown menu actions are ignored for forward compatibility.
             end
@@ -566,7 +979,7 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             value = reshape(value, 1, []);
         end
 
-        function invokeCustomMenuItem(this, value)
+        function invokeCustomMenuItem(this, value, eventData)
             if isempty(value)
                 return
             end
@@ -580,7 +993,7 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             if isempty(item.MenuSelectedFcn)
                 return
             end
-            item.MenuSelectedFcn(item, []);
+            item.MenuSelectedFcn(item, eventData);
         end
 
         function names = displayColumnNames(this)
@@ -603,6 +1016,69 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 end
             end
             widths = cellstr(string(widths));
+        end
+
+        function types = columnWidthTypesPayload(this)
+            nWidths = numel(this.ColumnWidth_);
+            types = strings(1, nWidths);
+            owner = this.owner();
+            if ~isempty(owner) && numel(owner.Column.WidthTypes) == nWidths
+                types = owner.Column.WidthTypes;
+                return
+            end
+
+            for iWidth = 1:nWidths
+                types(iWidth) = gwidgets.internal.table.backend.JSTableBackend.widthType(this.ColumnWidth_{iWidth});
+            end
+        end
+
+        function widths = columnPixelWidthPayload(this)
+            nWidths = numel(this.ColumnWidth_);
+            widths = nan(1, nWidths);
+            owner = this.owner();
+            if ~isempty(owner) && numel(owner.Column.PixelWidths) == nWidths
+                widths = owner.Column.PixelWidths;
+                return
+            end
+
+            for iWidth = 1:nWidths
+                widths(iWidth) = gwidgets.internal.table.backend.JSTableBackend.pixelWidth(this.ColumnWidth_{iWidth});
+            end
+        end
+
+        function widths = columnMinWidthPayload(this)
+            nWidths = numel(this.ColumnWidth_);
+            widths = repelem(24, 1, nWidths);
+            owner = this.owner();
+            if ~isempty(owner) && numel(owner.Column.MinWidth) == nWidths
+                widths = owner.Column.MinWidth;
+            end
+        end
+
+        function widths = columnMaxWidthPayload(this)
+            nWidths = numel(this.ColumnWidth_);
+            widths = nan(1, nWidths);
+            owner = this.owner();
+            if ~isempty(owner) && numel(owner.Column.MaxWidth) == nWidths
+                widths = owner.Column.MaxWidth;
+                widths(isinf(widths)) = NaN;
+            end
+        end
+
+        function width = tableMinWidthPayload(this)
+            width = NaN;
+            owner = this.owner();
+            if ~isempty(owner)
+                width = owner.Column.TableMinWidth;
+            end
+        end
+
+        function width = tableMaxWidthPayload(this)
+            width = NaN;
+            owner = this.owner();
+            if ~isempty(owner) && isfinite(owner.Column.TableMaxWidth)
+                width = owner.Column.TableMaxWidth;
+            end
         end
 
         function value = previousData(this, row, col)
@@ -650,7 +1126,7 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
         function items = contextMenuItems(options, customItems)
             arguments
                 options (1,1) struct
-                customItems (1,:) matlab.ui.container.Menu
+                customItems (1,:) cell
             end
 
             toggleItems = gwidgets.internal.table.backend.JSTableBackend.toggleMenuItems(options);
@@ -678,14 +1154,49 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             itemCells(nItems+1:nItems+nToggleItems) = toggleItems;
             nItems = nItems + nToggleItems;
 
-            for iItem = 1:numel(customItems)
-                nItems = nItems + 1;
-                itemCells{nItems} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
-                    string(customItems(iItem).Text), "CustomItem", string(iItem), ...
-                    string(customItems(iItem).Enable) ~= "off", cell(1,0));
-            end
+            nCustomItems = numel(customItems);
+            itemCells(nItems+1:nItems+nCustomItems) = customItems;
+            nItems = nItems + nCustomItems;
 
             items = itemCells(1:nItems);
+        end
+
+        function [items, leafItems] = customMenuItems(customItems)
+            arguments
+                customItems (1,:) matlab.ui.container.Menu
+            end
+
+            items = cell(1, numel(customItems));
+            leafItems = matlab.ui.container.Menu.empty(1,0);
+            for iItem = 1:numel(customItems)
+                [items{iItem}, leafItems] = gwidgets.internal.table.backend.JSTableBackend.customMenuItem( ...
+                    customItems(iItem), leafItems);
+            end
+        end
+
+        function [item, leafItems] = customMenuItem(menuItem, leafItems)
+            arguments
+                menuItem (1,1) matlab.ui.container.Menu
+                leafItems (1,:) matlab.ui.container.Menu
+            end
+
+            childMenus = reshape(menuItem.Children, 1, []);
+            children = cell(1, numel(childMenus));
+            for iChild = 1:numel(childMenus)
+                [children{iChild}, leafItems] = gwidgets.internal.table.backend.JSTableBackend.customMenuItem( ...
+                    childMenus(iChild), leafItems);
+            end
+
+            action = "";
+            value = strings(1,0);
+            if isempty(children)
+                leafItems(end+1) = menuItem;
+                action = "CustomItem";
+                value = string(numel(leafItems));
+            end
+
+            item = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                string(menuItem.Text), action, value, string(menuItem.Enable) ~= "off", children);
         end
 
         function item = groupingMenuItem(options)
@@ -774,6 +1285,24 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                     "Show/hide row filter", "ToggleRowFilter", strings(1,0), true, cell(1,0));
             end
 
+            if options.HasChangeDisplayOrientation
+                items{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    gwidgets.internal.table.backend.JSTableBackend.displayOrientationMenuText(options), ...
+                    "ToggleDisplayOrientation", strings(1,0), true, cell(1,0));
+            end
+
+            if options.HasToggleGroupHeaderTooltips
+                items{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    gwidgets.internal.table.backend.JSTableBackend.groupHeaderTooltipMenuText(options), ...
+                    "ToggleGroupHeaderTooltips", strings(1,0), true, cell(1,0));
+            end
+
+            if options.HasToggleTableMetrics
+                items{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
+                    gwidgets.internal.table.backend.JSTableBackend.tableMetricsMenuText(options), ...
+                    "ToggleTableMetrics", strings(1,0), true, cell(1,0));
+            end
+
             if options.HasAutoResizeColumns
                 items{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
                     "Auto-resize columns", "AutoResizeColumns", strings(1,0), true, cell(1,0));
@@ -786,6 +1315,39 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 end
                 items{end+1} = gwidgets.internal.table.backend.JSTableBackend.menuItem( ...
                     menuText, "ToggleDragging", strings(1,0), true, cell(1,0));
+            end
+        end
+
+        function text = displayOrientationMenuText(options)
+            arguments
+                options (1,1) struct
+            end
+
+            text = "Transpose table";
+            if options.DisplayOrientation == "Transposed"
+                text = "Untranspose table";
+            end
+        end
+
+        function text = groupHeaderTooltipMenuText(options)
+            arguments
+                options (1,1) struct
+            end
+
+            text = "Show group header tooltips";
+            if options.ShowGroupHeaderTooltips
+                text = "Hide group header tooltips";
+            end
+        end
+
+        function text = tableMetricsMenuText(options)
+            arguments
+                options (1,1) struct
+            end
+
+            text = "Show table metrics";
+            if options.ShowMetrics
+                text = "Hide table metrics";
             end
         end
 
@@ -838,6 +1400,37 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 "children", {children});
         end
 
+        function type = widthType(value)
+            if isnumeric(value) && isscalar(value)
+                type = "Pixel";
+                return
+            end
+
+            value = lower(string(value));
+            if value == "fit"
+                type = "Fit";
+            elseif endsWith(value, "px")
+                type = "Pixel";
+            else
+                type = "Relative";
+            end
+        end
+
+        function width = pixelWidth(value)
+            width = NaN;
+            if isnumeric(value) && isscalar(value)
+                width = double(value);
+                return
+            end
+
+            value = lower(string(value));
+            if ~endsWith(value, "px")
+                return
+            end
+
+            width = str2double(extractBefore(value, strlength(value) - 1));
+        end
+
         function values = displayValues(data)
             values = cell(height(data), width(data));
             for iRow = 1:height(data)
@@ -848,21 +1441,40 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
             end
         end
 
-        function [cellRows, cellCols, cellValues] = displayCellPayload(data)
-            nCells = height(data)*width(data);
-            cellRows = zeros(1, nCells);
-            cellCols = zeros(1, nCells);
-            cellValues = strings(1, nCells);
-            iCell = 0;
-            for iRow = 1:height(data)
-                for iCol = 1:width(data)
-                    iCell = iCell + 1;
-                    cellRows(iCell) = iRow;
-                    cellCols(iCell) = iCol;
-                    cellValues(iCell) = gwidgets.internal.table.backend.JSTableBackend.valueText( ...
-                        data{iRow, iCol});
-                end
+        function cellValues = displayCellValues(data)
+            nRows = height(data);
+            nCols = width(data);
+            if nRows == 0 || nCols == 0
+                cellValues = strings(1,0);
+                return
             end
+
+            valueMatrix = strings(nRows, nCols);
+            for iCol = 1:nCols
+                valueMatrix(:, iCol) = gwidgets.internal.table.backend.JSTableBackend.displayColumnValues( ...
+                    data, iCol);
+            end
+            cellValues = reshape(valueMatrix.', 1, []);
+        end
+
+        function values = displayColumnValues(data, iCol)
+            nRows = height(data);
+            columnData = data{:, iCol};
+            if gwidgets.internal.table.backend.JSTableBackend.isScalarDisplayColumn(columnData, nRows)
+                values = reshape(string(columnData), [], 1);
+                return
+            end
+
+            values = strings(nRows, 1);
+            for iRow = 1:nRows
+                values(iRow) = gwidgets.internal.table.backend.JSTableBackend.valueText(data{iRow, iCol});
+            end
+        end
+
+        function tf = isScalarDisplayColumn(columnData, nRows)
+            tf = ismatrix(columnData) && size(columnData, 1) == nRows && size(columnData, 2) == 1 && ...
+                (isstring(columnData) || isnumeric(columnData) || islogical(columnData) || ...
+                iscategorical(columnData) || isdatetime(columnData) || isduration(columnData));
         end
 
         function text = valueText(value)

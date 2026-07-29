@@ -83,10 +83,14 @@ classdef StyleController < gwidgets.internal.table.TableController
                 style = thisStyle.Style;
                 target = thisStyle.Target;
                 index = thisStyle.indices(this.owner());
+                isOriented = false;
                 if thisStyle.SelectionMode == gwidgets.table.SelectionMode.Data
                     index = this.owner().Selection.dataToDisplay(index, target);
+                    isOriented = this.owner().Display.Orientation == "Transposed" && target == "cell";
                 end
-                [target, index] = this.orientStyleTarget(target, index);
+                if ~isOriented
+                    [target, index] = this.orientStyleTarget(target, index);
+                end
                 backend.addStyle(style, target, index);
             end
 

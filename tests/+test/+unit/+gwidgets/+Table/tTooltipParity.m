@@ -64,6 +64,78 @@ classdef tTooltipParity < test.WithExampleTables
             testCase.verifyEqual(state.Texts, "s=x")
         end
 
+        function tTooltipAfterFilterSort(testCase, Backend)
+            data = table( ...
+                [3; 1; 4; 2], ...
+                ["three"; "one"; "four"; "two"], ...
+                VariableNames=["Value", "Label"]);
+            t = test.unit.gwidgets.Table.tTooltipParity.createTable(testCase, Backend, data);
+
+            t.Filter = "Value>1";
+            t.ColumnSortable = true;
+            t.Sort.By = "Value";
+            t.Sort.Direction = "Ascend";
+            t.addTooltip( ...
+                @(ctx)"display=" + string(ctx.DisplayRow) + ",data=" + string(ctx.DataRow) + ...
+                ",value=" + string(ctx.Value), ...
+                "cell", [1 1], SelectionMode=gwidgets.table.SelectionMode.Display);
+
+            state = testCase.hoverState(t, 1, 1);
+
+            testCase.verifyTrue(state.Visible)
+            testCase.verifyEqual(state.Texts, "display=1,data=4,value=2")
+        end
+
+        function tVirtualizedRowHoverResolvesTooltip(testCase, Backend)
+            data = table( ...
+                (1:200)', ...
+                "row_" + string((1:200)'), ...
+                VariableNames=["Value", "Label"]);
+            t = test.unit.gwidgets.Table.tTooltipParity.createTable(testCase, Backend, data);
+            t.addTooltip(@(ctx)"row=" + string(ctx.DisplayRow) + ",value=" + string(ctx.Value), "row", 180);
+
+            testCase.scrollToDisplayRow(t, 180);
+            state = testCase.hoverState(t, 180, 1);
+
+            testCase.verifyTrue(state.Visible)
+            testCase.verifyEqual(state.Texts, "row=180,value=180")
+        end
+
+        function tTransposedTooltipUsesLogicalCell(testCase, Backend)
+            data = table( ...
+                [10; 20], ...
+                ["A"; "B"], ...
+                VariableNames=["Value", "Label"]);
+            t = test.unit.gwidgets.Table.tTooltipParity.createTable(testCase, Backend, data);
+            t.DisplayOrientation = "Transposed";
+            t.addTooltip( ...
+                @(ctx)"display=" + string(ctx.DisplayRow) + "," + string(ctx.DisplayColumn) + ...
+                ";data=" + string(ctx.DataRow) + "," + string(ctx.DataColumn) + ...
+                ";value=" + string(ctx.Value), ...
+                "cell", [2 1], SelectionMode=gwidgets.table.SelectionMode.Display);
+
+            state = testCase.hoverState(t, 1, 3);
+
+            testCase.verifyTrue(state.Visible)
+            testCase.verifyEqual(state.Texts, "display=2,1;data=2,1;value=20")
+        end
+
+        function tTransposedTooltipMatchesRowsAndColumns(testCase, Backend)
+            data = table( ...
+                [10; 20], ...
+                ["A"; "B"], ...
+                VariableNames=["Value", "Label"]);
+            t = test.unit.gwidgets.Table.tTooltipParity.createTable(testCase, Backend, data);
+            t.DisplayOrientation = "Transposed";
+            t.addTooltip("row 2", "row", 2, SelectionMode=gwidgets.table.SelectionMode.Display);
+            t.addTooltip("column 1", "column", 1, SelectionMode=gwidgets.table.SelectionMode.Display);
+
+            state = testCase.hoverState(t, 1, 3);
+
+            testCase.verifyTrue(state.Visible)
+            testCase.verifyEqual(state.Texts, ["row 2", "column 1"])
+        end
+
         function tRemovingTooltipsClearsHover(testCase, Backend)
             t = test.unit.gwidgets.Table.tTooltipParity.createTable(testCase, Backend);
             t.addTooltip("cell-text", "cell", [2 1]);
@@ -122,6 +194,18 @@ classdef tTooltipParity < test.WithExampleTables
             end
         end
 
+        function scrollToDisplayRow(testCase, t, row)
+            arguments
+                testCase (1,1) test.unit.gwidgets.Table.tTooltipParity %#ok<INUSA>
+                t (1,1) gwidgets.Table
+                row (1,1) double
+            end
+
+            if t.Backend == "JavaScript"
+                t.UITable.Graphics.Backend.probeBrowser("ScrollToRow", struct("row", row));
+            end
+        end
+
         function state = stateFromBlocks(~, blocks)
             arguments
                 ~
@@ -175,10 +259,11 @@ classdef tTooltipParity < test.WithExampleTables
     end
 
     methods (Static, Access = private)
-        function t = createTable(testCase, backend)
+        function t = createTable(testCase, backend, data)
             arguments
                 testCase (1,1) matlab.unittest.TestCase
                 backend (1,1) string
+                data (:,:) table = test.WithExampleTables.multivariableData()
             end
 
             fig = uifigure(Visible="off");
@@ -186,7 +271,7 @@ classdef tTooltipParity < test.WithExampleTables
             t = gwidgets.Table( ...
                 Parent=fig, ...
                 Backend=backend, ...
-                Data=test.WithExampleTables.multivariableData());
+                Data=data);
             testCase.addTeardown(@()delete(t));
         end
     end

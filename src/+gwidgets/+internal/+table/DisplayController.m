@@ -8,7 +8,11 @@ classdef DisplayController < gwidgets.internal.table.TableController
     properties (Access = private)
         Orientation_ (1,1) string {mustBeMember(Orientation_, ["Normal", "Transposed"])} = "Normal"
         GroupHeaderColumnWidths_ (1,:) double = nan(1,0)
+        GroupHeaderColumnKeys_ (1,:) string = string.empty(1,0)
+        GroupHeaderColumnKeyWidths_ (1,:) double = nan(1,0)
         GroupHeaderRowWidths_ (1,:) double = nan(1,0)
+        TransposedDataRowColumnWidths_ (1,:) double = nan(1,0)
+        TransposedVariableHeaderWidth_ (1,1) double = NaN
     end
 
     methods
@@ -40,6 +44,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
             if owner.doControllerUpdate("DisplayOrientation")
                 owner.requestControllerUpdate(StartFrom="Display");
             end
+            owner.Menu.refresh();
         end
 
         function updateData(this)
@@ -76,9 +81,18 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 if isempty(visWidths)
                     visWidths = {"Auto"};
                 end
+                if isa(backend, "gwidgets.internal.table.backend.JSTableBackend")
+                    backend.ColumnWidth = visWidths;
+                    owner.forceRefresh();
+                    owner.Bridge.restore();
+                    return
+                end
+
                 backend.ColumnWidth = {"Auto"};
                 owner.forceRefresh();
                 backend.ColumnWidth = visWidths;
+            else
+                backend.refresh();
             end
             owner.Bridge.restore();
         end
@@ -89,6 +103,12 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
+            backend = owner.Graphics.Backend;
+            if isa(backend, "gwidgets.internal.table.backend.JSTableBackend")
+                backend.requestAutoResizeColumns();
+                return
+            end
+
             owner.Bridge.applyGroupHeaderSpans();
             owner.Bridge.requestGroupSpanMeasurement();
         end
@@ -123,6 +143,45 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
         end
 
+        function handleAutoResizeColumnWidths(this, pixelWidths)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                pixelWidths (1,:) double
+            end
+
+            owner = this.owner();
+            if this.Orientation == "Transposed"
+                if this.updateTransposedWidths(owner, pixelWidths)
+                    this.applyColumnWidth();
+                else
+                    owner.Bridge.restore();
+                end
+                return
+            end
+
+            [dataPixelWidths, visibleMask, syntheticPixelWidths, canMap] = ...
+                this.normalBridgeWidthMap(owner, pixelWidths);
+            if ~canMap
+                owner.Bridge.restore();
+                return
+            end
+
+            changed = false;
+            if any(visibleMask)
+                changed = owner.Column.setPixelWidthsForMask(dataPixelWidths, visibleMask);
+            end
+
+            if this.updateNormalSyntheticHeaderWidths(owner, syntheticPixelWidths)
+                changed = true;
+            end
+
+            if changed
+                this.applyColumnWidth();
+            else
+                owner.Bridge.restore();
+            end
+        end
+
         function handleBridgeColumnWidths(this, pixelWidths)
             arguments
                 this (1,1) gwidgets.internal.table.DisplayController
@@ -131,7 +190,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
 
             owner = this.owner();
             if this.Orientation == "Transposed"
-                if this.updateTransposedHeaderWidths(owner, pixelWidths)
+                if this.updateTransposedWidths(owner, pixelWidths)
                     this.applyColumnWidth();
                 else
                     owner.Bridge.restore();
@@ -154,6 +213,60 @@ classdef DisplayController < gwidgets.internal.table.TableController
 
             if this.updateNormalSyntheticHeaderWidths(owner, syntheticPixelWidths)
                 changed = true;
+            end
+
+            if changed
+                this.applyColumnWidth();
+            else
+                owner.Bridge.restore();
+            end
+        end
+
+        function handleBridgeColumnResize(this, displayColumn, pixelWidths, startPixelWidth)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                displayColumn (1,1) double
+                pixelWidths (1,:) double
+                startPixelWidth (1,1) double = NaN
+            end
+
+            owner = this.owner();
+            displayColumn = round(displayColumn);
+            if ~isfinite(displayColumn) || displayColumn < 1 || displayColumn > numel(pixelWidths)
+                owner.Bridge.restore();
+                return
+            end
+
+            if this.Orientation == "Transposed"
+                if this.updateTransposedWidth(owner, displayColumn, pixelWidths(displayColumn))
+                    this.applyColumnWidth();
+                else
+                    owner.Bridge.restore();
+                end
+                return
+            end
+
+            [dataPixelWidths, visibleMask, ~, canMap] = this.normalBridgeWidthMap(owner, pixelWidths);
+            if ~canMap
+                owner.Bridge.restore();
+                return
+            end
+
+            [resizedMask, syntheticPixelWidth, canMap] = ...
+                this.normalBridgeResizedColumnMap(owner, displayColumn, pixelWidths);
+            if ~canMap
+                owner.Bridge.restore();
+                return
+            end
+
+            changed = false;
+            if any(resizedMask)
+                changed = owner.Column.updateBridgeResizeForMask( ...
+                    dataPixelWidths, visibleMask, resizedMask, startPixelWidth);
+            end
+
+            if isfinite(syntheticPixelWidth) && syntheticPixelWidth > 0
+                changed = this.updateNormalSyntheticHeaderWidths(owner, syntheticPixelWidth) || changed;
             end
 
             if changed
@@ -341,9 +454,12 @@ classdef DisplayController < gwidgets.internal.table.TableController
 
             nColumns = this.transposedWidth();
             widths = repmat({"1x"}, 1, nColumns);
+            widths{1} = this.transposedVariableHeaderWidth(owner);
+            widths = this.applyTransposedDataRowWidths(owner, widths);
+
             headerColumns = owner.Data.VisibleGroupHeaderRowIdx + 1;
-            headerWidths = gwidgets.internal.table.DisplayController.indexedValues( ...
-                this.GroupHeaderColumnWidths_, headerColumns);
+            headerWidths = this.visibleGroupHeaderColumnWidths(owner, headerColumns);
+            defaultHeaderWidth = gwidgets.internal.table.DisplayController.defaultGroupHeaderColumnWidth();
             for iColumn = 1:numel(headerColumns)
                 displayColumn = headerColumns(iColumn);
                 if displayColumn < 1 || displayColumn > nColumns
@@ -351,6 +467,8 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 end
                 if isfinite(headerWidths(iColumn)) && headerWidths(iColumn) > 0
                     widths{displayColumn} = headerWidths(iColumn);
+                else
+                    widths{displayColumn} = defaultHeaderWidth;
                 end
             end
         end
@@ -482,6 +600,43 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 this.GroupHeaderRowWidths_, headerRows, headerWidths);
         end
 
+        function [resizedMask, syntheticPixelWidth, canMap] = normalBridgeResizedColumnMap( ...
+                this, owner, displayColumn, pixelWidths)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                displayColumn (1,1) double
+                pixelWidths (1,:) double
+            end
+
+            displayData = owner.Graphics.Backend.Data;
+            allDataNames = owner.Column.DataNames;
+            resizedMask = false(1, numel(allDataNames));
+            syntheticPixelWidth = NaN;
+            canMap = false;
+
+            if width(displayData) == 0 || numel(pixelWidths) ~= width(displayData) || ...
+                    displayColumn > width(displayData)
+                return
+            end
+
+            if this.isNormalSyntheticGroupDisplay(owner, displayData)
+                syntheticPixelWidth = pixelWidths(displayColumn);
+                canMap = true;
+                return
+            end
+
+            displayNames = string(displayData.Properties.VariableNames);
+            dataName = owner.Column.aliasesToData(displayNames(displayColumn));
+            dataIdx = find(allDataNames == dataName, 1);
+            if isempty(dataIdx)
+                syntheticPixelWidth = pixelWidths(displayColumn);
+            else
+                resizedMask(dataIdx) = true;
+            end
+            canMap = true;
+        end
+
         function tf = isNormalSyntheticGroupDisplay(this, owner, displayData)
             arguments
                 this (1,1) gwidgets.internal.table.DisplayController %#ok<INUSA>
@@ -495,6 +650,39 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 && ~isempty(headerRows) ...
                 && numel(headerRows) == height(displayData) ...
                 && all(ismember(owner.Column.DataNames, owner.Group.By));
+        end
+
+        function changed = updateTransposedWidths(this, owner, pixelWidths)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                pixelWidths (1,:) double
+            end
+
+            changed = this.updateTransposedVariableHeaderWidth(pixelWidths);
+            changed = this.updateTransposedDataRowWidths(owner, pixelWidths) || changed;
+            changed = this.updateTransposedHeaderWidths(owner, pixelWidths) || changed;
+        end
+
+        function changed = updateTransposedWidth(this, owner, displayColumn, pixelWidth)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                displayColumn (1,1) double
+                pixelWidth (1,1) double
+            end
+
+            if displayColumn == 1
+                changed = this.updateTransposedVariableHeaderWidth(pixelWidth);
+                return
+            end
+
+            changed = this.updateTransposedHeaderWidth(owner, displayColumn, pixelWidth);
+            if changed
+                return
+            end
+
+            changed = this.updateTransposedDataRowWidth(owner, displayColumn, pixelWidth);
         end
 
         function changed = updateTransposedHeaderWidths(this, owner, pixelWidths)
@@ -515,6 +703,184 @@ classdef DisplayController < gwidgets.internal.table.TableController
             [this.GroupHeaderColumnWidths_, changed] = ...
                 gwidgets.internal.table.DisplayController.setIndexedValues( ...
                 this.GroupHeaderColumnWidths_, headerColumns, pixelWidths(headerColumns));
+            didChangeKeys = this.setGroupHeaderColumnKeyWidths(owner, headerColumns, pixelWidths(headerColumns));
+            changed = didChangeKeys || changed;
+        end
+
+        function changed = updateTransposedHeaderWidth(this, owner, displayColumn, pixelWidth)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                displayColumn (1,1) double
+                pixelWidth (1,1) double
+            end
+
+            headerColumns = owner.Data.VisibleGroupHeaderRowIdx + 1;
+            if ~any(headerColumns == displayColumn)
+                changed = false;
+                return
+            end
+
+            [this.GroupHeaderColumnWidths_, changed] = ...
+                gwidgets.internal.table.DisplayController.setIndexedValues( ...
+                this.GroupHeaderColumnWidths_, displayColumn, pixelWidth);
+            didChangeKey = this.setGroupHeaderColumnKeyWidths(owner, displayColumn, pixelWidth);
+            changed = didChangeKey || changed;
+        end
+
+        function changed = updateTransposedDataRowWidths(this, owner, pixelWidths)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                pixelWidths (1,:) double
+            end
+
+            visibleToData = reshape(owner.Data.FoldedVisibleToDataMap, 1, []);
+            displayColumns = 2:(numel(visibleToData) + 1);
+            idx = displayColumns <= numel(pixelWidths) & isfinite(visibleToData) & visibleToData > 0;
+            dataRows = visibleToData(idx);
+            displayColumns = displayColumns(idx);
+            if isempty(dataRows)
+                changed = false;
+                return
+            end
+
+            [this.TransposedDataRowColumnWidths_, changed] = ...
+                gwidgets.internal.table.DisplayController.setIndexedValues( ...
+                this.TransposedDataRowColumnWidths_, dataRows, pixelWidths(displayColumns));
+        end
+
+        function changed = updateTransposedDataRowWidth(this, owner, displayColumn, pixelWidth)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                displayColumn (1,1) double
+                pixelWidth (1,1) double
+            end
+
+            visibleRow = displayColumn - 1;
+            visibleToData = reshape(owner.Data.FoldedVisibleToDataMap, 1, []);
+            if visibleRow < 1 || visibleRow > numel(visibleToData)
+                changed = false;
+                return
+            end
+
+            dataRow = visibleToData(visibleRow);
+            if ~isfinite(dataRow) || dataRow <= 0
+                changed = false;
+                return
+            end
+
+            [this.TransposedDataRowColumnWidths_, changed] = ...
+                gwidgets.internal.table.DisplayController.setIndexedValues( ...
+                this.TransposedDataRowColumnWidths_, dataRow, pixelWidth);
+        end
+
+        function changed = updateTransposedVariableHeaderWidth(this, pixelWidths)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                pixelWidths (1,:) double
+            end
+
+            if isempty(pixelWidths) || ~isfinite(pixelWidths(1)) || pixelWidths(1) <= 0
+                changed = false;
+                return
+            end
+
+            changed = ~isequaln(this.TransposedVariableHeaderWidth_, pixelWidths(1));
+            this.TransposedVariableHeaderWidth_ = pixelWidths(1);
+        end
+
+        function widths = visibleGroupHeaderColumnWidths(this, owner, headerColumns)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                headerColumns (1,:) double
+            end
+
+            widths = gwidgets.internal.table.DisplayController.indexedValues( ...
+                this.GroupHeaderColumnWidths_, headerColumns);
+
+            groupKeys = reshape(owner.Group.DisplayGroups, 1, []);
+            nValues = min(numel(groupKeys), numel(widths));
+            for iGroup = 1:nValues
+                keyIdx = find(this.GroupHeaderColumnKeys_ == groupKeys(iGroup), 1);
+                if isempty(keyIdx)
+                    continue
+                end
+
+                keyWidth = this.GroupHeaderColumnKeyWidths_(keyIdx);
+                if isfinite(keyWidth) && keyWidth > 0
+                    widths(iGroup) = keyWidth;
+                end
+            end
+        end
+
+        function widths = applyTransposedDataRowWidths(this, owner, widths)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                widths (1,:) cell
+            end
+
+            visibleToData = reshape(owner.Data.FoldedVisibleToDataMap, 1, []);
+            storedWidths = gwidgets.internal.table.DisplayController.indexedValues( ...
+                this.TransposedDataRowColumnWidths_, visibleToData);
+            nRows = min(numel(visibleToData), numel(widths) - 1);
+            for iRow = 1:nRows
+                if isfinite(storedWidths(iRow)) && storedWidths(iRow) > 0
+                    widths{iRow + 1} = storedWidths(iRow);
+                end
+            end
+        end
+
+        function width = transposedVariableHeaderWidth(this, owner)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+            end
+
+            width = this.TransposedVariableHeaderWidth_;
+            if ~isfinite(width) || width <= 0
+                width = gwidgets.internal.table.DisplayController.defaultTransposedVariableHeaderWidth(owner);
+            end
+        end
+
+        function changed = setGroupHeaderColumnKeyWidths(this, owner, headerColumns, pixelWidths)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable
+                headerColumns (1,:) double
+                pixelWidths (1,:) double
+            end
+
+            groupKeys = reshape(owner.Group.DisplayGroups, 1, []);
+            visibleColumns = reshape(owner.Data.VisibleGroupHeaderRowIdx, 1, []) + 1;
+            nValues = min(numel(headerColumns), numel(pixelWidths));
+            changed = false;
+            for iValue = 1:nValues
+                displayColumn = headerColumns(iValue);
+                groupIdx = find(visibleColumns == displayColumn, 1);
+                if isempty(groupIdx) || groupIdx > numel(groupKeys)
+                    continue
+                end
+
+                pixelWidth = pixelWidths(iValue);
+                if ~isfinite(pixelWidth) || pixelWidth <= 0
+                    continue
+                end
+
+                key = groupKeys(groupIdx);
+                existingIdx = find(this.GroupHeaderColumnKeys_ == key, 1);
+                if isempty(existingIdx)
+                    this.GroupHeaderColumnKeys_(end+1) = key;
+                    this.GroupHeaderColumnKeyWidths_(end+1) = pixelWidth;
+                    changed = true;
+                elseif ~isequaln(this.GroupHeaderColumnKeyWidths_(existingIdx), pixelWidth)
+                    this.GroupHeaderColumnKeyWidths_(existingIdx) = pixelWidth;
+                    changed = true;
+                end
+            end
         end
     end
 
@@ -600,6 +966,24 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 store(idx(iValue)) = values(iValue);
             end
             changed = ~isequaln(original, store);
+        end
+
+        function width = defaultGroupHeaderColumnWidth()
+            arguments
+            end
+
+            width = 36;
+        end
+
+        function width = defaultTransposedVariableHeaderWidth(owner)
+            arguments
+                owner (1,1) gwidgets.UITable
+            end
+
+            labels = reshape(owner.Column.VisibleNames, 1, []);
+            labels(ismember(owner.Column.VisibleDataNames, owner.Group.By)) = [];
+            labels = ["Variable", labels];
+            width = max(64, 14 + 7*max(strlength(labels)));
         end
 
         function data = selectVisibleColumns(data, state)

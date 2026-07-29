@@ -11,6 +11,7 @@ classdef Table < matlab.mixin.SetGet
     %       t.SelectionControl   Data/display selection state
     %       t.Style              Table styles
     %       t.TooltipControl     Static and function-based hover tooltips
+    %       t.MetricControl      Optional table and group metric tooltips
     %       t.Menu               Context-menu capabilities
     %       t.Callback           Stable callback properties
     %
@@ -39,6 +40,7 @@ classdef Table < matlab.mixin.SetGet
         FilterControl (1,1) gwidgets.internal.table.FilterController
         SelectionControl (1,1) gwidgets.internal.table.SelectionController
         TooltipControl (1,1) gwidgets.internal.table.TooltipController
+        MetricControl (1,1) gwidgets.internal.table.MetricController
         Drag (1,1) gwidgets.internal.table.DragController
         Backend (1,1) string
     end
@@ -48,7 +50,11 @@ classdef Table < matlab.mixin.SetGet
         Filter
         ShowRowFilter (1,1) logical
         Tooltip (1,1) string
+        ShowGroupHeaderTooltips (1,1) logical
         DefaultTooltipStyle (1,1) gwidgets.table.TooltipStyle
+        ShowMetrics (1,1) logical
+        MetricLocation (1,1) string
+        MetricDefinitions (1,:) gwidgets.table.MetricDefinition
         DisplayOrientation (1,1) string
         Parent
         Position
@@ -92,6 +98,12 @@ classdef Table < matlab.mixin.SetGet
         ColumnWidth (1,:)
         DataColumnWidth (1,:)
         DefaultColumnWidths (1,:)
+        ColumnMinWidth (1,:) double
+        ColumnMaxWidth (1,:) double
+        DataColumnMinWidth (1,:) double
+        DataColumnMaxWidth (1,:) double
+        TableMinWidth (1,:) double
+        TableMaxWidth (1,:) double
         PixelDataColumnWidths (1,:) double
         RelativeDataColumnWidths (1,:) string
         DataColumnWidthTypes (1,:) string
@@ -120,9 +132,12 @@ classdef Table < matlab.mixin.SetGet
         HasToggleFilter (1,1) logical
         HasChangeGroupingVariable (1,1) logical
         HasToggleShowEmptyGroups (1,1) logical
+        HasChangeDisplayOrientation (1,1) logical
         HasColumnSorting (1,1) logical
         HasAutoResizeColumns (1,1) logical
         HasToggleDragging (1,1) logical
+        HasToggleGroupHeaderTooltips (1,1) logical
+        HasToggleTableMetrics (1,1) logical
     end
 
     properties (Dependent, Hidden)
@@ -256,6 +271,10 @@ classdef Table < matlab.mixin.SetGet
             val = this.UITable_.Tooltip;
         end
 
+        function val = get.MetricControl(this)
+            val = this.UITable_.Metric;
+        end
+
         function val = get.Drag(this)
             val = this.UITable_.Drag;
         end
@@ -304,12 +323,44 @@ classdef Table < matlab.mixin.SetGet
             this.TooltipControl.Text = val;
         end
 
+        function val = get.ShowGroupHeaderTooltips(this)
+            val = this.UITable_.ShowGroupHeaderTooltips;
+        end
+
+        function set.ShowGroupHeaderTooltips(this, val)
+            this.UITable_.ShowGroupHeaderTooltips = val;
+        end
+
         function val = get.DefaultTooltipStyle(this)
             val = this.TooltipControl.DefaultStyle;
         end
 
         function set.DefaultTooltipStyle(this, val)
             this.TooltipControl.DefaultStyle = val;
+        end
+
+        function val = get.ShowMetrics(this)
+            val = this.MetricControl.Enabled;
+        end
+
+        function set.ShowMetrics(this, val)
+            this.MetricControl.Enabled = val;
+        end
+
+        function val = get.MetricLocation(this)
+            val = this.MetricControl.Location;
+        end
+
+        function set.MetricLocation(this, val)
+            this.MetricControl.Location = val;
+        end
+
+        function val = get.MetricDefinitions(this)
+            val = this.MetricControl.Definitions;
+        end
+
+        function set.MetricDefinitions(this, val)
+            this.MetricControl.Definitions = val;
         end
 
         function val = get.DisplayOrientation(this)
@@ -481,6 +532,54 @@ classdef Table < matlab.mixin.SetGet
             this.Column.Width = val;
         end
 
+        function val = get.ColumnMinWidth(this)
+            val = this.Column.MinWidth;
+        end
+
+        function set.ColumnMinWidth(this, val)
+            this.Column.MinWidth = val;
+        end
+
+        function val = get.ColumnMaxWidth(this)
+            val = this.Column.MaxWidth;
+        end
+
+        function set.ColumnMaxWidth(this, val)
+            this.Column.MaxWidth = val;
+        end
+
+        function val = get.DataColumnMinWidth(this)
+            val = this.Column.DataMinWidth;
+        end
+
+        function set.DataColumnMinWidth(this, val)
+            this.Column.DataMinWidth = val;
+        end
+
+        function val = get.DataColumnMaxWidth(this)
+            val = this.Column.DataMaxWidth;
+        end
+
+        function set.DataColumnMaxWidth(this, val)
+            this.Column.DataMaxWidth = val;
+        end
+
+        function val = get.TableMinWidth(this)
+            val = this.Column.TableMinWidth;
+        end
+
+        function set.TableMinWidth(this, val)
+            this.Column.TableMinWidth = val;
+        end
+
+        function val = get.TableMaxWidth(this)
+            val = this.Column.TableMaxWidth;
+        end
+
+        function set.TableMaxWidth(this, val)
+            this.Column.TableMaxWidth = val;
+        end
+
         function val = get.PixelDataColumnWidths(this)
             val = this.Column.PixelDataWidths;
         end
@@ -650,6 +749,24 @@ classdef Table < matlab.mixin.SetGet
 
             this.TooltipControl.remove(orderNum);
         end
+
+        function addMetric(this, definition)
+            arguments
+                this (1,1) gwidgets.Table
+                definition (1,1) gwidgets.table.MetricDefinition
+            end
+
+            this.MetricControl.add(definition);
+        end
+
+        function removeMetric(this, orderNum)
+            arguments
+                this (1,1) gwidgets.Table
+                orderNum (1,:) double = []
+            end
+
+            this.MetricControl.remove(orderNum);
+        end
     end
 
     methods (Hidden)
@@ -733,6 +850,14 @@ classdef Table < matlab.mixin.SetGet
             this.Menu.HasToggleShowEmptyGroups = val;
         end
 
+        function val = get.HasChangeDisplayOrientation(this)
+            val = this.Menu.HasChangeDisplayOrientation;
+        end
+
+        function set.HasChangeDisplayOrientation(this, val)
+            this.Menu.HasChangeDisplayOrientation = val;
+        end
+
         function val = get.HasColumnSorting(this)
             val = this.Menu.HasColumnSorting;
         end
@@ -755,6 +880,22 @@ classdef Table < matlab.mixin.SetGet
 
         function set.HasToggleDragging(this, val)
             this.Menu.HasToggleDragging = val;
+        end
+
+        function val = get.HasToggleGroupHeaderTooltips(this)
+            val = this.Menu.HasToggleGroupHeaderTooltips;
+        end
+
+        function set.HasToggleGroupHeaderTooltips(this, val)
+            this.Menu.HasToggleGroupHeaderTooltips = val;
+        end
+
+        function val = get.HasToggleTableMetrics(this)
+            val = this.Menu.HasToggleTableMetrics;
+        end
+
+        function set.HasToggleTableMetrics(this, val)
+            this.Menu.HasToggleTableMetrics = val;
         end
 
         function val = get.SupportedSelectionTypes(this)
