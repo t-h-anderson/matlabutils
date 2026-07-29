@@ -21,13 +21,12 @@ classdef UITableBackend < gwidgets.internal.table.backend.TableBackend
 
             this.Grid = grid;
             this.Component = uitable(grid);
+            this.Component.UserData = struct("ViewId", char(this.Name), "ViewKind", char(this.Kind));
             this.Component.ClickedFcn = @(s, e)owner.Callback.onCellClicked(s, e);
             this.Component.DoubleClickedFcn = @(s, e)owner.Callback.onCellDoubleClicked(s, e);
             this.Component.CellSelectionCallback = @(s, e)owner.Callback.onSelection(s, e);
             this.Component.CellEditCallback = @(s, e)owner.Callback.onCellEdit(s, e);
             this.Component.DisplayDataChangedFcn = @(s, e)owner.Callback.onDisplayDataChanged(s, e);
-            this.Component.Layout.Column = 1;
-            this.Component.Layout.Row = 3;
         end
 
         function setupBridge(this, bridgeController)
@@ -105,8 +104,33 @@ classdef UITableBackend < gwidgets.internal.table.backend.TableBackend
                     this.GroupHeaderRows_ = reshape(double(value), 1, []);
                 case "GroupHeaderLevels"
                     this.GroupHeaderLevels_ = reshape(double(value), 1, []);
+                case "StyleConfigurations"
+                    this.applyStyleConfigurations(value);
+                case "Tooltip"
+                    this.Component.Tooltip = "";
                 otherwise
                     this.Component.(propertyName) = value;
+            end
+        end
+    end
+
+    methods (Access = private)
+        function applyStyleConfigurations(this, configs)
+            arguments
+                this (1,1) gwidgets.internal.table.backend.UITableBackend
+                configs (:,3) table
+            end
+
+            this.Component.removeStyle();
+            if isempty(configs)
+                return
+            end
+
+            for iStyle = 1:height(configs)
+                this.Component.addStyle( ...
+                    configs.Style(iStyle), ...
+                    string(configs.Target(iStyle)), ...
+                    configs.TargetIndex{iStyle});
             end
         end
     end

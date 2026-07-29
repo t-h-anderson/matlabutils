@@ -1,9 +1,5 @@
-classdef (Abstract) TableBackend < handle
+classdef (Abstract) TableBackend < gwidgets.internal.table.view.TableView
     % TableBackend defines the rendering boundary for gwidgets.UITable.
-
-    properties (SetAccess = protected)
-        Component
-    end
 
     properties (Dependent)
         Data

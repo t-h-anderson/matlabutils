@@ -66,8 +66,10 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            owner.ContextMenu = owner.Graphics.Backend.buildContextMenu( ...
+            contextMenu = owner.Graphics.buildContextMenus( ...
                 owner.ContextMenu, this.CustomItems_, this.options(owner.Column.Sortable), this.callbacks());
+            gwidgets.internal.table.ContextMenuController.reparent(contextMenu, owner);
+            owner.ContextMenu = contextMenu;
         end
 
         function reparentToOwner(this)
@@ -317,7 +319,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
                     return
             end
 
-            names = string(owner.Graphics.Backend.Data.Properties.VariableNames);
+            names = string(owner.Data.Display.Properties.VariableNames);
             displayColumns(displayColumns < 1 | displayColumns > numel(names)) = [];
             if isempty(displayColumns)
                 return

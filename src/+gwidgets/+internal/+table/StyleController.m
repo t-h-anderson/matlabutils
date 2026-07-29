@@ -8,6 +8,7 @@ classdef StyleController < gwidgets.internal.table.TableController
 
     properties (Access = private)
         Styles_ (1,:) gwidgets.internal.table.TableStyle
+        Configurations_ (:,3) table = gwidgets.internal.table.backend.TableBackend.emptyStyleConfigurations()
         GroupHeaderStyle_ (1,:) gwidgets.internal.table.TableStyle = ...
             gwidgets.internal.table.StyleController.defaultGroupHeaderStyle()
         NestedGroupHeaderStyles_ (1,:) gwidgets.internal.table.TableStyle = ...
@@ -55,11 +56,17 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function val = get.Configurations(this)
-            val = this.owner().Graphics.Backend.StyleConfigurations;
+            val = this.Configurations_;
         end
 
         function set.Configurations(this, val)
-            this.owner().Graphics.Backend.StyleConfigurations = val;
+            arguments
+                this (1,1) gwidgets.internal.table.StyleController
+                val (:,3) table
+            end
+
+            this.Configurations_ = val;
+            this.owner().Graphics.setViewProperties({"StyleConfigurations", val});
         end
 
         function val = get.GroupHeaderStyle(this)
@@ -74,8 +81,8 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function applyToDisplay(this)
-            backend = this.owner().Graphics.Backend;
-            backend.removeStyle();
+            this.Configurations_ = gwidgets.internal.table.backend.TableBackend.emptyStyleConfigurations();
+            this.owner().Graphics.removeStyle();
             styles = [this.Styles_, this.groupHeaderStylesForDisplay()];
 
             for iStyle = 1:numel(styles)
@@ -91,7 +98,8 @@ classdef StyleController < gwidgets.internal.table.TableController
                 if ~isOriented
                     [target, index] = this.orientStyleTarget(target, index);
                 end
-                backend.addStyle(style, target, index);
+                this.appendConfiguration(style, target, index);
+                this.owner().Graphics.addStyle(style, target, index);
             end
 
             this.owner().forceRefresh();
@@ -158,6 +166,22 @@ classdef StyleController < gwidgets.internal.table.TableController
                 otherwise
                     % Table-wide styles remain table-wide.
             end
+        end
+
+        function appendConfiguration(this, style, target, index)
+            arguments
+                this (1,1) gwidgets.internal.table.StyleController
+                style (1,1) matlab.ui.style.Style
+                target (1,1) string {mustBeMember(target, ["table", "row", "column", "cell"])}
+                index
+            end
+
+            if target == "table" && isempty(index)
+                index = char.empty(0,0);
+            end
+            config = table(categorical(target), {index}, style, ...
+                VariableNames=["Target", "TargetIndex", "Style"]);
+            this.Configurations_ = [this.Configurations_; config];
         end
 
         function match = groupHeaderStyleMatch(this, rowIdx, target, index)

@@ -12,9 +12,18 @@ classdef tTooltipParity < test.WithExampleTables
     end
 
     methods (Test)
-        function tStaticTooltipReachesRenderer(testCase, Backend)
+        function tStaticTooltipUsesAppropriateRenderer(testCase, Backend)
             t = test.unit.gwidgets.Table.tTooltipParity.createTable(testCase, Backend);
             t.Tooltip = "Inspect values";
+
+            if Backend == "UITable"
+                state = testCase.hoverState(t, 1, 1);
+
+                testCase.verifyTrue(state.Visible)
+                testCase.verifyEqual(state.Texts, "Inspect values")
+                testCase.verifyEqual(string(t.UITable.Graphics.Backend.Tooltip), "")
+                return
+            end
 
             state = testCase.nativeTooltipState(t);
 

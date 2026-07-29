@@ -34,7 +34,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 return
             end
 
-            owner.Graphics.Backend.setupBridge(this);
+            owner.Graphics.setupBridge(this);
         end
 
         function setup(this, grid, displayTable)
@@ -176,7 +176,12 @@ classdef BridgeController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            if isempty(owner) || isempty(owner.Graphics.Backend) || ~owner.Graphics.Backend.isReady()
+            if isempty(owner)
+                backend = [];
+            else
+                backend = owner.Graphics.Backend;
+            end
+            if isempty(backend) || ~backend.isReady()
                 this.send("SetGroupHeaderSpans", struct( ...
                     "rows", zeros(1,0), "labels", {cell(1,0)}, ...
                     "tooltips", {cell(1,0)}, "styles", {cell(1,0)}));
@@ -192,7 +197,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
                     "tooltips", {cell(1,0)}, "styles", {cell(1,0)}));
                 styleCss = owner.Style.groupHeaderOverlayCss(owner.Data.VisibleGroupHeaderRowIdx);
                 payload = gwidgets.internal.table.BridgeController.groupColumnSpanPayload( ...
-                    owner.Graphics.Backend.Data, owner.Data.VisibleGroupHeaderRowIdx, styleCss, ...
+                    owner.Data.Display, owner.Data.VisibleGroupHeaderRowIdx, styleCss, ...
                     ShowTooltips=owner.ShowGroupHeaderTooltips);
                 this.send("SetGroupColumnSpans", payload);
             else
@@ -201,7 +206,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
                     "tooltips", {cell(1,0)}, "styles", {cell(1,0)}));
                 styleCss = owner.Style.groupHeaderOverlayCss(owner.Data.VisibleGroupHeaderRowIdx);
                 payload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
-                    owner.Graphics.Backend.Data, owner.Data.VisibleGroupHeaderRowIdx, styleCss, ...
+                    owner.Data.Display, owner.Data.VisibleGroupHeaderRowIdx, styleCss, ...
                     ShowTooltips=owner.ShowGroupHeaderTooltips);
                 this.send("SetGroupHeaderSpans", payload);
             end
@@ -327,7 +332,7 @@ classdef BridgeController < gwidgets.internal.table.TableController
 
         function tf = hasTooltips(this)
             owner = this.owner();
-            tf = ~isempty(owner.Tooltip.Tooltips) || owner.Metric.Enabled;
+            tf = owner.Tooltip.Text ~= "" || ~isempty(owner.Tooltip.Tooltips) || owner.Metric.Enabled;
         end
 
         function send(this, eventName, payload)

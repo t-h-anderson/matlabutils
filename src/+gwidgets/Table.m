@@ -43,6 +43,7 @@ classdef Table < matlab.mixin.SetGet
         MetricControl (1,1) gwidgets.internal.table.MetricController
         Drag (1,1) gwidgets.internal.table.DragController
         Backend (1,1) string
+        Render (1,1) string
     end
 
     properties (Dependent)
@@ -171,13 +172,15 @@ classdef Table < matlab.mixin.SetGet
                 namedArgs.?gwidgets.Table
                 namedArgs.ShowRowFilter (1,1) logical = false
                 namedArgs.GroupHeaderStyle = gwidgets.Table.defaultGroupHeaderStyle
-                namedArgs.Backend (1,1) string {mustBeMember(namedArgs.Backend, ["UITable", "JavaScript"])} = "UITable"
+                namedArgs.Backend (1,1) string = "<default>"
+                namedArgs.Render (1,1) string = "<default>"
             end
 
-            backend = namedArgs.Backend;
+            render = gwidgets.UITable.resolveRenderName(namedArgs.Backend, namedArgs.Render);
             namedArgs = rmfield(namedArgs, "Backend");
+            namedArgs = rmfield(namedArgs, "Render");
 
-            this.UITable_ = gwidgets.UITable(Backend=backend);
+            this.UITable_ = gwidgets.UITable(Render=render);
             this.UITable_.setConstructionRefreshSuppressed(true);
             cleanupObj = onCleanup(@()this.UITable_.setConstructionRefreshSuppressed(false));
 
@@ -281,6 +284,10 @@ classdef Table < matlab.mixin.SetGet
 
         function val = get.Backend(this)
             val = this.UITable_.Backend;
+        end
+
+        function val = get.Render(this)
+            val = this.UITable_.Render;
         end
 
         function val = get.Data(this)

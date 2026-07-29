@@ -650,6 +650,14 @@
 
     lastClientX = evt.clientX;
     lastClientY = evt.clientY;
+    if (hoverEnabled) {
+      var coords = groupSpanHoverCoords(overlay, evt);
+      hideGroupSpanTooltip();
+      positionTooltipNearCursor();
+      sendHover(coords.row, coords.col);
+      return true;
+    }
+
     var tooltip = overlay.getAttribute("data-gwidgets-tooltip");
     if (!tooltip) {
       hideGroupSpanTooltip();
@@ -658,6 +666,21 @@
 
     renderGroupSpanTooltip(tooltip, overlay);
     return true;
+  }
+
+  function groupSpanHoverCoords(overlay, evt) {
+    var root = findTableRoot();
+    var pos = gridCoordsFromTarget(evt.target, root);
+    var row = parseInt(overlay.getAttribute("data-gwidgets-row"), 10);
+    var col = parseInt(overlay.getAttribute("data-gwidgets-col"), 10);
+
+    if (isNaN(row) || row <= 0) row = pos.row >= 0 ? pos.row : 0;
+    if (isNaN(col) || col <= 0) col = pos.col >= 0 ? pos.col : 0;
+
+    return {
+      row: row >= 0 ? row : 0,
+      col: col >= 0 ? col : 0
+    };
   }
 
   function renderGroupHeaderSpans() {
@@ -684,6 +707,7 @@
       overlay.className = "gwidgets-group-header-span";
       overlay.textContent = span.label;
       overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || "");
+      overlay.setAttribute("data-gwidgets-row", String(span.row));
       overlay.style.cssText = [
         "position:absolute",
         "left:0",
@@ -797,6 +821,7 @@
       overlay.className = "gwidgets-group-column-span";
       overlay.textContent = span.label;
       overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || "");
+      overlay.setAttribute("data-gwidgets-col", String(span.column));
       overlay.style.cssText = [
         "position:fixed",
         "left:" + rect.left + "px",
@@ -1079,8 +1104,6 @@
 
     if (handleGroupSpanTooltipMove(evt)) {
       lastHoverCellEl = null;
-      lastHoverRow = -1;
-      lastHoverCol = -1;
       return;
     }
 

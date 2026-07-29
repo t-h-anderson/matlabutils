@@ -17,6 +17,7 @@ classdef UITable < gwidgets.internal.Reparentable
         Selection (1,1) gwidgets.internal.table.SelectionController
         Drag (1,1) gwidgets.internal.table.DragController
         Display (1,1) gwidgets.internal.table.DisplayController
+        Render (1,1) string
     end
 
     properties (SetAccess = private)
@@ -78,13 +79,15 @@ classdef UITable < gwidgets.internal.Reparentable
                 namedArgs.?gwidgets.UITable
                 namedArgs.Data (:,:) table = table.empty(0,0)
                 namedArgs.ShowRowFilter (1,1) logical = false
-                namedArgs.Backend (1,1) string {mustBeMember(namedArgs.Backend, ["UITable", "JavaScript"])} = "UITable"
+                namedArgs.Backend (1,1) string = "<default>"
+                namedArgs.Render (1,1) string = "<default>"
             end
 
             this@gwidgets.internal.Reparentable();
 
-            this.Backend = namedArgs.Backend;
+            this.Backend = gwidgets.UITable.resolveRenderName(namedArgs.Backend, namedArgs.Render);
             namedArgs = rmfield(namedArgs, "Backend");
+            namedArgs = rmfield(namedArgs, "Render");
 
             this.createControllers(this.Backend);
 
@@ -197,6 +200,10 @@ classdef UITable < gwidgets.internal.Reparentable
 
         function val = get.Display(this)
             val = this.DisplayApi_;
+        end
+
+        function val = get.Render(this)
+            val = this.Backend;
         end
 
         function val = get.Bridge(this)
@@ -516,7 +523,7 @@ classdef UITable < gwidgets.internal.Reparentable
             hasBackend = ~isempty(this.GraphicsApi_) && ~isempty(this.GraphicsApi_.Backend) && ...
                 isvalid(this.GraphicsApi_.Backend);
             if hasBackend
-                this.GraphicsApi_.Backend.refresh();
+                this.GraphicsApi_.refreshViews();
             end
 
             if ~isempty(this.BridgeApi_) && isvalid(this.BridgeApi_)
@@ -525,6 +532,46 @@ classdef UITable < gwidgets.internal.Reparentable
 
             if ~isempty(this.MenuApi_) && isvalid(this.MenuApi_)
                 this.MenuApi_.refresh();
+            end
+        end
+    end
+
+    methods (Static, Hidden)
+        function renderName = resolveRenderName(backendName, renderName)
+            arguments
+                backendName (1,1) string = "<default>"
+                renderName (1,1) string = "<default>"
+            end
+
+            hasBackend = backendName ~= "<default>";
+            hasRender = renderName ~= "<default>";
+            if hasBackend && hasRender
+                error("GraphicsWidgets:Table:RenderConflict", ...
+                    "Specify either Render or Backend, not both.");
+            end
+
+            if hasBackend
+                renderName = backendName;
+            elseif ~hasRender
+                renderName = "UITable";
+            end
+
+            renderName = gwidgets.UITable.normalizeRenderName(renderName);
+        end
+
+        function renderName = normalizeRenderName(renderName)
+            arguments
+                renderName (1,1) string
+            end
+
+            switch lower(strtrim(renderName))
+                case {"uitable", "matlab"}
+                    renderName = "UITable";
+                case {"javascript", "js"}
+                    renderName = "JavaScript";
+                otherwise
+                    error("GraphicsWidgets:Table:Render", ...
+                        "Unsupported table renderer: %s", renderName);
             end
         end
     end

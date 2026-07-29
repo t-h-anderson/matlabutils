@@ -80,7 +80,7 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 this.Tooltips(orderNum) = [];
             end
             didDisableHover = wasNotEmpty && isempty(this.Tooltips);
-            if didDisableHover && ~isempty(owner) && ~owner.Metric.Enabled
+            if didDisableHover && ~isempty(owner) && ~owner.Metric.Enabled && this.Text_ == ""
                 owner.Bridge.disableHover();
             end
             this.refreshDisplayState(owner);
@@ -286,12 +286,13 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 return
             end
 
-            owner.Graphics.Backend.Tooltip = this.Text_;
+            owner.Graphics.setViewProperties({"Tooltip", this.Text_});
+            this.refreshHoverState(owner);
         end
 
         function refreshDisplayState(this, owner)
             arguments
-                this (1,1) gwidgets.internal.table.TooltipController %#ok<INUSA>
+                this (1,1) gwidgets.internal.table.TooltipController
                 owner (1,:) gwidgets.UITable
             end
 
@@ -299,7 +300,21 @@ classdef TooltipController < gwidgets.internal.table.TableController
                 return
             end
 
-            owner.Graphics.Backend.refresh();
+            this.refreshHoverState(owner);
+            owner.Graphics.refreshViews();
+        end
+
+        function refreshHoverState(this, owner)
+            arguments
+                this (1,1) gwidgets.internal.table.TooltipController
+                owner (1,1) gwidgets.UITable
+            end
+
+            if this.Text_ ~= "" || ~isempty(this.Tooltips) || owner.Metric.Enabled
+                owner.Bridge.enableHover();
+            else
+                owner.Bridge.disableHover();
+            end
         end
 
         function owner = requireOwner(this)

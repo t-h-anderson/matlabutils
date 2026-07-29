@@ -208,7 +208,7 @@ classdef SortController < gwidgets.internal.table.TableController
 
             vars = string.empty(1,0);
             owner = this.owner();
-            displayData = owner.Graphics.Backend.Data;
+            displayData = owner.Data.Display;
             if displayRow < 1 || displayRow > height(displayData) || width(displayData) < 1
                 return
             end

@@ -48,8 +48,6 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 Parent=grid, ...
                 HTMLSource=htmlFile, ...
                 DataChangedFcn=@(src, ~)this.onData(src));
-            this.Component.Layout.Column = 1;
-            this.Component.Layout.Row = 3;
             this.configureThemeListener(owner);
         end
 
@@ -479,7 +477,10 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 end
             end
 
-            source = struct("SelectionType", char(selectionType));
+            source = struct( ...
+                "SelectionType", char(selectionType), ...
+                "ViewId", char(this.Name), ...
+                "ViewKind", char(this.Kind));
             eventData = struct("Indices", double(data.indices));
             owner.Callback.onSelection(source, eventData);
         end

@@ -569,7 +569,7 @@ classdef GroupController < gwidgets.internal.table.TableController
         function groupingVariable = groupingVariablesFromContext(this, displayColumn)
             owner = this.owner();
             columnIdx = this.groupingColumnFromContext(displayColumn);
-            groupingVariable = string(owner.Graphics.Backend.Data.Properties.VariableNames(columnIdx));
+            groupingVariable = string(owner.Data.Display.Properties.VariableNames(columnIdx));
             groupingVariable = owner.Column.aliasesToData(groupingVariable);
             groupingVariable = this.validateGroupingVariables(groupingVariable);
         end

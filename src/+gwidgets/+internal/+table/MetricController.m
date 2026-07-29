@@ -154,10 +154,10 @@ classdef MetricController < gwidgets.internal.table.TableController
 
             if this.Enabled_
                 owner.Bridge.enableHover();
-            elseif isempty(owner.Tooltip.Tooltips)
+            elseif isempty(owner.Tooltip.Tooltips) && owner.Tooltip.Text == ""
                 owner.Bridge.disableHover();
             end
-            owner.Graphics.Backend.refresh();
+            owner.Graphics.refreshViews();
         end
 
         function refreshMenu(this)

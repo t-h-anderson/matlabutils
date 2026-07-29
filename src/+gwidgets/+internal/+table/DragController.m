@@ -309,7 +309,7 @@ classdef DragController < gwidgets.internal.table.TableController
             else
                 owner.Bridge.disableDragging();
             end
-            owner.Graphics.Backend.refresh();
+            owner.Graphics.refreshViews();
         end
     end
 

@@ -12,6 +12,7 @@ classdef tBackend < matlab.unittest.TestCase
             t = gwidgets.Table();
 
             testCase.verifyEqual(t.Backend, "UITable")
+            testCase.verifyEqual(t.Render, "UITable")
             testCase.verifyInstanceOf(t.UITable.Graphics.Backend, ...
                 "gwidgets.internal.table.backend.UITableBackend")
             testCase.verifyInstanceOf(t.DisplayTable, "matlab.ui.control.Table")
@@ -25,10 +26,30 @@ classdef tBackend < matlab.unittest.TestCase
             t = gwidgets.Table(Parent=fig, Backend="JavaScript", Data=data);
 
             testCase.verifyEqual(t.Backend, "JavaScript")
+            testCase.verifyEqual(t.Render, "JavaScript")
             testCase.verifyInstanceOf(t.UITable.Graphics.Backend, ...
                 "gwidgets.internal.table.backend.JSTableBackend")
             testCase.verifyInstanceOf(t.DisplayTable, "matlab.ui.control.HTML")
             testCase.verifyEqual(t.DisplayData, data)
+        end
+
+        function tRenderAliasUsesJavaScriptRenderer(testCase)
+            fig = uifigure(Visible="off");
+            testCase.addTeardown(@()delete(fig));
+            data = table((1:3)', ["a"; "b"; "c"], VariableNames=["Value", "Label"]);
+
+            t = gwidgets.Table(Parent=fig, Render="JavaScript", Data=data);
+
+            testCase.verifyEqual(t.Render, "JavaScript")
+            testCase.verifyEqual(t.Backend, "JavaScript")
+            testCase.verifyInstanceOf(t.UITable.Graphics.Backend, ...
+                "gwidgets.internal.table.backend.JSTableBackend")
+        end
+
+        function tRenderAliasRejectsBackendConflict(testCase)
+            testCase.verifyError( ...
+                @()gwidgets.Table(Backend="UITable", Render="JavaScript"), ...
+                "GraphicsWidgets:Table:RenderConflict")
         end
 
         function tJavaScriptSelectionEventMapsRows(testCase)

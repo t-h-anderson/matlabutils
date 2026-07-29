@@ -17,9 +17,13 @@ T.Note = string(T.Note);
 %%
 %[text] ### Create the widget
 fig = uifigure('Name','Table Widget Demo');
-gl = uigridlayout(fig, [1,1]);
+gl = uigridlayout(fig, [1,2]);
 %[text] Construct the Table widget using name-value pairs supported by the class 
-tb = gwidgets.Table(Parent=gl, Data=T, Backend="JavaScript");
+tb = gwidgets.Table(Parent=gl, Data=T, Render="UITable");
+%%
+jsView = tb.UITable.Graphics.attachView("js", "JavaScript", gl);
+jsView.Component.Layout.Row = 1;
+jsView.Component.Layout.Column = 2;
 %%
 %[text] ### Enable features
 %[text] Enable the row filter control 

@@ -3,10 +3,25 @@ classdef DisplayController < gwidgets.internal.table.TableController
 
     properties (Dependent)
         Orientation
+        Data
+        ColumnName
+        ColumnEditable
+        ColumnSortable
+        ColumnWidth
+        GroupHeaderRows
+        GroupHeaderLevels
     end
 
     properties (Access = private)
         Orientation_ (1,1) string {mustBeMember(Orientation_, ["Normal", "Transposed"])} = "Normal"
+        RenderedData_ (:,:) table = table.empty(0,0)
+        ColumnName_ (1,:) cell = cell.empty(1,0)
+        ColumnEditable_ (1,:) logical = false(1,0)
+        ColumnSortable_ (1,:) logical = false(1,0)
+        SelectionType_ (1,1) string {mustBeMember(SelectionType_, ["cell", "row", "column"])} = "cell"
+        ColumnWidth_ (1,:) cell = cell.empty(1,0)
+        GroupHeaderRows_ (1,:) double = zeros(1,0)
+        GroupHeaderLevels_ (1,:) double = zeros(1,0)
         GroupHeaderColumnWidths_ (1,:) double = nan(1,0)
         GroupHeaderColumnKeys_ (1,:) string = string.empty(1,0)
         GroupHeaderColumnKeyWidths_ (1,:) double = nan(1,0)
@@ -47,6 +62,34 @@ classdef DisplayController < gwidgets.internal.table.TableController
             owner.Menu.refresh();
         end
 
+        function val = get.Data(this)
+            val = this.RenderedData_;
+        end
+
+        function val = get.ColumnName(this)
+            val = this.ColumnName_;
+        end
+
+        function val = get.ColumnEditable(this)
+            val = this.ColumnEditable_;
+        end
+
+        function val = get.ColumnSortable(this)
+            val = this.ColumnSortable_;
+        end
+
+        function val = get.ColumnWidth(this)
+            val = this.ColumnWidth_;
+        end
+
+        function val = get.GroupHeaderRows(this)
+            val = this.GroupHeaderRows_;
+        end
+
+        function val = get.GroupHeaderLevels(this)
+            val = this.GroupHeaderLevels_;
+        end
+
         function updateData(this)
             arguments
                 this (1,1) gwidgets.internal.table.DisplayController
@@ -74,25 +117,30 @@ classdef DisplayController < gwidgets.internal.table.TableController
 
             owner = this.owner();
             backend = owner.Graphics.Backend;
+            if isempty(backend) || ~backend.isReady()
+                return
+            end
 
             owner.Bridge.suppress();
             visWidths = this.visibleColumnWidths(owner);
-            if ~isequal(backend.ColumnWidth, visWidths)
-                if isempty(visWidths)
-                    visWidths = {"Auto"};
-                end
+            if isempty(visWidths)
+                visWidths = {"Auto"};
+            end
+
+            if ~isequal(this.ColumnWidth_, visWidths)
+                this.ColumnWidth_ = visWidths;
                 if isa(backend, "gwidgets.internal.table.backend.JSTableBackend")
-                    backend.ColumnWidth = visWidths;
+                    owner.Graphics.setViewProperties({"ColumnWidth", visWidths});
                     owner.forceRefresh();
                     owner.Bridge.restore();
                     return
                 end
 
-                backend.ColumnWidth = {"Auto"};
+                owner.Graphics.setViewProperties({"ColumnWidth", {"Auto"}});
                 owner.forceRefresh();
-                backend.ColumnWidth = visWidths;
+                owner.Graphics.setViewProperties({"ColumnWidth", visWidths});
             else
-                backend.refresh();
+                owner.Graphics.refreshViews();
             end
             owner.Bridge.restore();
         end
@@ -283,7 +331,6 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
-            backend = owner.Graphics.Backend;
             toUpdate = cell(1, 6*numel(vars));
             nUpdates = 0;
             for iVar = 1:numel(vars)
@@ -291,34 +338,38 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 newVal = this.propertyValue(owner, currentVar);
 
                 if currentVar == "VisibleData"
-                    currentVal = backend.DisplayData;
                     newVal = gwidgets.internal.table.DisplayController.visibleDataForTable( ...
                         newVal, this.updateState(owner));
                     columnName = this.columnNamesForDisplay(newVal);
                     newVal = this.orientVisibleData(newVal);
                     newVar = "Data";
+                    currentVal = this.RenderedData_;
                 else
-                    currentVal = backend.(currentVar);
+                    currentVal = this.currentRenderProperty(currentVar);
                     newVar = currentVar;
                 end
 
                 if ~isequal(currentVal, newVal)
+                    this.setRenderProperty(newVar, newVal);
                     nUpdates = nUpdates + 2;
                     toUpdate(nUpdates-1:nUpdates) = {newVar, newVal};
                 end
 
-                if currentVar == "VisibleData" && ~isequal(backend.ColumnName, columnName)
+                if currentVar == "VisibleData" && ~isequal(this.ColumnName_, columnName)
+                    this.ColumnName_ = columnName;
                     nUpdates = nUpdates + 2;
                     toUpdate(nUpdates-1:nUpdates) = {"ColumnName", columnName};
                 end
 
                 if currentVar == "VisibleData"
                     [groupHeaderRows, groupHeaderLevels] = this.groupHeadersForDisplay(owner);
-                    if ~isequal(backend.GroupHeaderRows, groupHeaderRows)
+                    if ~isequal(this.GroupHeaderRows_, groupHeaderRows)
+                        this.GroupHeaderRows_ = groupHeaderRows;
                         nUpdates = nUpdates + 2;
                         toUpdate(nUpdates-1:nUpdates) = {"GroupHeaderRows", groupHeaderRows};
                     end
-                    if ~isequal(backend.GroupHeaderLevels, groupHeaderLevels)
+                    if ~isequal(this.GroupHeaderLevels_, groupHeaderLevels)
+                        this.GroupHeaderLevels_ = groupHeaderLevels;
                         nUpdates = nUpdates + 2;
                         toUpdate(nUpdates-1:nUpdates) = {"GroupHeaderLevels", groupHeaderLevels};
                     end
@@ -326,12 +377,75 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             if nUpdates > 0
-                backend.setProperties(toUpdate(1:nUpdates));
+                owner.Graphics.setViewProperties(toUpdate(1:nUpdates));
             end
+        end
+
+        function state = renderState(this)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+            end
+
+            owner = this.owner();
+            state = struct( ...
+                "Data", this.RenderedData_, ...
+                "ColumnName", {this.ColumnName_}, ...
+                "ColumnEditable", this.ColumnEditable_, ...
+                "ColumnSortable", this.ColumnSortable_, ...
+                "SelectionType", owner.Selection.Type, ...
+                "Multiselect", owner.Selection.Multiselect, ...
+                "Selection", owner.Selection.DisplayValue, ...
+                "ColumnWidth", {this.ColumnWidth_}, ...
+                "GroupHeaderRows", this.GroupHeaderRows_, ...
+                "GroupHeaderLevels", this.GroupHeaderLevels_, ...
+                "StyleConfigurations", owner.Style.Configurations, ...
+                "Tooltip", owner.Tooltip.Text, ...
+                "Orientation", this.Orientation_);
         end
     end
 
     methods (Access = private)
+        function value = currentRenderProperty(this, propertyName)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                propertyName (1,1) string
+            end
+
+            switch propertyName
+                case "ColumnEditable"
+                    value = this.ColumnEditable_;
+                case "ColumnSortable"
+                    value = this.ColumnSortable_;
+                case "SelectionType"
+                    value = char(this.SelectionType_);
+                otherwise
+                    error("GraphicsWidgets:UITable:DisplayProperty", ...
+                        "Unsupported display property: %s", propertyName);
+            end
+        end
+
+        function setRenderProperty(this, propertyName, value)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                propertyName (1,1) string
+                value
+            end
+
+            switch propertyName
+                case "Data"
+                    this.RenderedData_ = value;
+                case "ColumnEditable"
+                    this.ColumnEditable_ = value;
+                case "ColumnSortable"
+                    this.ColumnSortable_ = value;
+                case "SelectionType"
+                    this.SelectionType_ = string(value);
+                otherwise
+                    error("GraphicsWidgets:UITable:DisplayProperty", ...
+                        "Unsupported display property: %s", propertyName);
+            end
+        end
+
         function value = propertyValue(this, owner, propertyName)
             arguments
                 this (1,1) gwidgets.internal.table.DisplayController
@@ -488,7 +602,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 owner (1,1) gwidgets.UITable
             end
 
-            displayData = owner.Graphics.Backend.Data;
+            displayData = this.Data;
             if width(displayData) == 0
                 widths = {};
                 return
@@ -534,7 +648,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 pixelWidths (1,:) double
             end
 
-            displayData = owner.Graphics.Backend.Data;
+            displayData = this.Data;
             allDataNames = owner.Column.DataNames;
             nData = numel(allDataNames);
             visibleMask = false(1, nData);
@@ -609,7 +723,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 pixelWidths (1,:) double
             end
 
-            displayData = owner.Graphics.Backend.Data;
+            displayData = this.Data;
             allDataNames = owner.Column.DataNames;
             resizedMask = false(1, numel(allDataNames));
             syntheticPixelWidth = NaN;
@@ -659,7 +773,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 pixelWidths (1,:) double
             end
 
-            changed = this.updateTransposedVariableHeaderWidth(pixelWidths);
+            changed = false;
             changed = this.updateTransposedDataRowWidths(owner, pixelWidths) || changed;
             changed = this.updateTransposedHeaderWidths(owner, pixelWidths) || changed;
         end
@@ -842,7 +956,12 @@ classdef DisplayController < gwidgets.internal.table.TableController
 
             width = this.TransposedVariableHeaderWidth_;
             if ~isfinite(width) || width <= 0
-                width = gwidgets.internal.table.DisplayController.defaultTransposedVariableHeaderWidth(owner);
+                backend = owner.Graphics.Backend;
+                if isa(backend, "gwidgets.internal.table.backend.JSTableBackend")
+                    width = gwidgets.internal.table.DisplayController.defaultTransposedVariableHeaderWidth(owner);
+                else
+                    width = "1x";
+                end
             end
         end
 

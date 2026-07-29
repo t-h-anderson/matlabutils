@@ -11,6 +11,8 @@ classdef SelectionController < gwidgets.internal.table.TableController
     properties (Access = private)
         Mode (1,1) gwidgets.table.SelectionMode = "Data"
         Value_ (:,:) double
+        Type_ (1,1) string {mustBeMember(Type_, ["cell", "row", "column"])} = "cell"
+        Multiselect_ (1,1) matlab.lang.OnOffSwitchState = "on"
         IsSettingProgrammatically (1,1) logical = false
     end
 
@@ -54,11 +56,17 @@ classdef SelectionController < gwidgets.internal.table.TableController
         end
 
         function val = get.Type(this)
-            val = this.owner().Graphics.Backend.SelectionType;
+            val = char(this.Type_);
         end
 
         function set.Type(this, val)
-            this.owner().Graphics.Backend.SelectionType = val;
+            arguments
+                this (1,1) gwidgets.internal.table.SelectionController
+                val (1,1) string {mustBeMember(val, ["cell", "row", "column"])}
+            end
+
+            this.Type_ = val;
+            this.owner().Graphics.setViewProperties({"SelectionType", val});
             this.clear();
 
             if this.owner().doControllerUpdate("SelectionType")
@@ -67,11 +75,12 @@ classdef SelectionController < gwidgets.internal.table.TableController
         end
 
         function val = get.Multiselect(this)
-            val = this.owner().Graphics.Backend.Multiselect;
+            val = this.Multiselect_;
         end
 
         function set.Multiselect(this, val)
-            this.owner().Graphics.Backend.Multiselect = val;
+            this.Multiselect_ = val;
+            this.owner().Graphics.setViewProperties({"Multiselect", val});
             this.clear();
         end
 
@@ -471,7 +480,8 @@ classdef SelectionController < gwidgets.internal.table.TableController
 
         function refreshVisibleSelection(this)
             owner = this.owner();
-            if isempty(owner.Graphics.Backend) || ~owner.Graphics.Backend.isReady() ...
+            backend = owner.Graphics.Backend;
+            if isempty(backend) || ~backend.isReady() ...
                     || isempty(owner.Data.FoldedDataToVisibleMap)
                 return
             end
@@ -484,9 +494,9 @@ classdef SelectionController < gwidgets.internal.table.TableController
             this.IsSettingProgrammatically = true;
             cleanupObj = onCleanup(@()this.clearProgrammaticFlag());
             try
-                owner.Graphics.Backend.Selection = selection;
+                owner.Graphics.setViewProperties({"Selection", selection});
             catch
-                owner.Graphics.Backend.Selection = [];
+                owner.Graphics.setViewProperties({"Selection", []});
             end
             delete(cleanupObj);
             if owner.Menu.HasChangeGroupingVariable
@@ -527,7 +537,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
                 return
             end
 
-            values = this.owner().Graphics.Backend.Data{:, colIdx};
+            values = this.owner().Data.Display{:, colIdx};
             if iscategorical(values)
                 this.owner().Filter.CategoricalVariables = categories(values);
             else
@@ -569,7 +579,7 @@ classdef SelectionController < gwidgets.internal.table.TableController
         function sz = displaySelectionSize(this)
             owner = this.owner();
             if owner.Display.Orientation == "Transposed"
-                sz = size(owner.Graphics.Backend.Data);
+                sz = size(owner.Data.Display);
             else
                 sz = size(owner.Data.Visible);
             end
