@@ -29,13 +29,21 @@ classdef tConstructionSetGet < test.WithExampleTables
             testCase.verifyFalse(t.HasChangeGroupingVariable)
             testCase.verifyFalse(t.HasColumnSorting)
             testCase.verifyFalse(t.HasToggleShowEmptyGroups)
+            testCase.verifyFalse(t.HasChangeDisplayOrientation)
+            testCase.verifyFalse(t.HasToggleGroupHeaderTooltips)
+            testCase.verifyFalse(t.HasToggleTableMetrics)
             testCase.verifyFalse(t.ShowRowFilter)
+            testCase.verifyTrue(t.ShowGroupHeaderTooltips)
+            testCase.verifyFalse(t.ShowMetrics)
             testCase.verifyEqual(t.SelectionType, 'cell')
             testCase.verifyEmpty(t.CellSelectionCallback)
             testCase.verifyEmpty(t.CellClickedCallback)
             testCase.verifyEmpty(t.CellEditCallback)
             testCase.verifyEmpty(t.CellDoubleClickCallback)
             testCase.verifyEmpty(t.DisplayDataChangedCallback)
+
+            t.ShowGroupHeaderTooltips = false;
+            testCase.verifyFalse(t.ShowGroupHeaderTooltips)
         end
 
         function tAssignData(testCase)

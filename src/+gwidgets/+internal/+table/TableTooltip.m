@@ -122,7 +122,7 @@ classdef TableTooltip
                         sty = result;
                     end
                 catch
-                    % swallow — caller uses the default style for this entry
+                    % Style functions are optional presentation; failed styles fall back to the base tooltip style.
                 end
             elseif ~isempty(this.Style)
                 sty = this.Style;

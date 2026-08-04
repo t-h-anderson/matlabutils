@@ -83,6 +83,7 @@ classdef DragLinker < handle
 
     properties (Hidden)
         IsDebugMode (1,1) logical = false          % Enable debug output
+        DebugCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
     end
 
     events
@@ -102,6 +103,7 @@ classdef DragLinker < handle
                 nvp.DragKey (1,1) string {mustBeMember(nvp.DragKey, ...
                     ["control", "alt", "shift", ""])} = "control"
                 nvp.UseItemGhost (1,1) logical = false
+                nvp.DebugCallback function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
             end
 
             obj.Source = source;
@@ -109,6 +111,7 @@ classdef DragLinker < handle
             obj.Callback = callback;
             obj.DragKey = nvp.DragKey;
             obj.UseItemGhost = nvp.UseItemGhost;
+            obj.DebugCallback = nvp.DebugCallback;
 
             obj.SourceFigure = ancestor(source, "figure");
             obj.TargetFigure = ancestor(target, "figure");
@@ -147,7 +150,7 @@ classdef DragLinker < handle
     end  % public methods
 
     % ================================================================== %
-    methods (Access = private)
+    methods (Access = ?matlab.unittest.TestCase)
 
         % ---- Listener Setup ----------------------------------------- %
 
@@ -212,9 +215,7 @@ classdef DragLinker < handle
             obj.IsClicked = true;
             obj.attachTargetListeners();
 
-            if obj.IsDebugMode
-                fprintf("[DEBUG] Clicked on %s\n", obj.componentText(obj.Source));
-            end
+            obj.debugLog("Clicked on %s", obj.componentText(obj.Source));
         end
 
         function onMouseMotion(obj, ~, ~)
@@ -280,10 +281,7 @@ classdef DragLinker < handle
 
             notify(obj, "DragStarted");
 
-            if obj.IsDebugMode
-                fprintf("[DEBUG] Started dragging %s\n", ...
-                        obj.componentText(obj.Source));
-            end
+            obj.debugLog("Started dragging %s", obj.componentText(obj.Source));
         end
 
         function finalizeDrag(obj, ~)
@@ -305,9 +303,7 @@ classdef DragLinker < handle
                     obj.invokeCallback(releasePoint);
                 else
                     notify(obj, "DragFailed");
-                    if obj.IsDebugMode
-                        fprintf("[DEBUG] Drag failed - not on target\n");
-                    end
+                    obj.debugLog("Drag failed - not on target");
                 end
             end
 
@@ -383,8 +379,12 @@ classdef DragLinker < handle
             if obj.UseItemGhost && isa(h, "matlab.ui.control.ListBox")
                 if ~isempty(h.Value)
                     vals = h.Value;
-                    if numel(vals) == 1
-                        txt = string(vals{1});
+                    if isscalar(vals)
+                        if iscell(vals)
+                            txt = string(vals{1});
+                        else
+                            txt = string(vals(1));
+                        end
                     else
                         txt = sprintf("%d items", numel(vals));
                     end
@@ -394,7 +394,7 @@ classdef DragLinker < handle
             elseif obj.UseItemGhost && isa(h, "matlab.ui.container.Tree")
                 if ~isempty(h.SelectedNodes)
                     nodes = {h.SelectedNodes.Text};
-                    if numel(nodes) == 1
+                    if isscalar(nodes)
                         txt = string(nodes{1});
                     else
                         txt = sprintf("%d nodes", numel(nodes));
@@ -421,15 +421,21 @@ classdef DragLinker < handle
         end
 
         function invokeCallback(obj, releasePoint)
-            if obj.IsDebugMode
-                fprintf("[DEBUG] Dropped %s on %s at [%.1f, %.1f]\n", ...
-                        obj.componentText(obj.Source), ...
-                        obj.componentText(obj.Target), ...
-                        releasePoint(1), releasePoint(2));
-            end
+            obj.debugLog("Dropped %s on %s at [%.1f, %.1f]", ...
+                obj.componentText(obj.Source), ...
+                obj.componentText(obj.Target), ...
+                releasePoint(1), releasePoint(2));
 
             obj.Callback(obj.Source, obj.Target, releasePoint);
             notify(obj, "DragSuccessful");
+        end
+
+        function debugLog(obj, formatSpec, varargin)
+            if ~obj.IsDebugMode || isempty(obj.DebugCallback)
+                return
+            end
+
+            obj.DebugCallback(string(sprintf(formatSpec, varargin{:})));
         end
 
     end  % private methods
@@ -486,8 +492,18 @@ classdef DragLinker < handle
             g = groot();
             cursorPos = g.PointerLocation;
             allFigs = findall(groot, "Type", "figure", "Visible", "on");
+            if isempty(allFigs) || isa(allFigs, "matlab.graphics.GraphicsPlaceholder")
+                figs = matlab.ui.Figure.empty(0,1);
+                return
+            end
 
             isNormal = strcmp({allFigs.WindowStyle}, "normal");
+            allFigs = allFigs(isNormal);
+            if isempty(allFigs)
+                figs = matlab.ui.Figure.empty(0,1);
+                return
+            end
+
             positions = vertcat(allFigs.Position);
 
             inX = cursorPos(1) >= positions(:,1) & ...
@@ -495,7 +511,7 @@ classdef DragLinker < handle
             inY = cursorPos(2) >= positions(:,2) & ...
                   cursorPos(2) <= positions(:,2) + positions(:,4);
 
-            figs = allFigs(isNormal(:) & inX & inY);
+            figs = allFigs(inX & inY);
         end
 
         function pos = cursorPositionForFigure(fig)

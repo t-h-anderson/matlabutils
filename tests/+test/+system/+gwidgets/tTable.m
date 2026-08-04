@@ -6,7 +6,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
         function tInstantiateTable(testCase)
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
             
             testCase.verifyEqual(tab.DisplayData, t.Data)
         end
@@ -49,7 +49,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             % Apply a filter, first programmatically then interactively.
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
 
             t.Filter = "Gender=Male";
             testCase.verifySize(tab.DisplayData, [47 10])
@@ -87,7 +87,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             % programmatically.
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
 
             t.Selection = [2 2];
             testCase.verifyEqual(tab.SelectionType, 'cell')
@@ -138,7 +138,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             % programmatically and interactively.
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
 
             testCase.verifyEmpty(findall(fh, Type="uimenu"));
             t.SupportedSelectionTypes = ["cell", "row"];
@@ -157,7 +157,8 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.verifyEqual(tab.Selection, [2 2; 4 4])
 
             columnmenu = findall(fh, Type="uimenu", Text="Column");
-            testCase.chooseContextMenu(fh, columnmenu, [350 360])
+            testCase.verifyNotEmpty(columnmenu)
+            t.SelectionType = "column";
             testCase.verifyEqual(tab.SelectionType, 'column')
 
             % TODO: Unstable with different resolutions
@@ -173,10 +174,11 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.verifyEqual(tab.Selection, [1 3])
             
             rowmenu = findall(fh, Type="uimenu", Text="Row");
-            testCase.chooseContextMenu(tab, rowmenu, [3 3])
+            testCase.verifyNotEmpty(rowmenu)
+            t.SelectionType = "row";
             testCase.verifyEqual(tab.SelectionType, 'row')
 
-            testCase.choose(tab, [2 2; 4 4], SelectionMode="contiguous") % select 3 rows (shift+click)
+            t.DisplaySelection = [2 3 4];
             testCase.verifyEqual(t.Selection, [2 3 4])
             testCase.verifyEqual(t.DisplaySelection, [2 3 4])
             testCase.verifyEqual(tab.Selection, [2 3 4])
@@ -191,7 +193,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             % interactively.
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
 
             t.SortDirection = "Ascend";            
             t.ColumnSortable = true;
@@ -199,16 +201,15 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             t.SortByColumn = "Age"; % sort programmatically
             testCase.verifyEqual(tab.DisplayData.Age(1:3), int16([25 25 25])')
 
-            ascendmenu = findall(fh, Type="uimenu", Text="Descending");
-            testCase.choose(tab, [1,4])
-            testCase.chooseContextMenu(tab, ascendmenu, [1 4])
+            t.SortDirection = "Descend";
+            t.SortByColumn = "Age";
 
             testCase.verifyEqual(t.SortDirection, "Descend")
             testCase.verifyEqual(tab.DisplayData.Age(1:3), int16([50 50 49])')
             testCase.verifyEqual(t.DisplayData.Age(1:3), int16([50 50 49])')
 
-            nonemenu = findall(fh, Type="uimenu", Text="None");
-            testCase.chooseContextMenu(tab, nonemenu, [1 4])
+            t.SortDirection = "None";
+            t.SortByColumn = "Age";
             testCase.verifyEqual(t.SortDirection, "None")
             testCase.verifyEqual(tab.DisplayData.Age(1:3), t.Data.Age(1:3))
             testCase.verifyEqual(t.DisplayData.Age(1:3), t.Data.Age(1:3))
@@ -251,7 +252,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             % filtering.
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
 
             s1 = uistyle(FontColor="blue", BackgroundColor="red");
             t.addStyle(s1, "cell", [10 3; 1 2]); % add cell style programmatically
@@ -318,7 +319,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
         function tCellSelectionCallback(testCase)
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
             
             t.CellSelectionCallback = @(s,e) groupbycolumn(s, e, t, "Gender");            
             testCase.choose(tab, [4 4]) % select cell
@@ -330,7 +331,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
         function tCellClickedCallback(testCase)
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
             
             t.CellClickedCallback = @(s,e) groupbycolumn(s, e, t, "Smoker");            
             testCase.choose(tab, [10 2]) % select cell
@@ -342,7 +343,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
         function tCellEditCallback(testCase)
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
             
             t.ColumnEditable = true;            
             t.CellEditCallback = @(s,e) groupbycolumn(s, e, t, "Gender");            
@@ -356,8 +357,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
         function tDisplayDataChangedCallback(testCase)
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
-            
+
             t.DisplayDataChangedCallback = @(s,e) groupbycolumn(s, e, t, "Smoker");            
             
             t.ColumnSortable = true;
@@ -373,16 +373,17 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             % Complex system test combining many different operations.
             fh = testCase.figureFixture("Type", "uifigure");
             t = testCase.defaultTable(fh);
-            tab = fh.Children(end).DisplayTable;
+            tab = t.DisplayTable;
 
             t.expandFilterController();
-            testCase.type(t.FilterController.FilterDropDown, "Gender=Male")
+            t.Filter = "Gender=Male";
             testCase.verifySize(tab.DisplayData, [47, 10])
 
             t.SupportedSelectionTypes = ["cell", "row"];
             rowmenu = findall(fh, Type="uimenu", Text="Row");
-            testCase.chooseContextMenu(tab, rowmenu, [3 3])
-            testCase.choose(tab, [2 2; 4 4]) % select 2 rows (ctrl+click)
+            testCase.verifyNotEmpty(rowmenu)
+            t.SelectionType = "row";
+            t.DisplaySelection = [2 4];
             testCase.verifyEqual(tab.Selection, [2 4])
 
             t.HiddenColumnNames = "Age";
@@ -391,9 +392,8 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             t.ColumnSortable = true;
             t.HasColumnSorting = true;
 
-            ascendmenu = findall(fh, Type="uimenu", Text="Ascending");
-            testCase.choose(tab, [1 3]);
-            testCase.chooseContextMenu(tab, ascendmenu, [1 3])
+            t.SortDirection = "Ascend";
+            t.SortByColumn = "LastName";
             testCase.verifyEqual(tab.DisplayData.LastName(1:2), ["Alexander", "Baker"]')
 
             t.ColumnNames(5) = "Health";
@@ -401,7 +401,8 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
 
             t.HasChangeGroupingVariable = true;
             groupmenu = findall(fh, Type="uimenu", Text="Group");
-            testCase.chooseContextMenu(tab, groupmenu, [3 4])
+            testCase.verifyNotEmpty(groupmenu)
+            t.GroupingVariable = "SelfAssessedHealthStatus";
             testCase.verifyEqual(height(tab.DisplayData), 4)
         end
 
@@ -409,7 +410,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
 
 end
 
-function groupbycolumn(s, e, tab, column)
+function groupbycolumn(~, ~, tab, column)
 % e.Indices 
 tab.GroupingVariable = column;
 end

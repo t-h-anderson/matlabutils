@@ -23,6 +23,53 @@ classdef tStyling < test.WithExampleTables
 
         end
 
+        function tNestedGroupHeadersUseLevelStyles(testCase)
+            data = table( ...
+                ["A"; "A"], ...
+                ["x"; "x"], ...
+                ["p"; "q"], ...
+                [1; 2], ...
+                'VariableNames', {'G1', 'G2', 'G3', 'Value'});
+            t = gwidgets.Table(Data=data, ...
+                GroupingVariable=["G1", "G2", "G3"], ...
+                GroupingMode="Nested");
+
+            t.OpenGroups = ["A", "A|x"];
+
+            configs = t.StyleConfigurations;
+            testCase.verifyEqual(configs.TargetIndex{1}, 1)
+            testCase.verifyEqual(configs.TargetIndex{2}, 2)
+            testCase.verifyEqual(configs.TargetIndex{3}, [3 4])
+            testCase.verifyNotEqual(configs.Style(1).BackgroundColor, configs.Style(2).BackgroundColor)
+            testCase.verifyNotEqual(configs.Style(2).BackgroundColor, configs.Style(3).BackgroundColor)
+        end
+
+        function tGroupHeaderOverlayStylesFollowOpenedHeaderRows(testCase)
+            data = table( ...
+                [1; 1; 1; 2; 3; 4; 5], ...
+                ["a"; "a"; "a"; "b"; "c"; "d"; "e"], ...
+                'VariableNames', {'Value', 'Group'});
+            style = matlab.ui.style.Style(BackgroundColor=[0 0 0], FontColor=[1 1 1]);
+            t = gwidgets.Table( ...
+                Data=data, ...
+                GroupingVariable="Group", ...
+                GroupHeaderStyle=gwidgets.Table.defaultGroupHeaderStyle(style));
+
+            testCase.verifyEqual(t.UITable.Data.VisibleGroupHeaderRowIdx, 1:5)
+
+            t.OpenGroups = "a";
+
+            headerRows = t.UITable.Data.VisibleGroupHeaderRowIdx;
+            css = t.UITable.Style.groupHeaderOverlayCss(headerRows);
+            payload = gwidgets.internal.table.BridgeController.groupHeaderSpanPayload( ...
+                t.DisplayTable.Data, headerRows, css);
+
+            testCase.verifyEqual(headerRows, [1 5 6 7 8])
+            testCase.verifyEqual(payload.rows, headerRows)
+            testCase.verifyTrue(all(contains(string(payload.styles), "color:rgb(255,255,255);")))
+            testCase.verifyTrue(all(contains(string(payload.styles), "background-color:rgb(0,0,0);")))
+        end
+
         function tAddStyleToCells(testCase)
             t = gwidgets.Table(Data=testCase.multivariableData());
             s = uistyle(FontColor="blue");

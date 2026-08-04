@@ -1,0 +1,76 @@
+function plan = buildfile
+%BUILDFILE Build, analyze, test, and package MATLAB Utils.
+
+plan = buildplan(localfunctions);
+plan.DefaultTasks = "test";
+
+end
+
+function checkTask(~)
+%CHECKTASK Run Code Analyzer on source files.
+
+files = dir(fullfile("src", "**", "*.m"));
+hasIssues = false;
+
+for k = 1:numel(files)
+    filePath = fullfile(files(k).folder, files(k).name);
+    issues = checkcode(filePath, "-struct");
+    if isempty(issues)
+        continue
+    end
+
+    hasIssues = true;
+    fprintf("%s\n", filePath);
+    for i = 1:numel(issues)
+        fprintf("  L%d: %s\n", issues(i).line, issues(i).message);
+    end
+end
+
+if hasIssues
+    warning("MLUT:build:codeIssues", "Code Analyzer reported issues.");
+end
+
+end
+
+function testTask(~)
+%TESTTASK Run tests with project source on the path.
+
+originalPath = path();
+cleanupObj = onCleanup(@() path(originalPath));
+
+addpath(genpath("src"));
+addpath("tests");
+
+testSuites = ["tests/+test/+unit", "tests/+test/+integration", "tests/+test/+system"];
+suiteResults = cell(1, numel(testSuites));
+for iSuite = 1:numel(testSuites)
+    suiteResults{iSuite} = runtests(testSuites(iSuite), IncludeSubfolders=true);
+end
+results = [suiteResults{:}];
+if any([results.Failed]) || any([results.Incomplete])
+    error("MLUT:build:testFailure", "Test suite failed.");
+end
+
+end
+
+function performanceTask(~)
+%PERFORMANCETASK Run performance benchmarks.
+
+originalPath = path();
+cleanupObj = onCleanup(@() path(originalPath));
+
+addpath(genpath("src"));
+addpath("tests");
+
+suite = testsuite("tests/+test/+performance", IncludeSubfolders=true);
+results = runperf(suite);
+disp(results)
+
+end
+
+function packageTask(~)
+%PACKAGETASK Package the MATLAB toolbox project.
+
+matlab.addons.toolbox.packageToolbox("MLUT.prj");
+
+end
