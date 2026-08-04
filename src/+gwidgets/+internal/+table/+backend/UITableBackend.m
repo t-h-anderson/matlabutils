@@ -21,6 +21,8 @@ classdef UITableBackend < gwidgets.internal.table.backend.TableBackend
 
             this.Grid = grid;
             this.Component = uitable(grid);
+            this.Component.Layout.Row = 3;
+            this.Component.Layout.Column = 1;
             this.Component.UserData = struct("ViewId", char(this.Name), "ViewKind", char(this.Kind));
             this.Component.ClickedFcn = @(s, e)owner.Callback.onCellClicked(s, e);
             this.Component.DoubleClickedFcn = @(s, e)owner.Callback.onCellDoubleClicked(s, e);

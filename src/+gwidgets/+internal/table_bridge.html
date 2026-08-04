@@ -365,6 +365,7 @@
     for (var i = 0; i < groupColumnSpanState.length; i++) {
       var state = groupColumnSpanState[i];
       if (state.overlay && state.overlay.isConnected) state.overlay.remove();
+      if (state.root && state.root.isConnected) state.root.style.position = state.rootPosition;
       restoreHiddenStyles(state.hiddenText);
       restoreHiddenStyles(state.hiddenDividers);
     }
@@ -803,7 +804,10 @@
 
     var root = findTableRoot();
     var pd = parentDocument();
-    if (!root || !pd) return;
+    if (!root || !pd || root.nodeType !== 1) return;
+    var rootRect = root.getBoundingClientRect();
+    var rootPosition = root.style.position;
+    if (window.getComputedStyle(root).position === "static") root.style.position = "relative";
 
     var measureColumns = [];
     var measureWidths = [];
@@ -823,12 +827,12 @@
       overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || "");
       overlay.setAttribute("data-gwidgets-col", String(span.column));
       overlay.style.cssText = [
-        "position:fixed",
-        "left:" + rect.left + "px",
-        "top:" + rect.top + "px",
+        "position:absolute",
+        "left:" + Math.max(0, rect.left - rootRect.left) + "px",
+        "top:" + Math.max(0, rect.top - rootRect.top) + "px",
         "width:" + rect.width + "px",
         "height:" + rect.height + "px",
-        "z-index:3",
+        "z-index:5",
         "pointer-events:none",
         "display:block",
         "box-sizing:border-box",
@@ -864,9 +868,11 @@
       var hiddenText = hideCellText(cells);
       var hiddenDividers = hideCellHorizontalDividers(cells);
 
-      pd.body.appendChild(overlay);
+      root.appendChild(overlay);
       groupColumnSpanState.push({
         overlay: overlay,
+        root: root,
+        rootPosition: rootPosition,
         hiddenText: hiddenText,
         hiddenDividers: hiddenDividers
       });
