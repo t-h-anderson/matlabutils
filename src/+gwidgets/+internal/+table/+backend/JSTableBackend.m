@@ -48,6 +48,8 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 Parent=grid, ...
                 HTMLSource=htmlFile, ...
                 DataChangedFcn=@(src, ~)this.onData(src));
+            this.Component.Layout.Row = 3;
+            this.Component.Layout.Column = 1;
             this.configureThemeListener(owner);
         end
 

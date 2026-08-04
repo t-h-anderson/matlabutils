@@ -52,6 +52,21 @@ classdef tBackend < matlab.unittest.TestCase
                 "GraphicsWidgets:Table:RenderConflict")
         end
 
+        function tPrimaryBackendOccupiesDisplayRowNotBridgeRow(testCase)
+            fig = uifigure(Visible="off");
+            testCase.addTeardown(@()delete(fig));
+
+            t = gwidgets.Table(Parent=fig, Data=table((1:3)', VariableNames="Value"));
+            backend = t.UITable.Graphics.Backend;
+            bridgeGrid = t.UITable.Graphics.Grid;
+            drawnow();
+
+            testCase.verifyEqual(backend.Component.Layout.Row, 3)
+            testCase.verifyEqual(backend.Component.Layout.Column, 1)
+            testCase.verifyNumElements(bridgeGrid.RowHeight, 4)
+            testCase.verifyEqual(bridgeGrid.RowHeight{4}, 2)
+        end
+
         function tJavaScriptSelectionEventMapsRows(testCase)
             fig = uifigure(Visible="off");
             testCase.addTeardown(@()delete(fig));
