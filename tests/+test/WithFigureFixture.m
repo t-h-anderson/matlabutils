@@ -1,5 +1,11 @@
 classdef WithFigureFixture < matlab.unittest.TestCase
     
+    methods (TestMethodSetup)
+        function applyGraphicsLeakFixture(this)
+            this.applyFixture(fixtures.GraphicsLeakFixture());
+        end
+    end
+
     methods (Access = protected)
         
         function fh = figureFixture(this, nvp)

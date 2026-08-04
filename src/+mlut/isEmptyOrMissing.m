@@ -13,6 +13,11 @@ if val
     return
 end
 
+if isstring(v) && isscalar(v) && v == ""
+    val = true;
+    return
+end
+
 hasIndicator = isfield(nvp, "Indicator");
 if nvp.VectorMissing
     if hasIndicator

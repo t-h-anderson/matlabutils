@@ -474,7 +474,7 @@ classdef tStyleInteraction < test.WithExampleTables
             % Edit cell at data position [2,1]
             newValue = originalValue + 100;
             e = testCase.mockEditEvent([2,1], newValue);
-            t.onCellEdit([], e);
+            t.Callback.onCellEdit([], e);
 
             % Verify data was updated
             testCase.verifyEqual(t.Data{2,1}, newValue)
@@ -495,7 +495,7 @@ classdef tStyleInteraction < test.WithExampleTables
             % This should correspond to data row 1 after filtering
             visibleRowValue = t.DisplayData{1,1};
             e = testCase.mockEditEvent([1,1], visibleRowValue + 50);
-            t.onCellEdit([1,1], e);
+            t.Callback.onCellEdit([1,1], e);
 
             % Verify the underlying data was updated at correct position
             testCase.verifyEqual(t.Data{1,1}, visibleRowValue + 50)
@@ -527,7 +527,7 @@ classdef tStyleInteraction < test.WithExampleTables
                 % Edit through display coordinates
                 currentValue = t.Data{2,1};
                 e = testCase.mockEditEvent(displayPosition, currentValue+25);
-                t.onCellEdit([], e);
+                t.Callback.onCellEdit([], e);
 
                 % Verify update
                 testCase.verifyEqual(t.Data{2,1}, currentValue + 25)
@@ -593,7 +593,7 @@ classdef tStyleInteraction < test.WithExampleTables
 
             % Simulate edit callback
             e = testCase.mockEditEvent(displayPos, newValue);
-            t.onCellEdit([], e);
+            t.Callback.onCellEdit([], e);
 
             % Verify data updated
             testCase.verifyEqual(t.Data{3,1}, newValue)
@@ -618,7 +618,7 @@ classdef tStyleInteraction < test.WithExampleTables
             if ~isempty(displayPosGrouped)
                 % Edit categorical value
                 e = testCase.mockEditEvent(displayPosGrouped, newCatValue);
-                t.onCellEdit([], e);
+                t.Callback.onCellEdit([], e);
 
                 % Verify update
                 testCase.verifyEqual(t.Data{2,2}, newCatValue)
@@ -653,7 +653,7 @@ classdef tStyleInteraction < test.WithExampleTables
 
             % Edit without filter
             e = testCase.mockEditEvent([1,1], 999);
-            t.onCellEdit([], e);
+            t.Callback.onCellEdit([], e);
 
             testCase.verifyEqual(editCount, 1)
             testCase.verifyEqual(lastEditDisplay, [1 1])
@@ -672,7 +672,7 @@ classdef tStyleInteraction < test.WithExampleTables
             dataPosition = t.Selection;
 
             e = testCase.mockEditEvent(dataPosition, 777);
-            t.onCellEdit([], e);
+            t.Callback.onCellEdit([], e);
 
             testCase.verifyEqual(editCount, 2)
             testCase.verifyEqual(lastEditDisplay, t.DisplaySelection, ...
@@ -685,7 +685,7 @@ classdef tStyleInteraction < test.WithExampleTables
             % Change value back to 1, so it should be highlighted again
             t.Filter = "";
             e = testCase.mockEditEvent(dataPosition, 1);
-            t.onCellEdit([], e);
+            t.Callback.onCellEdit([], e);
 
             testCase.verifyEqual(t.StyleConfigurations.TargetIndex{1} , [1,1])
 

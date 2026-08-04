@@ -15,15 +15,23 @@
   //   Diag        true|false              — enable/disable diagnostic messages to MATLAB
   //   HoverEnable                         — start reporting CellHover events
   //   HoverDisable                        — stop reporting CellHover events
+  //   DragEnable  {moveKey,copyKey}       — start reporting table row drag/drop events
+  //   DragDisable                         — stop reporting table row drag/drop events
   //   SetTooltip  {blocks:[{containerCss, lines:[{text,css}...]}, ...]}
   //                           — render or hide the popup; empty list hides.
   //                             Each block is a styled container <div>;
   //                             each line inside has its own per-line CSS.
+  //   SetGroupHeaderSpans {rows:[...], labels:[...], tooltips:[...], styles:[...]}
+  //                           — render group header labels over the full table row.
+  //   SetGroupColumnSpans {columns:[...], labels:[...], tooltips:[...], styles:[...]}
+  //                           — render group header labels rotated over full table columns.
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
   //   ColumnWidthChanged      — {widths:[...], moving:bool}
   //   CellHover               — {row:int, col:int} (row=0 means header; 0/0 means none)
+  //   TableDragStart          — {sourceRow:int, sourceCol:int, key:string}
+  //   TableDrop               — {sourceRow:int, targetRow:int, placement:string, key:string}
   //   BridgeDiag              — {msg:"..."} diagnostic log (flushed with each outgoing event)
 
   var COL_SELECTOR       = ".mw-table-header-column";
@@ -33,6 +41,7 @@
   var CELL_SELECTOR      = "[role='gridcell'], .mw-table-body-cell, .mw-table-cell";
   var HEADER_SELECTOR    = "[role='columnheader'], .mw-table-header-column";
   var ROW_SELECTOR       = "[role='row'], .mw-table-body-row";
+  var GROUP_SPAN_SELECTOR = ".gwidgets-group-header-span, .gwidgets-group-column-span";
 
   var resizeObserver     = null;
   var tableTag           = null;
@@ -43,12 +52,28 @@
   var diagQueue          = [];
   var hoverEnabled       = false;
   var hoverListener      = null;
+  var mouseDownListener  = null;
+  var mouseUpListener    = null;
+  var mouseMoveListener  = null;
+  var dragEnabled        = false;
+  var moveDragKey        = "alt";
+  var copyDragKey        = "control";
+  var dragCandidate      = null;
+  var activeTableDrag    = null;
   var lastHoverRow       = -1;
   var lastHoverCol       = -1;
   var lastHoverCellEl    = null;
   var lastClientX        = 0;
   var lastClientY        = 0;
   var tooltipEl          = null;
+  var activeGroupSpanTooltip = null;
+  var groupHeaderSpans   = [];
+  var groupHeaderSpanState = [];
+  var groupColumnSpans   = [];
+  var groupColumnSpanState = [];
+  var spanScrollListener = null;
+  var spanResizeListener = null;
+  var spanRenderFrame    = null;
 
   var t0 = Date.now();
   function ts() { return "t+" + (Date.now() - t0) + "ms"; }
@@ -66,6 +91,14 @@
     diagQueue = [];
   }
 
+  function parentDocument() {
+    try {
+      return window.parent && window.parent.document ? window.parent.document : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // ---- DOM helpers ----
 
   function colWidthsFromDOM(cols) {
@@ -75,8 +108,8 @@
   // ---- DOM locator ----
 
   function findColumns() {
-    var parentDoc;
-    try { parentDoc = window.parent.document; } catch (e) { return []; }
+    var parentDoc = parentDocument();
+    if (!parentDoc) return [];
     if (tableTag) {
       var tableEl = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
       if (tableEl) {
@@ -90,25 +123,50 @@
   // ---- Mouse tracking — drives the moving flag ----
 
   function setupMouseTracking() {
-    try {
-      var pd = window.parent.document;
-      pd.addEventListener("mousedown", function() { isMoving = true; }, true);
-      pd.addEventListener("mouseup", function() {
-        // isMoving must be false before we call onResize so the settled
-        // event carries moving=false.  ResizeObserver won't fire after
-        // release (size stopped changing), so we send one explicit report.
-        isMoving = false;
-        onResize();
-        // Self-suppress: block the snap-back ResizeObserver callback that fires
-        // ~120ms after mouseup when the drag handler releases its px constraints
-        // and the <th> reverts to the pre-drag <col> widths.  MATLAB takes ~133ms
-        // to process the ColumnWidthChanged above and deliver Suppress — too late.
-        // We suppress here instead; MATLAB un-suppresses via Restore as normal.
-        callbackSuppressed = true;
-        bridgeLog("[Bridge] " + ts() + " mouseup self-suppress");
-        flushDiag();
-      }, true);
-    } catch (e) {}
+    if (mouseDownListener || mouseUpListener) return;
+    var pd = parentDocument();
+    if (!pd) return;
+    mouseDownListener = function(evt) {
+      isMoving = true;
+      onTableMouseDown(evt);
+    };
+    mouseMoveListener = function(evt) {
+      onTableMouseMove(evt);
+    };
+    mouseUpListener = function(evt) {
+      onTableMouseUp(evt);
+      // isMoving must be false before we call onResize so the settled
+      // event carries moving=false.  ResizeObserver won't fire after
+      // release (size stopped changing), so we send one explicit report.
+      isMoving = false;
+      onResize();
+      // Self-suppress: block the snap-back ResizeObserver callback that fires
+      // ~120ms after mouseup when the drag handler releases its px constraints
+      // and the <th> reverts to the pre-drag <col> widths. MATLAB takes ~133ms
+      // to process the ColumnWidthChanged above and deliver Suppress - too late.
+      // We suppress here instead; MATLAB un-suppresses via Restore as normal.
+      callbackSuppressed = true;
+      bridgeLog("[Bridge] " + ts() + " mouseup self-suppress");
+      flushDiag();
+    };
+    pd.addEventListener("mousedown", mouseDownListener, true);
+    pd.addEventListener("mousemove", mouseMoveListener, true);
+    pd.addEventListener("mouseup", mouseUpListener, true);
+  }
+
+  function detachMouseTracking() {
+    if (!mouseDownListener && !mouseUpListener) return;
+    var pd = parentDocument();
+    if (pd) {
+      if (mouseDownListener) pd.removeEventListener("mousedown", mouseDownListener, true);
+      if (mouseMoveListener) pd.removeEventListener("mousemove", mouseMoveListener, true);
+      if (mouseUpListener) pd.removeEventListener("mouseup", mouseUpListener, true);
+    }
+    mouseDownListener = null;
+    mouseMoveListener = null;
+    mouseUpListener = null;
+    dragCandidate = null;
+    activeTableDrag = null;
   }
 
   // ---- Observer management ----
@@ -121,11 +179,15 @@
     if (cols.length === 0) return;
     resizeObserver = new ResizeObserver(onResize);
     cols.forEach(function(col) { resizeObserver.observe(col); });
+    var root = findTableRoot();
+    if (root && root.nodeType === 1) resizeObserver.observe(root);
   }
 
   // ---- ResizeObserver callback ----
 
   function onResize() {
+    if (!htmlComponent) return;
+    requestSpanRender();
     if (callbackSuppressed) return;
     var cols = findColumns();
     if (cols.length === 0) return;
@@ -141,8 +203,8 @@
   // ---- Cell hover tracking ----
 
   function findTableRoot() {
-    var parentDoc;
-    try { parentDoc = window.parent.document; } catch (e) { return null; }
+    var parentDoc = parentDocument();
+    if (!parentDoc) return null;
     if (tableTag) {
       var el = parentDoc.querySelector('[data-tag="' + tableTag + '"]');
       if (el) return el;
@@ -165,8 +227,10 @@
     // aria-colindex attributes. This is the generic ARIA grid approach
     // and works regardless of which exact class names MATLAB happens
     // to use for cells/rows in a given release.
+    if (!target || !root) return { row: -1, col: -1, cell: null, rowEl: null };
     var row = -1, col = -1;
     var cellEl = null;
+    var rowEl = null;
     var node = target;
     while (node && node.nodeType === 1 && node !== root) {
       if (col < 0) {
@@ -175,8 +239,9 @@
       }
       if (row < 0) {
         var r = parseInt(node.getAttribute && node.getAttribute("aria-rowindex"), 10);
-        if (!isNaN(r)) row = r;
+        if (!isNaN(r)) { row = r; if (!rowEl) rowEl = node; }
       }
+      if (!rowEl && node.matches && node.matches(ROW_SELECTOR)) rowEl = node;
       if (row >= 0 && col >= 0) break;
       node = node.parentNode;
     }
@@ -212,15 +277,671 @@
     // MATLAB display indices directly — no shift needed. Header cells
     // have no aria-rowindex, so row stays at -1 and onHoverMove maps
     // that to 0 (= "header row").
-    return { row: row, col: col, cell: cellEl };
+    return { row: row, col: col, cell: cellEl, rowEl: rowEl };
+  }
+
+  // ---- Group header row spanning --------------------------------
+
+  function normaliseArray(value) {
+    if (!value && value !== 0) return [];
+    return Array.isArray(value) ? value : [value];
+  }
+
+  function normaliseGroupHeaderSpans(data) {
+    var rows = normaliseArray(data && data.rows);
+    var labels = normaliseArray(data && data.labels);
+    var tooltips = normaliseArray(data && data.tooltips);
+    var styles = normaliseArray(data && data.styles);
+    var result = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = parseInt(rows[i], 10);
+      if (isNaN(row) || row <= 0) continue;
+      var label = labels[i] === undefined || labels[i] === null ? "" : String(labels[i]);
+      result.push({
+        row: row,
+        label: label,
+        tooltip: tooltips[i] === undefined || tooltips[i] === null ? label : String(tooltips[i]),
+        style: styles[i] === undefined || styles[i] === null ? "" : String(styles[i])
+      });
+    }
+    return result;
+  }
+
+  function rowElementForIndex(root, rowIndex) {
+    if (!root) return null;
+    var rows = Array.from(root.querySelectorAll(ROW_SELECTOR));
+    for (var i = 0; i < rows.length; i++) {
+      var rowEl = rows[i];
+      var ariaRow = parseInt(rowEl.getAttribute && rowEl.getAttribute("aria-rowindex"), 10);
+      if (!isNaN(ariaRow) && ariaRow === rowIndex) return rowEl;
+
+      var indexedCell = rowEl.querySelector && rowEl.querySelector("[aria-rowindex='" + rowIndex + "']");
+      if (indexedCell) return rowEl;
+    }
+    return null;
+  }
+
+  function bodyCellsForRow(rowEl) {
+    if (!rowEl) return [];
+    var cells = Array.from(rowEl.querySelectorAll(CELL_SELECTOR));
+    if (cells.length > 0) return cells;
+    return Array.from(rowEl.children || []);
+  }
+
+  function clearGroupHeaderSpans() {
+    for (var i = 0; i < groupHeaderSpanState.length; i++) {
+      var state = groupHeaderSpanState[i];
+      if (state.overlay && state.overlay.isConnected) state.overlay.remove();
+      if (state.rowEl && state.rowEl.isConnected) state.rowEl.style.position = state.rowPosition;
+      restoreHiddenStyles(state.hiddenText);
+      restoreHiddenStyles(state.hiddenDividers);
+      restoreHiddenStyles(state.hiddenHeights);
+    }
+    groupHeaderSpanState = [];
+    hideGroupSpanTooltip();
+  }
+
+  function normaliseGroupColumnSpans(data) {
+    var columns = normaliseArray(data && data.columns);
+    var labels = normaliseArray(data && data.labels);
+    var tooltips = normaliseArray(data && data.tooltips);
+    var styles = normaliseArray(data && data.styles);
+    var result = [];
+    for (var i = 0; i < columns.length; i++) {
+      var column = parseInt(columns[i], 10);
+      if (isNaN(column) || column <= 0) continue;
+      var label = labels[i] === undefined || labels[i] === null ? "" : String(labels[i]);
+      result.push({
+        column: column,
+        label: label,
+        tooltip: tooltips[i] === undefined || tooltips[i] === null ? label : String(tooltips[i]),
+        style: styles[i] === undefined || styles[i] === null ? "" : String(styles[i])
+      });
+    }
+    return result;
+  }
+
+  function clearGroupColumnSpans() {
+    for (var i = 0; i < groupColumnSpanState.length; i++) {
+      var state = groupColumnSpanState[i];
+      if (state.overlay && state.overlay.isConnected) state.overlay.remove();
+      restoreHiddenStyles(state.hiddenText);
+      restoreHiddenStyles(state.hiddenDividers);
+    }
+    groupColumnSpanState = [];
+    hideGroupSpanTooltip();
+  }
+
+  function hideCellText(cells) {
+    var hidden = [];
+    var elements = [];
+    var props = ["color", "text-shadow", "-webkit-text-fill-color"];
+
+    for (var i = 0; i < cells.length; i++) {
+      if (!cells[i]) continue;
+      elements.push(cells[i]);
+      var descendants = Array.from(cells[i].querySelectorAll("*"));
+      for (var j = 0; j < descendants.length; j++) {
+        elements.push(descendants[j]);
+      }
+    }
+
+    for (var k = 0; k < elements.length; k++) {
+      var el = elements[k];
+      if (elements.indexOf(el) !== k) continue;
+      var savedProps = [];
+      for (var p = 0; p < props.length; p++) {
+        savedProps.push({
+          name: props[p],
+          value: el.style.getPropertyValue(props[p]),
+          priority: el.style.getPropertyPriority(props[p])
+        });
+      }
+      hidden.push({
+        el: el,
+        props: savedProps
+      });
+      el.style.setProperty("color", "transparent", "important");
+      el.style.setProperty("text-shadow", "none", "important");
+      el.style.setProperty("-webkit-text-fill-color", "transparent", "important");
+    }
+
+    return hidden;
+  }
+
+  function hideCellVerticalDividers(cells) {
+    var hidden = [];
+    var props = [
+      "border-left-color",
+      "border-right-color",
+      "border-inline-start-color",
+      "border-inline-end-color"
+    ];
+
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      if (!cell) continue;
+
+      var savedProps = [];
+      for (var p = 0; p < props.length; p++) {
+        savedProps.push({
+          name: props[p],
+          value: cell.style.getPropertyValue(props[p]),
+          priority: cell.style.getPropertyPriority(props[p])
+        });
+      }
+
+      hidden.push({
+        el: cell,
+        props: savedProps
+      });
+
+      if (i > 0) {
+        cell.style.setProperty("border-left-color", "transparent", "important");
+        cell.style.setProperty("border-inline-start-color", "transparent", "important");
+      }
+      if (i < cells.length - 1) {
+        cell.style.setProperty("border-right-color", "transparent", "important");
+        cell.style.setProperty("border-inline-end-color", "transparent", "important");
+      }
+    }
+
+    return hidden;
+  }
+
+  function hideCellHorizontalDividers(cells) {
+    var hidden = [];
+    var props = [
+      "border-top-color",
+      "border-bottom-color",
+      "border-block-start-color",
+      "border-block-end-color"
+    ];
+
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      if (!cell) continue;
+
+      var savedProps = [];
+      for (var p = 0; p < props.length; p++) {
+        savedProps.push({
+          name: props[p],
+          value: cell.style.getPropertyValue(props[p]),
+          priority: cell.style.getPropertyPriority(props[p])
+        });
+      }
+
+      hidden.push({
+        el: cell,
+        props: savedProps
+      });
+
+      if (i > 0) {
+        cell.style.setProperty("border-top-color", "transparent", "important");
+        cell.style.setProperty("border-block-start-color", "transparent", "important");
+      }
+      if (i < cells.length - 1) {
+        cell.style.setProperty("border-bottom-color", "transparent", "important");
+        cell.style.setProperty("border-block-end-color", "transparent", "important");
+      }
+    }
+
+    return hidden;
+  }
+
+  function restoreHiddenStyles(hidden) {
+    if (!hidden) return;
+    for (var i = 0; i < hidden.length; i++) {
+      var item = hidden[i];
+      if (!item.el || !item.el.isConnected) continue;
+      for (var p = 0; p < item.props.length; p++) {
+        var prop = item.props[p];
+        if (prop.value) {
+          item.el.style.setProperty(prop.name, prop.value, prop.priority);
+        } else {
+          item.el.style.removeProperty(prop.name);
+        }
+      }
+    }
+  }
+
+  function saveStyleProps(elements, props) {
+    var saved = [];
+    for (var i = 0; i < elements.length; i++) {
+      var el = elements[i];
+      if (!el) continue;
+      var savedProps = [];
+      for (var p = 0; p < props.length; p++) {
+        savedProps.push({
+          name: props[p],
+          value: el.style.getPropertyValue(props[p]),
+          priority: el.style.getPropertyPriority(props[p])
+        });
+      }
+      saved.push({
+        el: el,
+        props: savedProps
+      });
+    }
+    return saved;
+  }
+
+  function applyMinHeight(elements, heightPx) {
+    var saved = saveStyleProps(elements, ["min-height"]);
+    var value = Math.max(Math.ceil(heightPx), 0) + "px";
+    for (var i = 0; i < elements.length; i++) {
+      if (elements[i]) elements[i].style.setProperty("min-height", value, "important");
+    }
+    return saved;
+  }
+
+  function applyCssText(el, cssText) {
+    if (!el || !cssText) return;
+    el.style.cssText = el.style.cssText + ";" + cssText;
+  }
+
+  function measureText(label, style) {
+    var pd = parentDocument();
+    if (!pd) return { width: 0, height: 0 };
+
+    var el = pd.createElement("div");
+    el.textContent = label || "";
+    el.style.cssText = [
+      "position:absolute",
+      "left:-10000px",
+      "top:-10000px",
+      "visibility:hidden",
+      "white-space:nowrap",
+      "box-sizing:border-box",
+      "padding:0",
+      "margin:0"
+    ].join(";") + ";";
+    el.style.fontFamily = style.fontFamily;
+    el.style.fontSize = style.fontSize;
+    el.style.fontWeight = style.fontWeight;
+    el.style.fontStyle = style.fontStyle;
+    el.style.lineHeight = style.lineHeight;
+
+    pd.body.appendChild(el);
+    var rect = el.getBoundingClientRect();
+    var width = Math.ceil(Math.max(rect.width, el.scrollWidth || 0));
+    var height = Math.ceil(Math.max(rect.height, el.scrollHeight || 0));
+    el.remove();
+    return { width: width, height: height };
+  }
+
+  function sendGroupSpanMeasure(data) {
+    if (!htmlComponent || !data) return;
+    data.event = "GroupSpanMeasure";
+    htmlComponent.Data = data;
+  }
+
+  function groupSpanOverlayFromTarget(target) {
+    var node = target;
+    while (node && node.nodeType === 1) {
+      if (node.matches && node.matches(GROUP_SPAN_SELECTOR)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function groupSpanOverlayAtPoint(clientX, clientY) {
+    var states = groupHeaderSpanState.concat(groupColumnSpanState);
+    for (var i = states.length - 1; i >= 0; i--) {
+      var overlay = states[i].overlay;
+      if (!overlay || !overlay.isConnected) continue;
+      var rect = overlay.getBoundingClientRect();
+      if (clientX >= rect.left && clientX <= rect.right &&
+          clientY >= rect.top && clientY <= rect.bottom) return overlay;
+    }
+    return null;
+  }
+
+  function renderGroupSpanTooltip(text, sourceEl) {
+    text = text === undefined || text === null ? "" : String(text);
+    if (text === "") {
+      hideTooltip();
+      return;
+    }
+
+    var el = ensureTooltipEl();
+    if (!el) return;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    el.textContent = text;
+    el.style.cssText = [
+      "position:fixed",
+      "z-index:9999",
+      "pointer-events:none",
+      "display:block",
+      "white-space:pre",
+      "background:#ffffe1",
+      "color:#000",
+      "border:1px solid #767676",
+      "border-radius:2px",
+      "padding:4px 6px",
+      "box-shadow:0 2px 8px rgba(0,0,0,0.18)"
+    ].join(";") + ";";
+
+    if (sourceEl) {
+      var sourceStyle = window.getComputedStyle(sourceEl);
+      el.style.fontFamily = sourceStyle.fontFamily;
+      el.style.fontSize = sourceStyle.fontSize;
+      el.style.fontWeight = sourceStyle.fontWeight;
+      el.style.fontStyle = sourceStyle.fontStyle;
+      el.style.lineHeight = sourceStyle.lineHeight;
+    }
+    activeGroupSpanTooltip = sourceEl || null;
+    positionTooltipNearCursor();
+  }
+
+  function hideGroupSpanTooltip() {
+    if (!activeGroupSpanTooltip) return;
+    activeGroupSpanTooltip = null;
+    hideTooltip();
+  }
+
+  function handleGroupSpanTooltipMove(evt) {
+    var overlay = groupSpanOverlayAtPoint(evt.clientX, evt.clientY) ||
+      groupSpanOverlayFromTarget(evt.target);
+    if (!overlay) {
+      hideGroupSpanTooltip();
+      return false;
+    }
+
+    lastClientX = evt.clientX;
+    lastClientY = evt.clientY;
+    if (hoverEnabled) {
+      var coords = groupSpanHoverCoords(overlay, evt);
+      hideGroupSpanTooltip();
+      positionTooltipNearCursor();
+      sendHover(coords.row, coords.col);
+      return true;
+    }
+
+    var tooltip = overlay.getAttribute("data-gwidgets-tooltip");
+    if (!tooltip) {
+      hideGroupSpanTooltip();
+      return false;
+    }
+
+    renderGroupSpanTooltip(tooltip, overlay);
+    return true;
+  }
+
+  function groupSpanHoverCoords(overlay, evt) {
+    var root = findTableRoot();
+    var pos = gridCoordsFromTarget(evt.target, root);
+    var row = parseInt(overlay.getAttribute("data-gwidgets-row"), 10);
+    var col = parseInt(overlay.getAttribute("data-gwidgets-col"), 10);
+
+    if (isNaN(row) || row <= 0) row = pos.row >= 0 ? pos.row : 0;
+    if (isNaN(col) || col <= 0) col = pos.col >= 0 ? pos.col : 0;
+
+    return {
+      row: row >= 0 ? row : 0,
+      col: col >= 0 ? col : 0
+    };
+  }
+
+  function renderGroupHeaderSpans() {
+    clearGroupHeaderSpans();
+    if (!groupHeaderSpans || groupHeaderSpans.length === 0) return;
+
+    var root = findTableRoot();
+    if (!root) return;
+
+    var measureRows = [];
+    var measureWidths = [];
+    var measureHeights = [];
+
+    for (var i = 0; i < groupHeaderSpans.length; i++) {
+      var span = groupHeaderSpans[i];
+      var rowEl = rowElementForIndex(root, span.row);
+      var cells = bodyCellsForRow(rowEl);
+      if (!rowEl || cells.length === 0) continue;
+
+      var firstCellStyle = window.getComputedStyle(cells[0]);
+      var measured = measureText(span.label, firstCellStyle);
+      var rowHeight = Math.max(measured.height + 8, 20);
+      var overlay = rowEl.ownerDocument.createElement("div");
+      overlay.className = "gwidgets-group-header-span";
+      overlay.textContent = span.label;
+      overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || "");
+      overlay.setAttribute("data-gwidgets-row", String(span.row));
+      overlay.style.cssText = [
+        "position:absolute",
+        "left:0",
+        "right:0",
+        "top:0",
+        "bottom:0",
+        "z-index:3",
+        "pointer-events:none",
+        "display:flex",
+        "align-items:center",
+        "box-sizing:border-box",
+        "padding-left:6px",
+        "white-space:nowrap",
+        "overflow:hidden",
+        "text-overflow:ellipsis"
+      ].join(";") + ";";
+      overlay.style.color = firstCellStyle.color;
+      overlay.style.fontFamily = firstCellStyle.fontFamily;
+      overlay.style.fontSize = firstCellStyle.fontSize;
+      overlay.style.fontWeight = firstCellStyle.fontWeight;
+      overlay.style.fontStyle = firstCellStyle.fontStyle;
+      overlay.style.lineHeight = firstCellStyle.lineHeight;
+      applyCssText(overlay, span.style);
+
+      var hiddenText = hideCellText(cells);
+      var hiddenDividers = hideCellVerticalDividers(cells);
+      var hiddenHeights = applyMinHeight([rowEl].concat(cells), rowHeight);
+
+      var rowPosition = rowEl.style.position;
+      if (window.getComputedStyle(rowEl).position === "static") rowEl.style.position = "relative";
+      rowEl.appendChild(overlay);
+      groupHeaderSpanState.push({
+        overlay: overlay,
+        rowEl: rowEl,
+        rowPosition: rowPosition,
+        hiddenText: hiddenText,
+        hiddenDividers: hiddenDividers,
+        hiddenHeights: hiddenHeights
+      });
+      measureRows.push(span.row);
+      measureWidths.push(Math.max(measured.width + 12, 24));
+      measureHeights.push(rowHeight);
+    }
+
+    sendGroupSpanMeasure({
+      rows: measureRows,
+      rowWidths: measureWidths,
+      rowHeights: measureHeights
+    });
+  }
+
+  function bodyCellsForColumn(root, columnIndex) {
+    if (!root) return [];
+    var cells = Array.from(root.querySelectorAll(CELL_SELECTOR));
+    var matches = [];
+    for (var i = 0; i < cells.length; i++) {
+      var col = parseInt(cells[i].getAttribute && cells[i].getAttribute("aria-colindex"), 10);
+      if (!isNaN(col) && col === columnIndex) matches.push(cells[i]);
+    }
+    return matches;
+  }
+
+  function cellUnionRect(cells) {
+    if (!cells || cells.length === 0) return null;
+    var left = Infinity;
+    var right = -Infinity;
+    var top = Infinity;
+    var bottom = -Infinity;
+
+    for (var i = 0; i < cells.length; i++) {
+      var rect = cells[i].getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      left = Math.min(left, rect.left);
+      right = Math.max(right, rect.right);
+      top = Math.min(top, rect.top);
+      bottom = Math.max(bottom, rect.bottom);
+    }
+
+    if (!isFinite(left) || !isFinite(right) || !isFinite(top) || !isFinite(bottom)) return null;
+    return {
+      left: left,
+      right: right,
+      top: top,
+      bottom: bottom,
+      width: right - left,
+      height: bottom - top
+    };
+  }
+
+  function renderGroupColumnSpans() {
+    clearGroupColumnSpans();
+    if (!groupColumnSpans || groupColumnSpans.length === 0) return;
+
+    var root = findTableRoot();
+    var pd = parentDocument();
+    if (!root || !pd) return;
+
+    var measureColumns = [];
+    var measureWidths = [];
+
+    for (var i = 0; i < groupColumnSpans.length; i++) {
+      var span = groupColumnSpans[i];
+      var cells = bodyCellsForColumn(root, span.column);
+      var rect = cellUnionRect(cells);
+      if (cells.length === 0 || !rect) continue;
+
+      var firstCellStyle = window.getComputedStyle(cells[0]);
+      var measured = measureText(span.label, firstCellStyle);
+      var columnWidth = Math.max(measured.height + 12, 24);
+      var overlay = pd.createElement("div");
+      overlay.className = "gwidgets-group-column-span";
+      overlay.textContent = span.label;
+      overlay.setAttribute("data-gwidgets-tooltip", span.tooltip || "");
+      overlay.setAttribute("data-gwidgets-col", String(span.column));
+      overlay.style.cssText = [
+        "position:fixed",
+        "left:" + rect.left + "px",
+        "top:" + rect.top + "px",
+        "width:" + rect.width + "px",
+        "height:" + rect.height + "px",
+        "z-index:3",
+        "pointer-events:none",
+        "display:block",
+        "box-sizing:border-box",
+        "white-space:nowrap",
+        "overflow:hidden"
+      ].join(";") + ";";
+      overlay.style.color = firstCellStyle.color;
+      overlay.style.fontFamily = firstCellStyle.fontFamily;
+      overlay.style.fontSize = firstCellStyle.fontSize;
+      overlay.style.fontWeight = firstCellStyle.fontWeight;
+      overlay.style.fontStyle = firstCellStyle.fontStyle;
+      overlay.style.lineHeight = firstCellStyle.lineHeight;
+      applyCssText(overlay, span.style);
+
+      var label = pd.createElement("div");
+      label.textContent = span.label;
+      label.style.cssText = [
+        "position:absolute",
+        "left:50%",
+        "top:50%",
+        "width:" + Math.max(rect.height - 8, 24) + "px",
+        "transform:translate(-50%,-50%) rotate(-90deg)",
+        "transform-origin:center",
+        "white-space:nowrap",
+        "overflow:hidden",
+        "text-overflow:ellipsis",
+        "text-align:center"
+      ].join(";") + ";";
+      label.style.pointerEvents = "none";
+      overlay.textContent = "";
+      overlay.appendChild(label);
+
+      var hiddenText = hideCellText(cells);
+      var hiddenDividers = hideCellHorizontalDividers(cells);
+
+      pd.body.appendChild(overlay);
+      groupColumnSpanState.push({
+        overlay: overlay,
+        hiddenText: hiddenText,
+        hiddenDividers: hiddenDividers
+      });
+      measureColumns.push(span.column);
+      measureWidths.push(columnWidth);
+    }
+
+    sendGroupSpanMeasure({
+      columns: measureColumns,
+      columnWidths: measureWidths
+    });
+  }
+
+  function hasGroupSpans() {
+    if ((!groupHeaderSpans || groupHeaderSpans.length === 0) &&
+        (!groupColumnSpans || groupColumnSpans.length === 0)) return false;
+    return true;
+  }
+
+  function renderGroupSpans() {
+    if (!hasGroupSpans()) return;
+    renderGroupHeaderSpans();
+    renderGroupColumnSpans();
+  }
+
+  function requestSpanRender() {
+    if (!hasGroupSpans()) return;
+    if (!window.requestAnimationFrame) {
+      renderGroupSpans();
+      return;
+    }
+    if (spanRenderFrame !== null) return;
+    spanRenderFrame = window.requestAnimationFrame(function() {
+      spanRenderFrame = null;
+      renderGroupSpans();
+    });
+  }
+
+  function onSpanLayoutChange() {
+    requestSpanRender();
+  }
+
+  function attachSpanScroll() {
+    var pd = parentDocument();
+    if (!pd) return;
+    if (!spanScrollListener) {
+      spanScrollListener = onSpanLayoutChange;
+      pd.addEventListener("scroll", spanScrollListener, true);
+    }
+    if (!spanResizeListener && pd.defaultView) {
+      spanResizeListener = onSpanLayoutChange;
+      pd.defaultView.addEventListener("resize", spanResizeListener, true);
+    }
+  }
+
+  function detachSpanScroll() {
+    var pd = parentDocument();
+    if (pd && spanScrollListener) pd.removeEventListener("scroll", spanScrollListener, true);
+    if (pd && pd.defaultView && spanResizeListener) {
+      pd.defaultView.removeEventListener("resize", spanResizeListener, true);
+    }
+    spanScrollListener = null;
+    spanResizeListener = null;
+    if (spanRenderFrame !== null && window.cancelAnimationFrame) {
+      window.cancelAnimationFrame(spanRenderFrame);
+    }
+    spanRenderFrame = null;
   }
 
   // ---- Custom popup (replaces native title) ----------------------
 
   function ensureTooltipEl() {
     if (tooltipEl && tooltipEl.isConnected) return tooltipEl;
-    var pd;
-    try { pd = window.parent.document; } catch (e) { return null; }
+    var pd = parentDocument();
+    if (!pd) return null;
     tooltipEl = pd.createElement("div");
     tooltipEl.id = "gwidgets-tooltip";
     tooltipEl.style.cssText = [
@@ -236,13 +957,14 @@
   }
 
   function hideTooltip() {
+    activeGroupSpanTooltip = null;
     if (tooltipEl) tooltipEl.style.display = "none";
   }
 
   function positionTooltipNearCursor() {
     if (!tooltipEl) return;
-    var pd;
-    try { pd = window.parent.document; } catch (e) { return; }
+    var pd = parentDocument();
+    if (!pd) return;
     var w = tooltipEl.offsetWidth;
     var h = tooltipEl.offsetHeight;
     var viewW = pd.documentElement.clientWidth;
@@ -295,6 +1017,7 @@
 
   function sendHover(row, col) {
     if (row === lastHoverRow && col === lastHoverCol) return;
+    if (!htmlComponent) return;
     lastHoverRow = row;
     lastHoverCol = col;
     bridgeLog("[Bridge] " + ts() + " hover row=" + row + " col=" + col);
@@ -302,10 +1025,88 @@
     htmlComponent.Data = { event: "CellHover", row: row, col: col };
   }
 
+  function dragKeyFromEvent(evt) {
+    var hasModifier = evt.altKey || evt.ctrlKey || evt.shiftKey;
+    if (!hasModifier && (moveDragKey === "" || copyDragKey === "")) return "";
+    if (evt.altKey && (moveDragKey === "alt" || copyDragKey === "alt")) return "alt";
+    if (evt.ctrlKey && (moveDragKey === "control" || copyDragKey === "control")) return "control";
+    if (evt.shiftKey && (moveDragKey === "shift" || copyDragKey === "shift")) return "shift";
+    return null;
+  }
+
+  function onTableMouseDown(evt) {
+    if (!dragEnabled) return;
+    var key = dragKeyFromEvent(evt);
+    if (key === null) return;
+
+    var root = findTableRoot();
+    var pos = gridCoordsFromTarget(evt.target, root);
+    if (pos.row <= 0) return;
+
+    dragCandidate = {
+      row: pos.row,
+      col: pos.col >= 0 ? pos.col : 0,
+      key: key,
+      clientX: evt.clientX,
+      clientY: evt.clientY
+    };
+  }
+
+  function onTableMouseMove(evt) {
+    handleGroupSpanTooltipMove(evt);
+
+    if (!dragEnabled || !dragCandidate || activeTableDrag) return;
+    var dx = evt.clientX - dragCandidate.clientX;
+    var dy = evt.clientY - dragCandidate.clientY;
+    if (Math.sqrt(dx*dx + dy*dy) < 5) return;
+
+    activeTableDrag = dragCandidate;
+    if (!htmlComponent) return;
+    htmlComponent.Data = {
+      event: "TableDragStart",
+      sourceRow: activeTableDrag.row,
+      sourceCol: activeTableDrag.col,
+      key: activeTableDrag.key
+    };
+  }
+
+  function onTableMouseUp(evt) {
+    if (!dragEnabled || !activeTableDrag) {
+      dragCandidate = null;
+      return;
+    }
+
+    var root = findTableRoot();
+    var pos = gridCoordsFromTarget(evt.target, root);
+    if (pos.row > 0 && htmlComponent) {
+      var placement = "after";
+      if (pos.rowEl) {
+        var rect = pos.rowEl.getBoundingClientRect();
+        placement = evt.clientY < (rect.top + rect.height/2) ? "before" : "after";
+      }
+      htmlComponent.Data = {
+        event: "TableDrop",
+        sourceRow: activeTableDrag.row,
+        targetRow: pos.row,
+        placement: placement,
+        key: activeTableDrag.key
+      };
+    }
+
+    dragCandidate = null;
+    activeTableDrag = null;
+  }
+
   function onHoverMove(evt) {
     if (!hoverEnabled) return;
     lastClientX = evt.clientX;
     lastClientY = evt.clientY;
+
+    if (handleGroupSpanTooltipMove(evt)) {
+      lastHoverCellEl = null;
+      return;
+    }
+
     var root = findTableRoot();
     if (!root || !root.contains(evt.target)) {
       hideTooltip();
@@ -329,21 +1130,33 @@
 
   function attachHover() {
     if (hoverListener) return;
-    try {
-      var pd = window.parent.document;
-      hoverListener = onHoverMove;
-      pd.addEventListener("mouseover", hoverListener, true);
-    } catch (e) {}
+    var pd = parentDocument();
+    if (!pd) return;
+    hoverListener = onHoverMove;
+    pd.addEventListener("mouseover", hoverListener, true);
   }
 
   function detachHover() {
     if (!hoverListener) return;
-    try {
-      window.parent.document.removeEventListener("mouseover", hoverListener, true);
-    } catch (e) {}
+    var pd = parentDocument();
+    if (pd) pd.removeEventListener("mouseover", hoverListener, true);
     hoverListener = null;
     lastHoverRow = -1;
     lastHoverCol = -1;
+  }
+
+  function cleanup() {
+    detachHover();
+    detachMouseTracking();
+    detachSpanScroll();
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
+    clearGroupHeaderSpans();
+    clearGroupColumnSpans();
+    hideTooltip();
+    htmlComponent = null;
   }
 
   // ---- Event wiring ----
@@ -351,6 +1164,7 @@
   function setup(component) {
     htmlComponent = component;
     setupMouseTracking();
+    window.addEventListener("beforeunload", cleanup);
 
     htmlComponent.addEventListener("Init", function(event) {
       tableTag = (event.Data && event.Data.tableTag) ? event.Data.tableTag : null;
@@ -361,6 +1175,8 @@
     htmlComponent.addEventListener("Ready", function() {
       bridgeLog("[Bridge] " + ts() + " Ready");
       attachObserver();
+      renderGroupHeaderSpans();
+      renderGroupColumnSpans();
       flushDiag();
     });
 
@@ -397,11 +1213,45 @@
       flushDiag();
     });
 
+    htmlComponent.addEventListener("DragEnable", function(event) {
+      dragEnabled = true;
+      moveDragKey = (event.Data && event.Data.moveKey) || "alt";
+      copyDragKey = (event.Data && event.Data.copyKey) || "control";
+      bridgeLog("[Bridge] " + ts() + " DragEnable move=" + moveDragKey + " copy=" + copyDragKey);
+      flushDiag();
+    });
+
+    htmlComponent.addEventListener("DragDisable", function() {
+      dragEnabled = false;
+      dragCandidate = null;
+      activeTableDrag = null;
+      bridgeLog("[Bridge] " + ts() + " DragDisable");
+      flushDiag();
+    });
+
     htmlComponent.addEventListener("SetTooltip", function(event) {
       // MATLAB has resolved the hovered cell to a list of styled blocks.
       // Render them in our floating popup div near the cursor.
       var blocks = (event.Data && event.Data.blocks) || [];
       renderTooltipBlocks(blocks);
+    });
+
+    htmlComponent.addEventListener("SetGroupHeaderSpans", function(event) {
+      groupHeaderSpans = normaliseGroupHeaderSpans(event.Data || {});
+      if (hasGroupSpans()) attachSpanScroll();
+      else detachSpanScroll();
+      renderGroupHeaderSpans();
+    });
+
+    htmlComponent.addEventListener("SetGroupColumnSpans", function(event) {
+      groupColumnSpans = normaliseGroupColumnSpans(event.Data || {});
+      if (hasGroupSpans()) attachSpanScroll();
+      else detachSpanScroll();
+      renderGroupColumnSpans();
+    });
+
+    htmlComponent.addEventListener("MeasureGroupSpans", function() {
+      renderGroupSpans();
     });
 
     htmlComponent.Data = { event: "BridgeReady" };

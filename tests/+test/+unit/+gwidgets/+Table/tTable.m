@@ -140,7 +140,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture
                         end
 
                         try
-                            val = this.ExpectedSelectionDict({[dataSelection, group, filter, selection]});
+                            this.ExpectedSelectionDict({[dataSelection, group, filter, selection]});
                         catch
                             warning("Combination [Group: %s, Filter: %s, Selection: %s] not defined", group, filter, selection);
                         end
@@ -169,6 +169,32 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture
 
             testCase.verifyLessThanOrEqual(d.Total, 1)
             delete(t);
+        end
+
+        function tDisplayOrientationTransposesRenderedData(testCase)
+            data = test.WithExampleTables.multivariableData();
+            t = gwidgets.Table(Data=data, DisplayOrientation="Transposed");
+
+            testCase.verifyEqual(t.DisplayOrientation, "Transposed")
+            testCase.verifyEqual( ...
+                string(t.DisplayData.Properties.VariableNames), ...
+                ["Variable", "Row1", "Row2", "Row3", "Row4", "Row5"])
+            testCase.verifyEqual(string(t.DisplayData.Variable), string(data.Properties.VariableNames).')
+            testCase.verifyEqual(t.DisplayData.Row2{1}, 2)
+            testCase.verifyEqual(string(t.DisplayData.Row2{2}), "b")
+            testCase.verifyEqual(t.DisplayData.Row2{3}, false)
+            testCase.verifyEqual(t.DisplayData.Row2{4}, "x")
+            testCase.verifyEqual(string(t.DisplayTable.ColumnName), repmat("", 6, 1))
+        end
+
+        function tTransposedHeadersUseRowNamesWhenPresent(testCase)
+            data = table( ...
+                [1; 2], ["a"; "b"], ...
+                VariableNames=["Number", "Text"], ...
+                RowNames=["One", "Two"]);
+            t = gwidgets.Table(Data=data, DisplayOrientation="Transposed");
+
+            testCase.verifyEqual(string(t.DisplayTable.ColumnName), ["", "One", "Two"].')
         end
 
         function tDeletionClearsUpChildren(testCase)

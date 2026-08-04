@@ -113,16 +113,19 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
         end
 
-        function obj = parenAssign(obj,indexOp,val)
+        function obj = parenAssign(obj, indexOp, val)
 
             % Grow the underlying table when assigning past its end so
             % `t(N+k,:) = ...` succeeds rather than erroring.
-            h = indexOp.Indices{1} - height(obj.DataTable);
-            if h > 0
-                obj = obj.addRows(h);
+            rowIdx = indexOp.Indices{1};
+            if isnumeric(rowIdx)
+                nNewRows = max(rowIdx, [], "all") - height(obj.DataTable);
+                if nNewRows > 0
+                    obj = obj.addRows(nNewRows);
+                end
             end
 
-            obj.DataTable(indexOp) = val;
+            obj.DataTable(indexOp.Indices{:}) = val;
 
         end
 
@@ -174,7 +177,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
             elseif isa(rhs, "mlut.tabular.RTabular")
                 [obj.DataTable.(indexOp)] = rhs.DataTable.Variables;
             else
-                if numel(rhs) == 1
+                if isscalar(rhs)
                     % Broadcast a scalar across the column so
                     % `t.Column = v` mirrors built-in table semantics.
                     rhs = repelem(rhs, height(obj.DataTable), 1);
@@ -248,7 +251,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
             if numel(varargin) > 2
                 tmpTbl = obj.horzcat_(varargin{end-1}, varargin{end});
                 outTbl = obj.horzcat_(varargin{1:end-2}, tmpTbl);
-            elseif numel(varargin) == 1
+            elseif isscalar(varargin)
                 outTbl = varargin{1};
             elseif numel(varargin) == 0
                 outTbl = obj.tabularEmpty(1,0);
@@ -289,7 +292,7 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
             if numel(varargin) > 2
                 tmpTbl = obj.vertcat_(varargin{end-1}, varargin{end});
                 outTbl = obj.vertcat_(varargin{1:end-2}, tmpTbl);
-            elseif numel(varargin) == 1
+            elseif isscalar(varargin)
                 outTbl = varargin{1};
             elseif numel(varargin) == 0
                 outTbl = obj.tabularEmpty(1,0);
@@ -297,45 +300,20 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
                 tblA = varargin{1};
                 tblB = varargin{2};
 
-                idxRight = ~ismember(tblA.Properties.VariableNames,...
-                    tblB.Properties.VariableNames);
-                idxLeft = ~ismember(tblB.Properties.VariableNames,...
-                    tblA.Properties.VariableNames);
+                varsA = string(tblA.Properties.VariableNames);
+                varsB = string(tblB.Properties.VariableNames);
+                missingInB = varsA(~ismember(varsA, varsB));
+                missingInA = varsB(~ismember(varsB, varsA));
 
-                typesA = mlut.tabular.RTabular.dataTypes(tblA);
-                subTblB = obj.makeNewColsLike(tblB, nnz(idxRight), string(tblA.Properties.VariableNames(idxRight)));
-
-                cols = string(subTblB.Properties.VariableNames);
-                for j = 1:numel(cols)
-                    if idxRight(j)
-                        subTblB = convertvars(subTblB, cols(j), typesA(idxRight(j)));
-                    end
-                end
-
-                idx = (typesA(idxRight) == "double") | (typesA(idxRight) == "single");
-                subTblB(:, idx) = subTblB(:, idx) .* NaN;
-
-                tblB = [tblB, subTblB];
-
-                typesB = mlut.tabular.RTabular.dataTypes(tblB);
-                subTblA = obj.makeNewColsLike(tblA, nnz(idxLeft), string(tblB.Properties.VariableNames(idxLeft)));
-
-                cols = string(subTblA.Properties.VariableNames);
-                for j = 1:numel(cols)
-                    % convertvars may fail when the source/target types
-                    % can't be coerced; skip those rather than aborting
-                    % the whole concatenation.
-                    try
-                        subTblA = convertvars(subTblA, cols(j), typesB(idxLeft(j)));
-                    catch
-                    end
-                end
-
-                idx = (typesB(idxLeft) == "double") | (typesB(idxLeft) == "single");
-                subTblA(:, idx) = subTblA(:, idx) .* NaN;
+                subTblA = obj.missingColumnsLike(tblA, tblB, missingInA);
+                subTblB = obj.missingColumnsLike(tblB, tblA, missingInB);
 
                 tblA = [tblA, subTblA];
+                tblB = [tblB, subTblB];
 
+                columnOrder = [varsA, missingInA];
+                tblA = tblA(:, columnOrder);
+                tblB = tblB(:, columnOrder);
                 outTbl = [tblA; tblB];
             end
 
@@ -348,8 +326,8 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
         function types = dataTypes(tbl)
             % VariableTypes was added in R2023b (MATLAB 23.3); fall back
             % to varfun(@class,...) on older releases.
-            if verLessThan("MATLAB", "23.3")
-                types = varfun(@class,tbl,'OutputFormat','cell');
+            if isMATLABReleaseOlderThan("R2023b")
+                types = varfun(@class, tbl, OutputFormat="cell");
                 types = string(types);
             else
                 types = tbl.Properties.VariableTypes;
@@ -387,6 +365,52 @@ classdef (Abstract) RTabular < matlab.mixin.indexing.RedefinesParen ...
 
             if ~isempty(colNames)
                 tblOut.Properties.VariableNames = colNames;
+            end
+        end
+
+        function tblOut = missingColumnsLike(targetTbl, sourceTbl, colNames)
+            arguments
+                targetTbl
+                sourceTbl
+                colNames (1,:) string
+            end
+
+            tblOut = targetTbl(:, []);
+            for iCol = 1:numel(colNames)
+                colName = colNames(iCol);
+                tblOut.(colName) = mlut.tabular.RTabular.missingArrayLike( ...
+                    sourceTbl.(colName), height(targetTbl));
+            end
+        end
+
+        function values = missingArrayLike(template, nRows)
+            arguments
+                template
+                nRows (1,1) double
+            end
+
+            values = template([], :);
+            if nRows == 0
+                return
+            end
+
+            try
+                values(nRows, :) = missing;
+                values(:, :) = missing;
+            catch
+                nCols = size(template, 2);
+                if islogical(template)
+                    values = false(nRows, nCols);
+                elseif isnumeric(template)
+                    values = zeros(nRows, nCols, "like", template);
+                    if isfloat(template)
+                        values(:, :) = NaN;
+                    end
+                elseif iscell(template)
+                    values = repmat({missing}, nRows, nCols);
+                else
+                    values = repmat(missing, nRows, nCols);
+                end
             end
         end
 

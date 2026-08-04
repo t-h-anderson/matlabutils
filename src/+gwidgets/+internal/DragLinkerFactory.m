@@ -231,8 +231,7 @@ classdef DragLinkerFactory < handle
 
         function [src, dst, dragKey] = unpackKey(~, key)
             % Extract components from a link key
-            colonIdx = strfind(key, ":");
-            if isempty(colonIdx)
+            if ~contains(key, ":")
                 error("DragLinkerFactory:invalidKey", ...
                     "Key must contain ':' separator");
             end
@@ -240,8 +239,7 @@ classdef DragLinkerFactory < handle
             dragKey = extractBefore(key, ":");
             remainder = extractAfter(key, ":");
 
-            slashIdx = strfind(remainder, "/");
-            if isempty(slashIdx)
+            if ~contains(remainder, "/")
                 error("DragLinkerFactory:invalidKey", ...
                     "Key must contain '/' separator");
             end

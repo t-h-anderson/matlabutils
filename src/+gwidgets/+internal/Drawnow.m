@@ -1,7 +1,7 @@
 classdef Drawnow < handle
 
     properties
-        IsEnabled (1,1) logical = true
+        IsEnabled (1,1) logical = false
         Total (1,1) double = 0
         Skipped (1,1) double = 0
         TicTocTime (1,1) double = 0
@@ -29,11 +29,16 @@ classdef Drawnow < handle
         end
 
         function run(varargin)
-            gwidgets.internal.Drawnow.tickAndDraw(false, varargin{:});
+            gwidgets.internal.Drawnow.tickAndDraw(DrawnowArgs=varargin);
         end
 
         function runWithPause(varargin)
-            gwidgets.internal.Drawnow.tickAndDraw(true, varargin{:});
+            gwidgets.internal.Drawnow.tickAndDraw(WithPause=true, DrawnowArgs=varargin);
+        end
+
+        function tf = isEnabled()
+            this = gwidgets.internal.Drawnow.make();
+            tf = this.IsEnabled;
         end
 
         function obj = make(clearflag)
@@ -52,17 +57,22 @@ classdef Drawnow < handle
 
     methods (Static, Access = private)
 
-        function tickAndDraw(withPause, varargin)
+        function tickAndDraw(nvp)
+            arguments
+                nvp.WithPause (1,1) logical = false
+                nvp.DrawnowArgs (1,:) cell = cell.empty(1,0)
+            end
+
             this = gwidgets.internal.Drawnow.make();
             if ~this.IsEnabled
                 this.Skipped = this.Skipped + 1;
                 return
             end
             tic
-            if withPause
+            if nvp.WithPause
                 pause(0);
             end
-            drawnow(varargin{:});
+            drawnow(nvp.DrawnowArgs{:});
             this.TicTocTime = this.TicTocTime + toc;
             this.Total = this.Total + 1;
         end
