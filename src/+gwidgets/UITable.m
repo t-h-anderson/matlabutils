@@ -24,6 +24,23 @@ classdef UITable < gwidgets.internal.Reparentable
         Backend (1,1) string {mustBeMember(Backend, ["UITable", "JavaScript"])} = "UITable"
     end
 
+    events
+        CellClicked
+        CellDoubleClicked
+        SelectionChanged
+        CellEdited
+        DisplayDataChanged
+        FilterChanged
+        GroupingChanged
+        GroupOpenStateChanged
+        SortChanged
+        TooltipRequested
+        TooltipCleared
+        DragStarted
+        DropCompleted
+        TableDataChanged
+    end
+
     properties (Dependent, Access = private)
         Update (1,1) gwidgets.internal.table.UpdateController
     end
@@ -44,7 +61,8 @@ classdef UITable < gwidgets.internal.Reparentable
             ?gwidgets.internal.table.BridgeController, ...
             ?gwidgets.internal.table.DragController, ...
             ?gwidgets.internal.table.MetricController, ...
-            ?gwidgets.internal.table.TooltipController}, ...
+            ?gwidgets.internal.table.TooltipController, ...
+            ?gwidgets.internal.table.backend.JSTableBackend}, ...
             SetAccess = private)
         Bridge (1,1) gwidgets.internal.table.BridgeController
     end
@@ -248,7 +266,8 @@ classdef UITable < gwidgets.internal.Reparentable
             ?gwidgets.internal.table.BridgeController, ...
             ?gwidgets.internal.table.DragController, ...
             ?gwidgets.internal.table.MetricController, ...
-            ?gwidgets.internal.table.TooltipController})
+            ?gwidgets.internal.table.TooltipController, ...
+            ?gwidgets.internal.table.backend.JSTableBackend})
         function addControllerUpdateSuppression(this, propertyName, nvp)
             arguments
                 this (1,1) gwidgets.UITable
@@ -283,6 +302,105 @@ classdef UITable < gwidgets.internal.Reparentable
                 return
             end
             gwidgets.internal.Drawnow.run("limitrate");
+        end
+
+        function emitTableEvent(this, eventName, eventData)
+            arguments
+                this (1,1) gwidgets.UITable
+                eventName (1,1) string
+                eventData (1,1) gwidgets.table.TableEventData = gwidgets.table.TableEventData()
+            end
+
+            if ~any(eventName == gwidgets.Table.tableEventNames())
+                error("GraphicsWidgets:Table:EventName", ...
+                    "Unsupported table event: %s", eventName);
+            end
+
+            if eventData.Backend == ""
+                eventData.Backend = this.Backend;
+            end
+
+            notify(this, char(eventName), eventData);
+        end
+
+        function dataIdx = eventDisplayToData(this, displayIdx, type)
+            arguments
+                this (1,1) gwidgets.UITable
+                displayIdx
+                type (1,1) string {mustBeMember(type, ["cell", "row", "column"])} = "cell"
+            end
+
+            try
+                dataIdx = this.Selection.displayToData(displayIdx, type);
+            catch
+                dataIdx = gwidgets.internal.table.SelectionController.emptySelection(type);
+            end
+        end
+
+        function snapshot = eventSnapshot(this)
+            arguments
+                this (1,1) gwidgets.UITable
+            end
+
+            snapshot = struct( ...
+                "Filter", this.Filter.FilterValue, ...
+                "RowFilterIndices", reshape(this.Data.RowFilterIndices, 1, []), ...
+                "GroupingVariables", reshape(this.Group.By, 1, []), ...
+                "Groups", reshape(this.Group.Groups, 1, []), ...
+                "OpenGroups", reshape(this.Group.Open, 1, []), ...
+                "ClosedGroups", reshape(this.Group.Closed, 1, []), ...
+                "HiddenGroups", reshape(this.Group.Hidden, 1, []), ...
+                "SortBy", reshape(this.Sort.By, 1, []), ...
+                "SortDirection", this.Sort.Direction);
+        end
+
+        function emitStateChangeEvents(this, beforeState)
+            arguments
+                this (1,1) gwidgets.UITable
+                beforeState (1,1) struct
+            end
+
+            afterState = this.eventSnapshot();
+            if ~isequal(beforeState.Filter, afterState.Filter) || ...
+                    ~isequal(beforeState.RowFilterIndices, afterState.RowFilterIndices)
+                this.emitTableEvent("FilterChanged", gwidgets.table.TableEventData( ...
+                    Action="changed", ...
+                    Filter=afterState.Filter, ...
+                    PreviousFilter=beforeState.Filter, ...
+                    RowFilterIndices=afterState.RowFilterIndices));
+            end
+
+            if ~isequal(beforeState.GroupingVariables, afterState.GroupingVariables) || ...
+                    ~isequal(beforeState.Groups, afterState.Groups) || ...
+                    ~isequal(beforeState.HiddenGroups, afterState.HiddenGroups)
+                this.emitTableEvent("GroupingChanged", gwidgets.table.TableEventData( ...
+                    Action="changed", ...
+                    GroupingVariables=afterState.GroupingVariables, ...
+                    PreviousGroupingVariables=beforeState.GroupingVariables, ...
+                    Groups=afterState.Groups, ...
+                    OpenGroups=afterState.OpenGroups, ...
+                    ClosedGroups=afterState.ClosedGroups, ...
+                    HiddenGroups=afterState.HiddenGroups));
+            end
+
+            if ~isequal(beforeState.OpenGroups, afterState.OpenGroups) || ...
+                    ~isequal(beforeState.ClosedGroups, afterState.ClosedGroups)
+                this.emitTableEvent("GroupOpenStateChanged", gwidgets.table.TableEventData( ...
+                    Action="changed", ...
+                    GroupingVariables=afterState.GroupingVariables, ...
+                    Groups=afterState.Groups, ...
+                    OpenGroups=afterState.OpenGroups, ...
+                    ClosedGroups=afterState.ClosedGroups, ...
+                    HiddenGroups=afterState.HiddenGroups));
+            end
+
+            if ~isequal(beforeState.SortBy, afterState.SortBy) || ...
+                    ~isequal(beforeState.SortDirection, afterState.SortDirection)
+                this.emitTableEvent("SortChanged", gwidgets.table.TableEventData( ...
+                    Action="changed", ...
+                    SortBy=afterState.SortBy, ...
+                    SortDirection=afterState.SortDirection));
+            end
         end
 
     end

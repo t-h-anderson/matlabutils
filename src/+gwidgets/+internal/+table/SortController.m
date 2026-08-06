@@ -53,9 +53,12 @@ classdef SortController < gwidgets.internal.table.TableController
                     "Specified columns are not sortable")
             end
 
+            previousBy = this.By;
+            previousDirection = this.Direction;
             this.ByColumnIdxs_ = gwidgets.internal.table.SortController.namesToIndex(val, columnNames);
             if owner.doControllerUpdate("SortByColumn")
                 owner.requestControllerUpdate(StartFrom="Sorting");
+                this.emitSortChanged(previousBy, previousDirection);
             end
         end
 
@@ -85,9 +88,12 @@ classdef SortController < gwidgets.internal.table.TableController
                     "Specified columns are not sortable")
             end
 
+            previousBy = this.By;
+            previousDirection = this.Direction;
             this.ByColumnIdxs_ = gwidgets.internal.table.SortController.namesToIndex(val, dataColumnNames);
             if owner.doControllerUpdate("SortByColumn")
                 owner.requestControllerUpdate(StartFrom="Sorting");
+                this.emitSortChanged(previousBy, previousDirection);
             end
         end
 
@@ -101,10 +107,13 @@ classdef SortController < gwidgets.internal.table.TableController
                 val (1,1) string {mustBeMember(val, ["Ascend", "Descend", "None"])}
             end
 
+            previousBy = this.By;
+            previousDirection = this.Direction_;
             this.Direction_ = val;
 
             if this.owner().doControllerUpdate("SortDirection")
                 this.owner().requestControllerUpdate(StartFrom="Sorting");
+                this.emitSortChanged(previousBy, previousDirection);
             end
         end
 
@@ -155,6 +164,26 @@ classdef SortController < gwidgets.internal.table.TableController
     end
 
     methods (Access = private)
+        function emitSortChanged(this, previousBy, previousDirection)
+            arguments
+                this (1,1) gwidgets.internal.table.SortController
+                previousBy (1,:) string
+                previousDirection (1,1) string
+            end
+
+            if isequal(previousBy, this.By) && isequal(previousDirection, this.Direction)
+                return
+            end
+
+            this.owner().emitTableEvent("SortChanged", gwidgets.table.TableEventData( ...
+                Action="changed", ...
+                SortBy=this.By, ...
+                SortDirection=this.Direction, ...
+                Payload=struct( ...
+                    "PreviousSortBy", previousBy, ...
+                    "PreviousSortDirection", previousDirection)));
+        end
+
         function colIdx = sortColumnFromContext(this, displayColumn)
             arguments
                 this (1,1) gwidgets.internal.table.SortController
