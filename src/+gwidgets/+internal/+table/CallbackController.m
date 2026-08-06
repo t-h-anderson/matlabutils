@@ -41,11 +41,17 @@ classdef CallbackController < gwidgets.internal.table.TableController
                 owner.Group.toggleOpenStateForRows(rowIdxs, owner.Data.VisibleGroupHeaderRowIdx);
             end
 
+            dataIdx = owner.eventDisplayToData(displayIdx, "cell");
+            owner.emitTableEvent("CellClicked", gwidgets.table.TableEventData( ...
+                Action="click", ...
+                DisplayIndices=displayIdx, ...
+                DataIndices=dataIdx, ...
+                SelectionType=string(owner.Selection.Type)));
+
             if isempty(this.CellClicked)
                 return
             end
 
-            dataIdx = owner.Selection.displayToData(displayIdx);
             callbackData = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
             this.CellClicked(owner, callbackData);
         end
@@ -58,13 +64,19 @@ classdef CallbackController < gwidgets.internal.table.TableController
             end
 
             gwidgets.internal.table.CallbackController.ignoreCallbackSource(source);
+            owner = this.owner();
+            displayIdx = this.interactionDisplayIndex(eventData);
+            dataIdx = owner.eventDisplayToData(displayIdx, "cell");
+            owner.emitTableEvent("CellDoubleClicked", gwidgets.table.TableEventData( ...
+                Action="doubleClick", ...
+                DisplayIndices=displayIdx, ...
+                DataIndices=dataIdx, ...
+                SelectionType=string(owner.Selection.Type)));
+
             if isempty(this.CellDoubleClick)
                 return
             end
 
-            owner = this.owner();
-            displayIdx = this.interactionDisplayIndex(eventData);
-            dataIdx = owner.Selection.displayToData(displayIdx);
             callbackData = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
             this.CellDoubleClick(owner, callbackData);
         end
@@ -79,11 +91,22 @@ classdef CallbackController < gwidgets.internal.table.TableController
             owner = this.owner();
             displayIdx = eventData.Indices;
             [displayIdx, shouldContinue] = owner.Selection.handleDisplaySelection(displayIdx, source.SelectionType);
-            if ~shouldContinue || isempty(this.CellSelection)
+            if ~shouldContinue
                 return
             end
 
-            dataIdx = owner.Selection.displayToData(displayIdx, "cell");
+            selectionType = string(source.SelectionType);
+            dataIdx = owner.eventDisplayToData(displayIdx, selectionType);
+            owner.emitTableEvent("SelectionChanged", gwidgets.table.TableEventData( ...
+                Action="select", ...
+                DisplayIndices=displayIdx, ...
+                DataIndices=dataIdx, ...
+                SelectionType=selectionType));
+
+            if isempty(this.CellSelection)
+                return
+            end
+
             callbackData = gwidgets.internal.table.CellInteractionData(dataIdx, displayIdx);
             this.CellSelection(owner, callbackData);
         end
@@ -100,11 +123,19 @@ classdef CallbackController < gwidgets.internal.table.TableController
             displayIdx = eventData.Indices;
             owner.Data.editDisplayCell(displayIdx, eventData.NewData, owner.Selection);
 
+            dataIdx = owner.eventDisplayToData(displayIdx, "cell");
+            owner.emitTableEvent("CellEdited", gwidgets.table.TableEventData( ...
+                Action="edit", ...
+                DisplayIndices=displayIdx, ...
+                DataIndices=dataIdx, ...
+                PreviousData=eventData.PreviousData, ...
+                NewData=eventData.NewData, ...
+                EditData=eventData.EditData));
+
             if isempty(this.CellEdit)
                 return
             end
 
-            dataIdx = owner.Selection.displayToData(displayIdx, "cell");
             callbackData = gwidgets.internal.table.CellEditData(eventData, dataIdx);
             this.CellEdit(owner, callbackData);
         end
@@ -119,6 +150,11 @@ classdef CallbackController < gwidgets.internal.table.TableController
             if eventData.Interaction == "sort"
                 this.applyDisplaySort(eventData);
             end
+
+            owner = this.owner();
+            owner.emitTableEvent("DisplayDataChanged", gwidgets.table.TableEventData( ...
+                Action=string(eventData.Interaction), ...
+                Payload=struct("InteractionVariable", string(eventData.InteractionVariable))));
 
             if ~isempty(this.DisplayDataChanged)
                 this.DisplayDataChanged(source, eventData);

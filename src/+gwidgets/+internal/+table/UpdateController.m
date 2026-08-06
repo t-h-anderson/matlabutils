@@ -52,6 +52,7 @@ classdef UpdateController < gwidgets.internal.table.TableController
             end
 
             owner = this.owner();
+            beforeState = owner.eventSnapshot();
             stateUpdateToken = owner.Graphics.beginStateUpdate();
             cleanupObj = onCleanup(@()owner.Graphics.cancelStateUpdate(stateUpdateToken));
 
@@ -95,6 +96,7 @@ classdef UpdateController < gwidgets.internal.table.TableController
 
             delete(cleanupObj);
             owner.Graphics.endStateUpdate(stateUpdateToken);
+            owner.emitStateChangeEvents(beforeState);
             owner.forceRefresh();
         end
     end

@@ -61,6 +61,14 @@ classdef DataController < gwidgets.internal.table.TableController
 
             this.Table_ = data;
             this.requestTableUpdate();
+
+            owner = this.owner();
+            if ~isempty(owner)
+                owner.emitTableEvent("TableDataChanged", gwidgets.table.TableEventData( ...
+                    Action="set", ...
+                    NewData=data, ...
+                    Payload=struct("Size", size(data))));
+            end
         end
 
         function data = get.Table(this)

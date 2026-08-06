@@ -215,6 +215,11 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 case "CellHover"
                     this.onCellHover(data);
                 case "CellLeave"
+                    owner = this.owner();
+                    if ~isempty(owner)
+                        owner.emitTableEvent("TooltipCleared", gwidgets.table.TableEventData( ...
+                            Action="leave"));
+                    end
                     this.sendTooltipBlocks(cell(1,0));
                 case "ContextMenuAction"
                     this.onContextMenuAction(data);
@@ -595,16 +600,32 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
         function onCellHover(this, data)
             owner = this.owner();
             if isempty(owner) || ~isfield(data, "row") || ~isfield(data, "col")
+                if ~isempty(owner)
+                    owner.emitTableEvent("TooltipCleared", gwidgets.table.TableEventData( ...
+                        Action="leave"));
+                end
                 this.sendTooltipBlocks(cell(1,0));
                 return
             end
 
             if isempty(owner.Tooltip.Tooltips) && ~owner.Metric.Enabled
+                displayIdx = [double(data.row), double(data.col)];
+                owner.emitTableEvent("TooltipCleared", gwidgets.table.TableEventData( ...
+                    Action="leave", ...
+                    DisplayIndices=displayIdx, ...
+                    DataIndices=owner.eventDisplayToData(displayIdx, "cell")));
                 this.sendTooltipBlocks(cell(1,0));
                 return
             end
 
-            blocks = owner.Tooltip.resolveBlocks(double(data.row), double(data.col));
+            displayIdx = [double(data.row), double(data.col)];
+            blocks = owner.Tooltip.resolveBlocks(displayIdx(1), displayIdx(2));
+            owner.emitTableEvent("TooltipRequested", gwidgets.table.TableEventData( ...
+                Action="hover", ...
+                DisplayIndices=displayIdx, ...
+                DataIndices=owner.eventDisplayToData(displayIdx, "cell"), ...
+                TooltipBlocks={blocks}, ...
+                TooltipText=gwidgets.table.TableEventData.tooltipTextFromBlocks(blocks)));
             this.sendTooltipBlocks(blocks);
         end
 

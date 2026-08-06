@@ -162,7 +162,14 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 displayColumn (1,1) double
             end
 
-            blocks = this.owner().Tooltip.resolveBlocks(displayRow, displayColumn);
+            owner = this.owner();
+            blocks = owner.Tooltip.resolveBlocks(displayRow, displayColumn);
+            owner.emitTableEvent("TooltipRequested", gwidgets.table.TableEventData( ...
+                Action="hover", ...
+                DisplayIndices=[displayRow, displayColumn], ...
+                DataIndices=owner.eventDisplayToData([displayRow, displayColumn], "cell"), ...
+                TooltipBlocks={blocks}, ...
+                TooltipText=gwidgets.table.TableEventData.tooltipTextFromBlocks(blocks)));
             if isempty(this.Bridge) || ~isvalid(this.Bridge)
                 return
             end
@@ -299,7 +306,18 @@ classdef BridgeController < gwidgets.internal.table.TableController
                     this.owner().Display.applyGroupSpanMeasurements(d);
                 case "CellHover"
                     if this.hasTooltips()
-                        this.applyTooltipPayload(double(d.row), double(d.col));
+                        row = double(d.row);
+                        col = double(d.col);
+                        if row == 0 && col == 0
+                            owner = this.owner();
+                            owner.emitTableEvent("TooltipCleared", gwidgets.table.TableEventData( ...
+                                Action="leave", ...
+                                DisplayIndices=[row, col], ...
+                                DataIndices=owner.eventDisplayToData([row, col], "cell")));
+                            this.send("SetTooltip", struct("blocks", {cell(1,0)}));
+                            return
+                        end
+                        this.applyTooltipPayload(row, col);
                     end
                 case "TableDragStart"
                     this.owner().Drag.onBridgeDragStart(d);

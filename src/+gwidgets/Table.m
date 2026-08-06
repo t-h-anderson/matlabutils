@@ -28,6 +28,24 @@ classdef Table < matlab.mixin.SetGet
 
     properties (Access = private)
         UITable_ (1,:) gwidgets.UITable {mustBeScalarOrEmpty}
+        UITableEventListeners (1,:) event.listener = event.listener.empty(1,0)
+    end
+
+    events
+        CellClicked
+        CellDoubleClicked
+        SelectionChanged
+        CellEdited
+        DisplayDataChanged
+        FilterChanged
+        GroupingChanged
+        GroupOpenStateChanged
+        SortChanged
+        TooltipRequested
+        TooltipCleared
+        DragStarted
+        DropCompleted
+        TableDataChanged
     end
 
     properties (Dependent, SetAccess = private)
@@ -181,6 +199,7 @@ classdef Table < matlab.mixin.SetGet
             namedArgs = rmfield(namedArgs, "Render");
 
             this.UITable_ = gwidgets.UITable(Render=render);
+            this.attachUITableEventForwarders();
             this.UITable_.setConstructionRefreshSuppressed(true);
             cleanupObj = onCleanup(@()this.UITable_.setConstructionRefreshSuppressed(false));
 
@@ -206,6 +225,7 @@ classdef Table < matlab.mixin.SetGet
         end
 
         function delete(this)
+            delete(this.UITableEventListeners);
             delete(this.UITable_);
         end
 
@@ -1066,6 +1086,24 @@ classdef Table < matlab.mixin.SetGet
     end
 
     methods (Static, Hidden)
+        function names = tableEventNames()
+            names = [
+                "CellClicked"
+                "CellDoubleClicked"
+                "SelectionChanged"
+                "CellEdited"
+                "DisplayDataChanged"
+                "FilterChanged"
+                "GroupingChanged"
+                "GroupOpenStateChanged"
+                "SortChanged"
+                "TooltipRequested"
+                "TooltipCleared"
+                "DragStarted"
+                "DropCompleted"
+                "TableDataChanged"]';
+        end
+
         function g = gcdPixelWidths(px)
             vals = round(px(isfinite(px) & px > 0));
             if isempty(vals)
@@ -1084,6 +1122,27 @@ classdef Table < matlab.mixin.SetGet
 
         function val = normalizeColumnWidths(val)
             val = gwidgets.internal.table.ColumnWidthController.normalizeColumnWidths(val);
+        end
+    end
+
+    methods (Access = private)
+        function attachUITableEventForwarders(this)
+            names = gwidgets.Table.tableEventNames();
+            this.UITableEventListeners = event.listener.empty(1,0);
+            for iName = 1:numel(names)
+                eventName = names(iName);
+                this.UITableEventListeners(end+1) = addlistener( ...
+                    this.UITable_, char(eventName), ...
+                    @(~, eventData)this.forwardUITableEvent(eventName, eventData));
+            end
+        end
+
+        function forwardUITableEvent(this, eventName, eventData)
+            if ~isvalid(this)
+                return
+            end
+
+            notify(this, char(eventName), eventData);
         end
     end
 end
