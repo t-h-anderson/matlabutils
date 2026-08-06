@@ -35,16 +35,23 @@ classdef Table < matlab.mixin.SetGet
         CellClicked
         CellDoubleClicked
         SelectionChanged
+        CellEditRequested
         CellEdited
+        DisplayDataChangeRequested
         DisplayDataChanged
+        FilterChangeRequested
         FilterChanged
+        GroupingChangeRequested
         GroupingChanged
         GroupOpenStateChanged
+        SortChangeRequested
         SortChanged
         TooltipRequested
         TooltipCleared
         DragStarted
+        DropRequested
         DropCompleted
+        CommandInvoked
         TableDataChanged
     end
 
@@ -1091,16 +1098,23 @@ classdef Table < matlab.mixin.SetGet
                 "CellClicked"
                 "CellDoubleClicked"
                 "SelectionChanged"
+                "CellEditRequested"
                 "CellEdited"
+                "DisplayDataChangeRequested"
                 "DisplayDataChanged"
+                "FilterChangeRequested"
                 "FilterChanged"
+                "GroupingChangeRequested"
                 "GroupingChanged"
                 "GroupOpenStateChanged"
+                "SortChangeRequested"
                 "SortChanged"
                 "TooltipRequested"
                 "TooltipCleared"
                 "DragStarted"
+                "DropRequested"
                 "DropCompleted"
+                "CommandInvoked"
                 "TableDataChanged"]';
         end
 

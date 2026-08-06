@@ -28,16 +28,23 @@ classdef UITable < gwidgets.internal.Reparentable
         CellClicked
         CellDoubleClicked
         SelectionChanged
+        CellEditRequested
         CellEdited
+        DisplayDataChangeRequested
         DisplayDataChanged
+        FilterChangeRequested
         FilterChanged
+        GroupingChangeRequested
         GroupingChanged
         GroupOpenStateChanged
+        SortChangeRequested
         SortChanged
         TooltipRequested
         TooltipCleared
         DragStarted
+        DropRequested
         DropCompleted
+        CommandInvoked
         TableDataChanged
     end
 
@@ -304,7 +311,7 @@ classdef UITable < gwidgets.internal.Reparentable
             gwidgets.internal.Drawnow.run("limitrate");
         end
 
-        function emitTableEvent(this, eventName, eventData)
+        function eventData = emitTableEvent(this, eventName, eventData)
             arguments
                 this (1,1) gwidgets.UITable
                 eventName (1,1) string

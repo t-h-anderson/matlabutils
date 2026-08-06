@@ -364,6 +364,23 @@ classdef GroupController < gwidgets.internal.table.TableController
             val(val == "") = [];
 
             owner = this.owner();
+            previousBy = this.By_;
+            requestEvent = owner.emitTableEvent("GroupingChangeRequested", ...
+                gwidgets.table.TableEventData( ...
+                Action="change", ...
+                GroupingVariables=val, ...
+                PreviousGroupingVariables=previousBy, ...
+                Value=val, ...
+                PreviousValue=previousBy));
+            if requestEvent.Cancel
+                return
+            end
+            if requestEvent.HasReplacementValue
+                val = string(requestEvent.ReplacementValue);
+                val = unique(val, "stable");
+                val(val == "") = [];
+            end
+
             dataColumnNames = owner.Column.DataNames;
             if ~isempty(val) && any(~ismember(val, dataColumnNames))
                 error("GraphicsWidgets:Table:NonexistentGroupingVariable", ...
@@ -375,6 +392,7 @@ classdef GroupController < gwidgets.internal.table.TableController
 
             if owner.doControllerUpdate("GroupingVariable")
                 owner.requestControllerUpdate(StartFrom="Grouping");
+                this.emitGroupingChanged("changed", previousBy);
             end
             owner.Menu.refresh();
         end
@@ -413,10 +431,13 @@ classdef GroupController < gwidgets.internal.table.TableController
                     "Grouping variables not found: " + strjoin(val(~idx), ", "));
             end
 
+            previousOpen = this.Open;
+            previousClosed = this.Closed;
             idx = ismember(this.Groups_, val);
             this.Open_ = this.Groups_(idx);
             if this.owner().doControllerUpdate("OpenGroups")
                 this.owner().requestControllerUpdate(StartFrom="Folding");
+                this.emitGroupOpenStateChanged(previousOpen, previousClosed);
             end
         end
 
@@ -441,10 +462,13 @@ classdef GroupController < gwidgets.internal.table.TableController
                     "Grouping variables not found: " + strjoin(val(~idx), ", "));
             end
 
+            previousOpen = this.Open;
+            previousClosed = this.Closed;
             idx = ismember(this.Groups_, val);
             this.Open_ = this.Groups_(~idx);
             if this.owner().doControllerUpdate("ClosedGroups")
                 this.owner().requestControllerUpdate(StartFrom="Folding");
+                this.emitGroupOpenStateChanged(previousOpen, previousClosed);
             end
         end
 
@@ -458,10 +482,12 @@ classdef GroupController < gwidgets.internal.table.TableController
                 val (1,:) string
             end
 
+            previousBy = this.By_;
             idx = ismember(this.Groups_, val);
             this.Hidden_ = this.Groups_(idx);
             if this.owner().doControllerUpdate("HiddenGroups")
                 this.owner().requestControllerUpdate(StartFrom="Folding");
+                this.emitGroupingChanged("hide", previousBy);
             end
         end
 
@@ -475,10 +501,12 @@ classdef GroupController < gwidgets.internal.table.TableController
                 val (1,1) logical
             end
 
+            previousBy = this.By_;
             this.ShowEmpty_ = val;
 
             if this.owner().doControllerUpdate("ShowEmptyGroups")
                 this.owner().requestControllerUpdate(StartFrom="Folding");
+                this.emitGroupingChanged("showEmpty", previousBy);
             end
         end
 
@@ -492,9 +520,11 @@ classdef GroupController < gwidgets.internal.table.TableController
                 val (1,1) string {mustBeMember(val, ["Flat", "Nested"])}
             end
 
+            previousBy = this.By_;
             this.Mode_ = val;
             if this.owner().doControllerUpdate("GroupingMode")
                 this.owner().requestControllerUpdate(StartFrom="Grouping");
+                this.emitGroupingChanged("mode", previousBy);
             end
             this.owner().Menu.refresh();
         end
@@ -514,6 +544,50 @@ classdef GroupController < gwidgets.internal.table.TableController
     end
 
     methods (Access = private)
+        function emitGroupingChanged(this, action, previousBy)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                action (1,1) string
+                previousBy (1,:) string
+            end
+
+            if action == "changed" && isequal(previousBy, this.By_)
+                return
+            end
+
+            this.owner().emitTableEvent("GroupingChanged", gwidgets.table.TableEventData( ...
+                Action=action, ...
+                GroupingVariables=this.By, ...
+                PreviousGroupingVariables=previousBy, ...
+                Groups=this.Groups, ...
+                OpenGroups=this.Open, ...
+                ClosedGroups=this.Closed, ...
+                HiddenGroups=this.Hidden));
+        end
+
+        function emitGroupOpenStateChanged(this, previousOpen, previousClosed)
+            arguments
+                this (1,1) gwidgets.internal.table.GroupController
+                previousOpen (1,:) string
+                previousClosed (1,:) string
+            end
+
+            if isequal(previousOpen, this.Open) && isequal(previousClosed, this.Closed)
+                return
+            end
+
+            this.owner().emitTableEvent("GroupOpenStateChanged", gwidgets.table.TableEventData( ...
+                Action="changed", ...
+                GroupingVariables=this.By, ...
+                Groups=this.Groups, ...
+                OpenGroups=this.Open, ...
+                ClosedGroups=this.Closed, ...
+                HiddenGroups=this.Hidden, ...
+                Payload=struct( ...
+                    "PreviousOpenGroups", previousOpen, ...
+                    "PreviousClosedGroups", previousClosed)));
+        end
+
         function tf = reorderCategorical(this, sourceGroup, targetGroup, placement)
             arguments
                 this (1,1) gwidgets.internal.table.GroupController

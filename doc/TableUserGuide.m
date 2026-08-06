@@ -52,6 +52,19 @@ tbl.SelectionControl.Value = [2 3];
 tbl.Callback.CellSelection = @(src, evt)setappdata(fig, "LastSelection", evt);
 tbl.Callback.CellDoubleClick = @(src, evt)setappdata(fig, "LastDoubleClick", evt);
 %%
+%[text] ## Events
+%[text] Apps can attach listeners directly to |gwidgets.Table|. Event payloads are |gwidgets.table.TableEventData| objects with common fields such as |Action|, |Backend|, |DisplayIndices|, |DataIndices|, |SelectionType|, |Payload|, and workflow-specific fields.
+editListener = addlistener(tbl, "CellEdited", ...
+    @(src, evt)setappdata(fig, "LastEditedCell", evt.DataIndices));
+cleanupEditListener = onCleanup(@()delete(editListener));
+%[text] Pre-action events can cancel or replace selected operations. For example, this prevents dropping rows onto the first display row.
+dropListener = addlistener(tbl, "DropRequested", @(src, evt)cancelFirstRowDrop(evt));
+cleanupDropListener = onCleanup(@()delete(dropListener));
+%[text] |TooltipRequested| can provide app-owned tooltip blocks by setting |Handled| and |TooltipBlocks|.
+tooltipListener = addlistener(tbl, "TooltipRequested", @(src, evt)setDynamicTooltip(evt));
+cleanupTooltipListener = onCleanup(@()delete(tooltipListener));
+%[text] Common events include |CellClicked|, |CellDoubleClicked|, |SelectionChanged|, |CellEditRequested|, |CellEdited|, |DisplayDataChangeRequested|, |DisplayDataChanged|, |FilterChangeRequested|, |FilterChanged|, |GroupingChangeRequested|, |GroupingChanged|, |GroupOpenStateChanged|, |SortChangeRequested|, |SortChanged|, |TooltipRequested|, |TooltipCleared|, |DragStarted|, |DropRequested|, |DropCompleted|, |CommandInvoked|, and |TableDataChanged|. Requested events are pre-action and may set |Cancel=true|; changed/completed events are notifications after work is applied.
+%%
 %[text] ## Columns
 %[text] |Column.Width|, |Column.Visible|, |Column.Names|, |Column.Editable|, and |Column.Sortable| act on visible columns. The corresponding |Data| properties act on source data columns before visibility mapping.
 tbl.Column.DataWidth = {120, "1x", 90};
@@ -91,6 +104,18 @@ fig.Visible = "on";
 %%
 %[text] ## See Also
 %[text] |gwidgets.Table|, |gwidgets.UITable|, |gwidgets.table.TooltipStyle|, |gwidgets.table.TooltipContext|, |doc/TableDeveloperGuide.m|, |doc/TableDemo.m|
+function cancelFirstRowDrop(evt)
+if any(evt.TargetSelection.DisplayRows == 1)
+    evt.Cancel = true;
+end
+end
+
+function setDynamicTooltip(evt)
+line = struct("text", "Display cell [" + strjoin(string(evt.DisplayIndices), ", ") + "]", "css", "");
+evt.TooltipBlocks = {struct("containerCss", "", "lines", {{line}})};
+evt.TooltipText = string(line.text);
+evt.Handled = true;
+end
 %[appendix]{"version":"1.0"}
 %---
 %[metadata:view]

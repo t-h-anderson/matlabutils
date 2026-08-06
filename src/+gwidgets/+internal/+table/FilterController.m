@@ -108,14 +108,32 @@ classdef FilterController < gwidgets.internal.table.TableController
         end
 
         function set.FilterValue(this, val)
+            previousFilter = this.FilterValue;
+            owner = this.owner();
+            if ~isempty(owner)
+                requestEvent = owner.emitTableEvent("FilterChangeRequested", ...
+                    gwidgets.table.TableEventData( ...
+                    Action="change", ...
+                    Filter=val, ...
+                    PreviousFilter=previousFilter, ...
+                    Value=val, ...
+                    PreviousValue=previousFilter));
+                if requestEvent.Cancel
+                    return
+                end
+                if requestEvent.HasReplacementValue
+                    val = string(requestEvent.ReplacementValue);
+                end
+            end
+
             this.FilterValue_ = val;
             if ~isempty(this.Component)
                 this.Component.FilterValue = val;
             end
 
-            owner = this.owner();
             if ~isempty(owner) && owner.doControllerUpdate("Filter")
                 owner.requestControllerUpdate(StartFrom="Filtering");
+                this.emitFilterChanged(previousFilter);
             end
         end
 
@@ -147,7 +165,10 @@ classdef FilterController < gwidgets.internal.table.TableController
 
     methods (Access = {?gwidgets.internal.WithWeakListeners})
         function onFilterChanged(this, ~, ~)
+            previousFilter = this.FilterValue_;
+            this.FilterValue_ = this.FilterValue;
             notify(this, "FilterChanged");
+            this.emitFilterChanged(previousFilter);
         end
 
         function onFilterHelpRequested(this, ~, ~)
@@ -156,6 +177,21 @@ classdef FilterController < gwidgets.internal.table.TableController
 
         function onFilterHelpClosed(this, ~, ~)
             notify(this, "FilterHelpClosed");
+        end
+    end
+
+    methods (Access = private)
+        function emitFilterChanged(this, previousFilter)
+            owner = this.owner();
+            if isempty(owner) || string(previousFilter) == this.FilterValue
+                return
+            end
+
+            owner.emitTableEvent("FilterChanged", gwidgets.table.TableEventData( ...
+                Action="changed", ...
+                Filter=this.FilterValue, ...
+                PreviousFilter=previousFilter, ...
+                RowFilterIndices=reshape(owner.Data.RowFilterIndices, 1, [])));
         end
     end
 end
