@@ -47,6 +47,11 @@ classdef SortController < gwidgets.internal.table.TableController
             owner = this.owner();
             columnNames = owner.Column.Names;
             sortableColumnNames = columnNames(owner.Column.DataSortable);
+            [val, canceled] = this.requestSortChange("by", val);
+            if canceled
+                return
+            end
+
             idx = ~ismember(val, sortableColumnNames);
             if any(idx)
                 error("GraphicsWidgets:Table:NotASortableColumn", ...
@@ -82,6 +87,11 @@ classdef SortController < gwidgets.internal.table.TableController
             owner = this.owner();
             dataColumnNames = owner.Column.DataNames;
             sortableDataColumnNames = dataColumnNames(owner.Column.DataSortable);
+            [val, canceled] = this.requestSortChange("byData", val);
+            if canceled
+                return
+            end
+
             idx = ~ismember(val, sortableDataColumnNames);
             if any(idx)
                 error("GraphicsWidgets:Table:NotASortableColumn", ...
@@ -105,6 +115,11 @@ classdef SortController < gwidgets.internal.table.TableController
             arguments
                 this (1,1) gwidgets.internal.table.SortController
                 val (1,1) string {mustBeMember(val, ["Ascend", "Descend", "None"])}
+            end
+
+            [val, canceled] = this.requestSortChange("direction", val);
+            if canceled
+                return
             end
 
             previousBy = this.By;
@@ -164,6 +179,38 @@ classdef SortController < gwidgets.internal.table.TableController
     end
 
     methods (Access = private)
+        function [val, canceled] = requestSortChange(this, action, val)
+            arguments
+                this (1,1) gwidgets.internal.table.SortController
+                action (1,1) string
+                val
+            end
+
+            canceled = false;
+            eventData = this.owner().emitTableEvent("SortChangeRequested", ...
+                gwidgets.table.TableEventData( ...
+                Action=action, ...
+                SortBy=this.requestedSortBy(action, val), ...
+                SortDirection=this.requestedSortDirection(action, val), ...
+                Value=val, ...
+                PreviousValue=this.currentSortValue(action), ...
+                Payload=struct( ...
+                    "PreviousSortBy", this.By, ...
+                    "PreviousSortDirection", this.Direction)));
+            if eventData.Cancel
+                canceled = true;
+                return
+            end
+
+            if eventData.HasReplacementValue
+                val = string(eventData.ReplacementValue);
+            end
+            if action == "direction" && ~any(val == ["Ascend", "Descend", "None"])
+                error("GraphicsWidgets:Table:SortDirection", ...
+                    "Sort direction must be Ascend, Descend, or None.");
+            end
+        end
+
         function emitSortChanged(this, previousBy, previousDirection)
             arguments
                 this (1,1) gwidgets.internal.table.SortController
@@ -182,6 +229,30 @@ classdef SortController < gwidgets.internal.table.TableController
                 Payload=struct( ...
                     "PreviousSortBy", previousBy, ...
                     "PreviousSortDirection", previousDirection)));
+        end
+
+        function value = requestedSortBy(this, action, requestedValue)
+            if action == "direction"
+                value = this.By;
+            else
+                value = string(requestedValue);
+            end
+        end
+
+        function value = requestedSortDirection(this, action, requestedValue)
+            if action == "direction"
+                value = string(requestedValue);
+            else
+                value = this.Direction;
+            end
+        end
+
+        function value = currentSortValue(this, action)
+            if action == "direction"
+                value = this.Direction;
+            else
+                value = this.By;
+            end
         end
 
         function colIdx = sortColumnFromContext(this, displayColumn)

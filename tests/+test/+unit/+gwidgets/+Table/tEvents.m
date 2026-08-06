@@ -48,6 +48,8 @@ classdef tEvents < matlab.unittest.TestCase
         function tCellEditedEventIncludesPreviousAndNewData(testCase)
             t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
             log = test.unit.gwidgets.Table.EventLog();
+            requestLog = test.unit.gwidgets.Table.EventLog();
+            testCase.listen(t, "CellEditRequested", requestLog);
             testCase.listen(t, "CellEdited", log);
             editEvent = struct( ...
                 "Indices", [2 1], ...
@@ -59,6 +61,7 @@ classdef tEvents < matlab.unittest.TestCase
 
             event = log.latest();
             testCase.verifyEqual(log.Count, 1)
+            testCase.verifyEqual(requestLog.Count, 1)
             testCase.verifyEqual(string(event.EventName), "CellEdited")
             testCase.verifyEqual(event.DisplayIndices, [2 1])
             testCase.verifyEqual(event.DataIndices, [2 1])
@@ -68,9 +71,49 @@ classdef tEvents < matlab.unittest.TestCase
             testCase.verifyEqual(t.Data.ID(2), 42)
         end
 
+        function tCellEditRequestedCanCancelEdit(testCase)
+            t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
+            requestLog = test.unit.gwidgets.Table.EventLog();
+            editLog = test.unit.gwidgets.Table.EventLog();
+            requestLog.CancelEvents = true;
+            testCase.listen(t, "CellEditRequested", requestLog);
+            testCase.listen(t, "CellEdited", editLog);
+            editEvent = struct( ...
+                "Indices", [2 1], ...
+                "PreviousData", 2, ...
+                "EditData", 42, ...
+                "NewData", 42);
+
+            t.UITable.Callback.onCellEdit([], editEvent);
+
+            testCase.verifyEqual(requestLog.Count, 1)
+            testCase.verifyEqual(editLog.Count, 0)
+            testCase.verifyEqual(t.Data.ID, (1:4)')
+        end
+
+        function tCellEditRequestedCanReplaceData(testCase)
+            t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
+            requestLog = test.unit.gwidgets.Table.EventLog();
+            requestLog.HasReplacementData = true;
+            requestLog.ReplacementData = 99;
+            testCase.listen(t, "CellEditRequested", requestLog);
+            editEvent = struct( ...
+                "Indices", [2 1], ...
+                "PreviousData", 2, ...
+                "EditData", 42, ...
+                "NewData", 42);
+
+            t.UITable.Callback.onCellEdit([], editEvent);
+
+            testCase.verifyEqual(requestLog.Count, 1)
+            testCase.verifyEqual(t.Data.ID(2), 99)
+        end
+
         function tDisplayDataChangedEventDoesNotRequireLegacyCallback(testCase)
             t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
             log = test.unit.gwidgets.Table.EventLog();
+            requestLog = test.unit.gwidgets.Table.EventLog();
+            testCase.listen(t, "DisplayDataChangeRequested", requestLog);
             testCase.listen(t, "DisplayDataChanged", log);
             eventData = struct( ...
                 "Interaction", "filter", ...
@@ -80,9 +123,37 @@ classdef tEvents < matlab.unittest.TestCase
 
             event = log.latest();
             testCase.verifyEqual(log.Count, 1)
+            testCase.verifyEqual(requestLog.Count, 1)
             testCase.verifyEqual(string(event.EventName), "DisplayDataChanged")
             testCase.verifyEqual(event.Action, "filter")
             testCase.verifyEqual(event.Payload.InteractionVariable, "Group")
+        end
+
+        function tFilterChangeRequestedCanReplaceFilter(testCase)
+            t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
+            requestLog = test.unit.gwidgets.Table.EventLog();
+            requestLog.HasReplacementValue = true;
+            requestLog.ReplacementValue = "Group=B";
+            testCase.listen(t, "FilterChangeRequested", requestLog);
+
+            t.Filter = "Group=A";
+
+            testCase.verifyEqual(requestLog.Count, 1)
+            testCase.verifyEqual(t.Filter, "Group=B")
+            testCase.verifyEqual(t.RowFilterIndices, [false true false true])
+        end
+
+        function tFilterChangeRequestedCanCancelFilter(testCase)
+            t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
+            requestLog = test.unit.gwidgets.Table.EventLog();
+            requestLog.CancelEvents = true;
+            testCase.listen(t, "FilterChangeRequested", requestLog);
+
+            t.Filter = "Group=A";
+
+            testCase.verifyEqual(requestLog.Count, 1)
+            testCase.verifyEqual(t.Filter, "")
+            testCase.verifyEqual(t.RowFilterIndices, [true true true true])
         end
 
         function tStateChangeEventsPublishFilterGroupAndSort(testCase)
@@ -126,8 +197,10 @@ classdef tEvents < matlab.unittest.TestCase
             testCase.verifyEqual(log.Count, 1)
             testCase.verifyEqual(string(event.EventName), "TableDataChanged")
             testCase.verifyEqual(event.Action, "set")
-            testCase.verifyEqual(event.NewData, data)
+            testCase.verifyEmpty(event.NewData)
             testCase.verifyEqual(event.Payload.Size, size(data))
+            testCase.verifyEqual(event.Payload.PreviousSize, [4 2])
+            testCase.verifyEqual(event.Payload.VariableNames, ["ID", "Group"])
         end
 
         function tTooltipEventFromBridgeHover(testCase)
@@ -144,6 +217,20 @@ classdef tEvents < matlab.unittest.TestCase
             testCase.verifyEqual(event.DisplayIndices, [2 1])
             testCase.verifyEqual(event.DataIndices, [2 1])
             testCase.verifyEqual(event.TooltipText, "cell text")
+        end
+
+        function tTooltipRequestedCanSupplyTooltipBlocks(testCase)
+            t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
+            log = test.unit.gwidgets.Table.EventLog();
+            log.TooltipBlocks = test.unit.gwidgets.Table.tEvents.tooltipBlocks("listener text");
+            testCase.listen(t, "TooltipRequested", log);
+
+            t.simulateBridgeHover(2, 1);
+
+            event = log.latest();
+            testCase.verifyEqual(log.Count, 1)
+            testCase.verifyEqual(event.TooltipText, "listener text")
+            testCase.verifyTrue(event.Handled)
         end
 
         function tTooltipEventFromJavaScriptHover(testCase)
@@ -193,6 +280,44 @@ classdef tEvents < matlab.unittest.TestCase
             testCase.verifyEqual(dropEvent.TargetSelection.DataRows, 4)
             testCase.verifyEqual(t.Data.ID, [1; 3; 4; 2])
         end
+
+        function tDropRequestedCanCancelDrop(testCase)
+            t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
+            requestLog = test.unit.gwidgets.Table.EventLog();
+            dropLog = test.unit.gwidgets.Table.EventLog();
+            requestLog.CancelEvents = true;
+            testCase.listen(t, "DropRequested", requestLog);
+            testCase.listen(t, "DropCompleted", dropLog);
+            t.Drag.Enabled = true;
+            dropData = struct( ...
+                "sourceRow", 2, ...
+                "targetRow", 4, ...
+                "placement", "after", ...
+                "key", "alt");
+
+            t.Drag.onBridgeDrop(dropData);
+
+            testCase.verifyEqual(requestLog.Count, 1)
+            testCase.verifyEqual(dropLog.Count, 0)
+            testCase.verifyEqual(t.Data.ID, (1:4)')
+        end
+
+        function tContextMenuCommandCanBeObservedAndCanceled(testCase)
+            t = test.unit.gwidgets.Table.tEvents.createTable(testCase);
+            log = test.unit.gwidgets.Table.EventLog();
+            log.CancelEvents = true;
+            testCase.listen(t, "CommandInvoked", log);
+            t.Menu.HasToggleDragging = true;
+            menuItem = findall(t.ContextMenu, "Type", "uimenu", "Text", "Enable row dragging");
+            callback = menuItem.MenuSelectedFcn;
+
+            callback(menuItem, []);
+
+            event = log.latest();
+            testCase.verifyEqual(log.Count, 1)
+            testCase.verifyEqual(event.Command, "ToggleDragging")
+            testCase.verifyFalse(t.Drag.Enabled)
+        end
     end
 
     methods
@@ -224,6 +349,12 @@ classdef tEvents < matlab.unittest.TestCase
                 (1:4)', ...
                 ["A"; "B"; "A"; "B"], ...
                 VariableNames=["ID", "Group"]);
+        end
+
+        function blocks = tooltipBlocks(text)
+            blocks = {struct( ...
+                "containerCss", "", ...
+                "lines", {{struct("text", text, "css", "")}})};
         end
     end
 end

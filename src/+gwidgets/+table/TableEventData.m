@@ -4,12 +4,21 @@ classdef TableEventData < event.EventData
     properties
         Action string = ""
         Backend string = ""
+        Command string = ""
         DisplayIndices = []
         DataIndices = []
         SelectionType string = ""
+        Cancel (1,1) logical = false
+        Handled (1,1) logical = false
         PreviousData = []
         NewData = []
         EditData = []
+        Value = []
+        PreviousValue = []
+        ReplacementValue = []
+        HasReplacementValue (1,1) logical = false
+        ReplacementData = []
+        HasReplacementData (1,1) logical = false
         Filter string = ""
         PreviousFilter string = ""
         RowFilterIndices = logical.empty(1,0)
@@ -43,12 +52,21 @@ classdef TableEventData < event.EventData
             arguments
                 nvp.Action = ""
                 nvp.Backend = ""
+                nvp.Command = ""
                 nvp.DisplayIndices = []
                 nvp.DataIndices = []
                 nvp.SelectionType = ""
+                nvp.Cancel (1,1) logical = false
+                nvp.Handled (1,1) logical = false
                 nvp.PreviousData = []
                 nvp.NewData = []
                 nvp.EditData = []
+                nvp.Value = []
+                nvp.PreviousValue = []
+                nvp.ReplacementValue = []
+                nvp.HasReplacementValue (1,1) logical = false
+                nvp.ReplacementData = []
+                nvp.HasReplacementData (1,1) logical = false
                 nvp.Filter = ""
                 nvp.PreviousFilter = ""
                 nvp.RowFilterIndices = logical.empty(1,0)
@@ -90,6 +108,28 @@ classdef TableEventData < event.EventData
 
         function columns = get.DataColumn(this)
             columns = gwidgets.table.TableEventData.indexColumn(this.DataIndices, 2);
+        end
+
+        function blocks = tooltipBlocksForDisplay(this, defaultBlocks)
+            arguments
+                this (1,1) gwidgets.table.TableEventData
+                defaultBlocks (1,:) cell = cell(1,0)
+            end
+
+            if this.Cancel
+                blocks = cell(1,0);
+                return
+            end
+
+            blocks = defaultBlocks;
+            if ~this.Handled
+                return
+            end
+
+            blocks = this.TooltipBlocks;
+            if isscalar(blocks) && iscell(blocks{1})
+                blocks = blocks{1};
+            end
         end
     end
 
