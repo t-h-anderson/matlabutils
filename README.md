@@ -5,11 +5,14 @@ MATLAB Utils is a small MATLAB project containing general-purpose utilities and 
 The main packages are:
 
 - `mlut`: utility functions and robust wrappers around `table` and `timetable`.
+- `mlut.sl`: Simulink session, data dictionary, bus, model-wrapper, and trace utilities.
+- `mlut.workspace`: scoped access and guard utilities for base-workspace changes.
 - `gwidgets`: interactive graphics widgets, including a filterable/sortable table and drag-link helpers.
 
 ## Requirements
 
-- MATLAB R2023b or newer is recommended.
+- MATLAB R2025a or newer is required.
+- Simulink is required for `mlut.sl` utilities and their tests.
 - Statistics and Machine Learning Toolbox is currently required by the source dependency graph.
 
 ## Getting Started
