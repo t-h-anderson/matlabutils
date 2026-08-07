@@ -291,7 +291,13 @@ classdef DragLinker < handle
 
             % Check if dropped on target
             cursorFig = obj.figureAtCursor();
-            if ~isempty(cursorFig)
+            if isempty(cursorFig)
+                % Released clear of every figure. That is still a failed drag,
+                % not a silent no-op, or a drop that misses the app entirely
+                % leaves the drag unresolved and no listener ever hears.
+                notify(obj, "DragFailed");
+                obj.debugLog("Drag failed - released outside all figures");
+            else
                 cursorFig = cursorFig(1);
                 releasePoint = obj.cursorPositionForFigure(cursorFig);
                 targetPos = obj.getAbsolutePosition(obj.Target);
