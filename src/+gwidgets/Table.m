@@ -1057,6 +1057,12 @@ classdef Table < matlab.mixin.SetGet
             this.UITable_.Display.handleBridgeColumnWidths(pixelWidths);
         end
 
+        function simulateBridgeReflow(this, pixelWidths)
+            % A ResizeObserver report with no user gesture behind it, as sent
+            % after a hide/show, new data, or a figure resize.
+            this.UITable_.Display.handleBridgeColumnWidths(pixelWidths, false);
+        end
+
         function simulateGroupSpanMeasure(this, data)
             this.UITable_.Display.applyGroupSpanMeasurements(data);
         end
