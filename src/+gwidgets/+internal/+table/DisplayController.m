@@ -230,10 +230,16 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
         end
 
-        function handleBridgeColumnWidths(this, pixelWidths)
+        function handleBridgeColumnWidths(this, pixelWidths, fromDrag)
+            % fromDrag is false for the bridge's ResizeObserver reports, which
+            % fire on any reflow. Those carry measurements only: the renderer
+            % stretches the last visible column to fill, so treating them as
+            % resizes writes that stretched width over an authored one and
+            % re-derives every relative weight from measured pixels.
             arguments
                 this (1,1) gwidgets.internal.table.DisplayController
                 pixelWidths (1,:) double
+                fromDrag (1,1) logical = true
             end
 
             owner = this.owner();
@@ -254,11 +260,14 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
 
             changed = false;
-            if any(visibleMask) && owner.Column.didBridgeWidthsChangeForMask(dataPixelWidths, visibleMask)
+            if fromDrag && any(visibleMask) && ...
+                    owner.Column.didBridgeWidthsChangeForMask(dataPixelWidths, visibleMask)
                 owner.Column.updateBridgeWidthsForMask(dataPixelWidths, visibleMask);
                 changed = true;
             end
 
+            % Group-header spans are measured, not authored, so they track the
+            % rendered layout whether or not the user dragged anything.
             if this.updateNormalSyntheticHeaderWidths(owner, syntheticPixelWidths)
                 changed = true;
             end

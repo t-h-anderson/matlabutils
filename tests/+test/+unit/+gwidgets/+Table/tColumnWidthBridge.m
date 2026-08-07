@@ -384,6 +384,71 @@ classdef tColumnWidthBridge < test.WithExampleTables
     end
 
     % ------------------------------------------------------------------ %
+    %  Reflow reports must not be mistaken for user resizes
+    % ------------------------------------------------------------------ %
+    %  The bridge's ResizeObserver reports widths after any reflow, not just
+    %  after a drag. Those measurements describe what the renderer did -- it
+    %  stretches the last visible column to fill -- so accepting them as
+    %  resizes overwrites authored widths and re-derives every relative
+    %  weight from measured pixels.
+    methods (Test)
+
+        function tReflowKeepsRelativeWeights(testCase)
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.DataColumnWidth = {100, "1x"};
+            % Renderer stretched the relative column to fill the table.
+            t.simulateBridgeReflow([100, 699]);
+            testCase.verifyEqual(t.DataColumnWidth, {100, "1x"})
+            delete(t);
+        end
+
+        function tReflowKeepsRelativeWeightRatio(testCase)
+            t = gwidgets.Table(Data=testCase.multivariableData());
+            nCols = numel(t.DataColumnWidth);
+            testCase.assumeGreaterThanOrEqual(nCols, 3)
+
+            widths = repmat({"1x"}, 1, nCols);
+            widths{1} = 80;
+            widths{2} = "1x";
+            widths{3} = "2x";
+            t.DataColumnWidth = widths;
+
+            reported = repmat(200, 1, nCols);
+            reported(1) = 80;
+            reported(2) = 281;
+            reported(3) = 558;
+            t.simulateBridgeReflow(reported);
+
+            result = t.DataColumnWidth;
+            testCase.verifyEqual(result{1}, 80)
+            testCase.verifyEqual(result{2}, "1x")
+            testCase.verifyEqual(result{3}, "2x")
+            delete(t);
+        end
+
+        function tReflowKeepsFixedWidthWhenRendererStretchesIt(testCase)
+            % Hiding a neighbour makes the renderer stretch the last column
+            % past its authored pixel width. That measurement must not stick.
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.DataColumnWidth = {100, 80};
+            t.simulateBridgeReflow([100, 779]);
+            testCase.verifyEqual(t.DataColumnWidth, {100, 80})
+            delete(t);
+        end
+
+        function tDragStillUpdatesWidths(testCase)
+            % The gesture path must keep working -- guard against the reflow
+            % fix suppressing genuine resizes too.
+            t = gwidgets.Table(Data=testCase.stringData());  % 2 cols
+            t.DataColumnWidth = {100, 80};
+            t.simulateBridgeDrag([150, 120]);
+            testCase.verifyEqual(t.DataColumnWidth, {150, 120})
+            delete(t);
+        end
+
+    end
+
+    % ------------------------------------------------------------------ %
     %  DefaultColumnWidths reset
     % ------------------------------------------------------------------ %
     methods (Test)

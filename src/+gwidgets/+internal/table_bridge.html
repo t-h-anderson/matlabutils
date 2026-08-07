@@ -28,7 +28,7 @@
   //
   // Bridge reports (events sent FROM the bridge):
   //   BridgeReady             — JS setup complete; MATLAB should send Init + Ready
-  //   ColumnWidthChanged      — {widths:[...], moving:bool}
+  //   ColumnWidthChanged      — {widths:[...], moving:bool, fromDrag:bool}
   //   CellHover               — {row:int, col:int} (row=0 means header; 0/0 means none)
   //   TableDragStart          — {sourceRow:int, sourceCol:int, key:string}
   //   TableDrop               — {sourceRow:int, targetRow:int, placement:string, key:string}
@@ -144,7 +144,7 @@
       // event carries moving=false.  ResizeObserver won't fire after
       // release (size stopped changing), so we send one explicit report.
       isMoving = false;
-      onResize();
+      onResize(true);
       // Self-suppress: block the snap-back ResizeObserver callback that fires
       // ~120ms after mouseup when the drag handler releases its px constraints
       // and the <th> reverts to the pre-drag <col> widths. MATLAB takes ~133ms
@@ -183,7 +183,10 @@
     bridgeLog("[Bridge] " + ts() + " attachObserver: found=" + cols.length +
               (cols.length ? " widths=[" + colWidthsFromDOM(cols).join(",") + "]" : ""));
     if (cols.length === 0) return;
-    resizeObserver = new ResizeObserver(onResize);
+    // Must not pass onResize directly: the observer would supply its entries
+    // array as the first argument and every layout reflow would look like a
+    // user drag.
+    resizeObserver = new ResizeObserver(function() { onResize(false); });
     cols.forEach(function(col) { resizeObserver.observe(col); });
     var root = findTableRoot();
     if (root && root.nodeType === 1) resizeObserver.observe(root);
@@ -191,7 +194,11 @@
 
   // ---- ResizeObserver callback ----
 
-  function onResize() {
+  // fromDrag marks the one report we send explicitly on mouseup. Everything
+  // else is the ResizeObserver reacting to a reflow — hiding or showing a
+  // column, new data, a figure resize — which must not be mistaken for the
+  // user resizing a column.
+  function onResize(fromDrag) {
     if (!htmlComponent) return;
     requestSpanRender();
     if (callbackSuppressed) return;
@@ -201,9 +208,14 @@
     if (widths.every(function(w) { return w === 0; })) return;
 
     bridgeLog("[Bridge] " + ts() + " resize: widths=[" + widths.join(",") + "]" +
-              " moving=" + isMoving);
+              " moving=" + isMoving + " fromDrag=" + !!fromDrag);
     flushDiag();
-    htmlComponent.Data = { event: "ColumnWidthChanged", widths: widths, moving: isMoving };
+    htmlComponent.Data = {
+      event: "ColumnWidthChanged",
+      widths: widths,
+      moving: isMoving,
+      fromDrag: !!fromDrag
+    };
   }
 
   // ---- Cell hover tracking ----

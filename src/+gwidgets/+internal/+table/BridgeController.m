@@ -345,8 +345,14 @@ classdef BridgeController < gwidgets.internal.table.TableController
                 return
             end
 
+            % Only the report the bridge sends on mouseup reflects a user
+            % resize. Reports without the marker come from the bridge's
+            % ResizeObserver reacting to a reflow, and must not redefine
+            % authored column widths.
+            fromDrag = isfield(d, "fromDrag") && logical(d.fromDrag);
+
             owner = this.owner();
-            owner.Display.handleBridgeColumnWidths(d.widths);
+            owner.Display.handleBridgeColumnWidths(d.widths, fromDrag);
         end
 
         function tf = hasTooltips(this)
