@@ -140,7 +140,10 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             t = testCase.defaultTable(fh);
             tab = t.DisplayTable;
 
-            testCase.verifyEmpty(findall(fh, Type="uimenu"));
+            % A single supported selection type means no selection menu yet.
+            % Other items (e.g. "Auto-resize columns") are on by default, so
+            % this must not assert the context menu is entirely empty.
+            testCase.verifyEmpty(findall(fh, Type="uimenu", Text="Selection Mode"));
             t.SupportedSelectionTypes = ["cell", "row"];
             testCase.verifyEmpty(findall(fh, Type="uimenu", Text="Column"));
             testCase.verifyNotEmpty(findall(fh, Type="uimenu", Text="Row"));
@@ -400,7 +403,9 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.verifyEqual(tab.DisplayData.Properties.VariableNames{4}, 'Health')
 
             t.HasChangeGroupingVariable = true;
-            groupmenu = findall(fh, Type="uimenu", Text="Group");
+            % The single "Group" item became a "Grouping" menu holding
+            % Set/Add/Remove when multi-variable grouping landed.
+            groupmenu = findall(fh, Type="uimenu", Text="Grouping");
             testCase.verifyNotEmpty(groupmenu)
             t.GroupingVariable = "SelfAssessedHealthStatus";
             testCase.verifyEqual(height(tab.DisplayData), 4)

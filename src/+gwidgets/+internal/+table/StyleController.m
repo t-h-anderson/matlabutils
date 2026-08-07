@@ -56,7 +56,22 @@ classdef StyleController < gwidgets.internal.table.TableController
         end
 
         function val = get.Configurations(this)
-            val = this.Configurations_;
+            % Read from the live view rather than the cache: styles can be
+            % applied straight to the underlying component, and those must be
+            % visible here too.
+            owner = this.owner();
+            if isempty(owner)
+                val = this.Configurations_;
+                return
+            end
+
+            backend = owner.Graphics.Backend;
+            if isempty(backend) || ~backend.isReady()
+                val = this.Configurations_;
+                return
+            end
+
+            val = backend.StyleConfigurations;
         end
 
         function set.Configurations(this, val)
