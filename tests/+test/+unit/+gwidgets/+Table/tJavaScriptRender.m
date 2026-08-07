@@ -515,7 +515,7 @@ classdef tJavaScriptRender < matlab.unittest.TestCase
             widths = test.unit.gwidgets.Table.tJavaScriptRender.stylePixelValues(snapshot.colStyleWidths);
 
             testCase.verifyNotEmpty(groupColumns)
-            testCase.verifyGreaterThanOrEqual(widths(groupColumns), repelem(36, 1, numel(groupColumns)))
+            testCase.verifyGreaterThanOrEqual(widths(groupColumns), repelem(64, 1, numel(groupColumns)))
         end
 
         function tAutoResizeTransposedGroupHeadersUseRotatedTextThickness(testCase)

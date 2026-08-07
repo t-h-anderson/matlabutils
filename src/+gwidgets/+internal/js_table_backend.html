@@ -2505,6 +2505,10 @@
         case "HoverCell":
           hoverCell(payload, request);
           break;
+        case "LeaveCell":
+          leaveCell(payload);
+          sendProbeResult(request, snapshot());
+          break;
         case "ClearTooltip":
           hideTooltip();
           sendProbeResult(request, snapshot());
@@ -3128,6 +3132,12 @@
     if (!cell) throw new Error("Cell not found");
     pendingTooltipProbe = request;
     cell.dispatchEvent(mouseEvent("mouseenter", hoverPayloadForCell(cell, payload)));
+  }
+
+  function leaveCell(payload) {
+    var cell = cellAt(payload.row, payload.col);
+    if (!cell) throw new Error("Cell not found");
+    cell.dispatchEvent(mouseEvent("mouseleave", payload));
   }
 
   function hoverPayloadForCell(cell, payload) {

@@ -569,11 +569,11 @@ classdef DisplayController < gwidgets.internal.table.TableController
             nColumns = this.transposedWidth();
             widths = repmat({"1x"}, 1, nColumns);
             widths{1} = this.transposedVariableHeaderWidth(owner);
+            widths = this.applyDefaultTransposedDataRowWidths(widths);
             widths = this.applyTransposedDataRowWidths(owner, widths);
 
             headerColumns = owner.Data.VisibleGroupHeaderRowIdx + 1;
             headerWidths = this.visibleGroupHeaderColumnWidths(owner, headerColumns);
-            defaultHeaderWidth = gwidgets.internal.table.DisplayController.defaultGroupHeaderColumnWidth();
             for iColumn = 1:numel(headerColumns)
                 displayColumn = headerColumns(iColumn);
                 if displayColumn < 1 || displayColumn > nColumns
@@ -582,7 +582,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
                 if isfinite(headerWidths(iColumn)) && headerWidths(iColumn) > 0
                     widths{displayColumn} = headerWidths(iColumn);
                 else
-                    widths{displayColumn} = defaultHeaderWidth;
+                    widths{displayColumn} = this.defaultVisibleGroupHeaderColumnWidth(owner, displayColumn);
                 end
             end
         end
@@ -948,6 +948,20 @@ classdef DisplayController < gwidgets.internal.table.TableController
             end
         end
 
+        function widths = applyDefaultTransposedDataRowWidths(this, widths)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                widths (1,:) cell
+            end
+
+            displayData = this.Data;
+            nColumns = min(width(displayData), numel(widths));
+            for iColumn = 2:nColumns
+                widths{iColumn} = gwidgets.internal.table.DisplayController.defaultTextColumnWidth( ...
+                    displayData{:, iColumn});
+            end
+        end
+
         function width = transposedVariableHeaderWidth(this, owner)
             arguments
                 this (1,1) gwidgets.internal.table.DisplayController
@@ -956,13 +970,29 @@ classdef DisplayController < gwidgets.internal.table.TableController
 
             width = this.TransposedVariableHeaderWidth_;
             if ~isfinite(width) || width <= 0
-                backend = owner.Graphics.Backend;
-                if isa(backend, "gwidgets.internal.table.backend.JSTableBackend")
-                    width = gwidgets.internal.table.DisplayController.defaultTransposedVariableHeaderWidth(owner);
-                else
-                    width = "1x";
-                end
+                width = gwidgets.internal.table.DisplayController.defaultTransposedVariableHeaderWidth(owner);
             end
+        end
+
+        function width = defaultVisibleGroupHeaderColumnWidth(this, owner, displayColumn)
+            arguments
+                this (1,1) gwidgets.internal.table.DisplayController
+                owner (1,1) gwidgets.UITable %#ok<INUSA>
+                displayColumn (1,1) double
+            end
+
+            width = gwidgets.internal.table.DisplayController.defaultGroupHeaderColumnWidth();
+            nDisplayColumns = size(this.Data, 2);
+            if nDisplayColumns == 0 || displayColumn < 1 || displayColumn > nDisplayColumns
+                return
+            end
+
+            label = gwidgets.internal.table.DisplayController.displayText(this.Data{1, displayColumn});
+            if strlength(label) == 0
+                return
+            end
+
+            width = max(width, 16 + 7*strlength(label));
         end
 
         function changed = setGroupHeaderColumnKeyWidths(this, owner, headerColumns, pixelWidths)
@@ -1091,7 +1121,7 @@ classdef DisplayController < gwidgets.internal.table.TableController
             arguments
             end
 
-            width = 36;
+            width = 64;
         end
 
         function width = defaultTransposedVariableHeaderWidth(owner)
@@ -1102,7 +1132,48 @@ classdef DisplayController < gwidgets.internal.table.TableController
             labels = reshape(owner.Column.VisibleNames, 1, []);
             labels(ismember(owner.Column.VisibleDataNames, owner.Group.By)) = [];
             labels = ["Variable", labels];
-            width = max(64, 14 + 7*max(strlength(labels)));
+            width = gwidgets.internal.table.DisplayController.defaultTextWidth(labels, 64);
+        end
+
+        function width = defaultTextColumnWidth(values)
+            text = strings(1, numel(values));
+            for iValue = 1:numel(values)
+                valueText = reshape(string( ...
+                    gwidgets.internal.table.DisplayController.displayText(values(iValue))), 1, []);
+                valueText(ismissing(valueText)) = "";
+                text(iValue) = strjoin(valueText, " ");
+            end
+
+            width = gwidgets.internal.table.DisplayController.defaultTextWidth(text, 64);
+        end
+
+        function width = defaultTextWidth(text, minimumWidth)
+            text = reshape(string(text), 1, []);
+            text(ismissing(text)) = "";
+            if isempty(text)
+                width = minimumWidth;
+                return
+            end
+
+            width = max(minimumWidth, 16 + 7*max(strlength(text)));
+        end
+
+        function text = displayText(value)
+            if iscell(value) && isscalar(value)
+                value = value{1};
+            end
+
+            if isstring(value)
+                if isempty(value)
+                    text = "";
+                else
+                    text = value(1);
+                end
+            elseif ischar(value)
+                text = string(value);
+            else
+                text = string(value);
+            end
         end
 
         function data = selectVisibleColumns(data, state)

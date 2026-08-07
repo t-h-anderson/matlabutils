@@ -155,6 +155,19 @@ classdef tTooltipParity < test.WithExampleTables
             testCase.verifyFalse(state.Visible)
             testCase.verifyEmpty(state.Texts)
         end
+
+        function tJavaScriptCellLeaveHidesTooltipLocally(testCase)
+            t = test.unit.gwidgets.Table.tTooltipParity.createTable(testCase, "JavaScript");
+            t.addTooltip("cell-text", "cell", [1 1]);
+
+            shown = t.UITable.Graphics.Backend.probeBrowser( ...
+                "HoverCell", struct("row", 1, "col", 1));
+            hidden = t.UITable.Graphics.Backend.probeBrowser( ...
+                "LeaveCell", struct("row", 1, "col", 1));
+
+            testCase.verifyTrue(logical(shown.tooltipVisible))
+            testCase.verifyFalse(logical(hidden.tooltipVisible))
+        end
     end
 
     methods

@@ -52,6 +52,11 @@
   var diagQueue          = [];
   var hoverEnabled       = false;
   var hoverListener      = null;
+  var hoverRootTarget    = null;
+  var hoverLeaveListener = null;
+  var hoverDocumentOutListener = null;
+  var hoverWindowBlurListener = null;
+  var hoverVisibilityListener = null;
   var mouseDownListener  = null;
   var mouseUpListener    = null;
   var mouseMoveListener  = null;
@@ -152,6 +157,7 @@
     pd.addEventListener("mousedown", mouseDownListener, true);
     pd.addEventListener("mousemove", mouseMoveListener, true);
     pd.addEventListener("mouseup", mouseUpListener, true);
+    attachHoverFallbackListeners(pd);
   }
 
   function detachMouseTracking() {
@@ -632,11 +638,13 @@
       el.style.lineHeight = sourceStyle.lineHeight;
     }
     activeGroupSpanTooltip = sourceEl || null;
+    bridgeLog("[Bridge] " + ts() + " group-tooltip show source=" + elementSummary(sourceEl));
     positionTooltipNearCursor();
   }
 
-  function hideGroupSpanTooltip() {
+  function hideGroupSpanTooltip(reason) {
     if (!activeGroupSpanTooltip) return;
+    bridgeLog("[Bridge] " + ts() + " group-tooltip hide reason=" + (reason || ""));
     activeGroupSpanTooltip = null;
     hideTooltip();
   }
@@ -645,7 +653,7 @@
     var overlay = groupSpanOverlayAtPoint(evt.clientX, evt.clientY) ||
       groupSpanOverlayFromTarget(evt.target);
     if (!overlay) {
-      hideGroupSpanTooltip();
+      hideGroupSpanTooltip("outside-overlay");
       return false;
     }
 
@@ -653,7 +661,7 @@
     lastClientY = evt.clientY;
     if (hoverEnabled) {
       var coords = groupSpanHoverCoords(overlay, evt);
-      hideGroupSpanTooltip();
+      hideGroupSpanTooltip("hover-enabled");
       positionTooltipNearCursor();
       sendHover(coords.row, coords.col);
       return true;
@@ -661,7 +669,7 @@
 
     var tooltip = overlay.getAttribute("data-gwidgets-tooltip");
     if (!tooltip) {
-      hideGroupSpanTooltip();
+      hideGroupSpanTooltip("empty-tooltip");
       return false;
     }
 
@@ -820,7 +828,7 @@
 
       var firstCellStyle = window.getComputedStyle(cells[0]);
       var measured = measureText(span.label, firstCellStyle);
-      var columnWidth = Math.max(measured.height + 12, 24);
+      var columnWidth = Math.max(measured.width + 16, 64);
       var overlay = pd.createElement("div");
       overlay.className = "gwidgets-group-column-span";
       overlay.textContent = span.label;
@@ -834,10 +842,15 @@
         "height:" + rect.height + "px",
         "z-index:5",
         "pointer-events:none",
-        "display:block",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
         "box-sizing:border-box",
+        "padding:4px",
         "white-space:nowrap",
-        "overflow:hidden"
+        "overflow:hidden",
+        "text-overflow:ellipsis",
+        "text-align:center"
       ].join(";") + ";";
       overlay.style.color = firstCellStyle.color;
       overlay.style.fontFamily = firstCellStyle.fontFamily;
@@ -846,24 +859,6 @@
       overlay.style.fontStyle = firstCellStyle.fontStyle;
       overlay.style.lineHeight = firstCellStyle.lineHeight;
       applyCssText(overlay, span.style);
-
-      var label = pd.createElement("div");
-      label.textContent = span.label;
-      label.style.cssText = [
-        "position:absolute",
-        "left:50%",
-        "top:50%",
-        "width:" + Math.max(rect.height - 8, 24) + "px",
-        "transform:translate(-50%,-50%) rotate(-90deg)",
-        "transform-origin:center",
-        "white-space:nowrap",
-        "overflow:hidden",
-        "text-overflow:ellipsis",
-        "text-align:center"
-      ].join(";") + ";";
-      label.style.pointerEvents = "none";
-      overlay.textContent = "";
-      overlay.appendChild(label);
 
       var hiddenText = hideCellText(cells);
       var hiddenDividers = hideCellHorizontalDividers(cells);
@@ -1059,6 +1054,9 @@
   }
 
   function onTableMouseMove(evt) {
+    var root = findTableRoot();
+    syncHoverRootListener(root);
+
     handleGroupSpanTooltipMove(evt);
 
     if (!dragEnabled || !dragCandidate || activeTableDrag) return;
@@ -1108,16 +1106,16 @@
     lastClientX = evt.clientX;
     lastClientY = evt.clientY;
 
+    var root = findTableRoot();
+    syncHoverRootListener(root);
+
     if (handleGroupSpanTooltipMove(evt)) {
       lastHoverCellEl = null;
       return;
     }
 
-    var root = findTableRoot();
     if (!root || !root.contains(evt.target)) {
-      hideTooltip();
-      lastHoverCellEl = null;
-      sendHover(0, 0);
+      clearHoverTooltip();
       return;
     }
     var pos = gridCoordsFromTarget(evt.target, root);
@@ -1134,12 +1132,140 @@
     sendHover(pos.row >= 0 ? pos.row : 0, pos.col >= 0 ? pos.col : 0);
   }
 
+  function clearHoverTooltip(reason) {
+    bridgeLog("[Bridge] " + ts() + " tooltip clear reason=" + (reason || ""));
+    hideTooltip();
+    lastHoverCellEl = null;
+    sendHover(0, 0);
+  }
+
+  function elementSummary(el) {
+    if (!el || el.nodeType !== 1) return "<none>";
+    var parts = [String(el.tagName || "").toLowerCase()];
+    if (el.id) parts.push("#" + el.id);
+    if (el.className) parts.push("." + String(el.className).replace(/\s+/g, "."));
+    if (el.getAttribute && el.getAttribute("data-tag")) {
+      parts.push("[data-tag=" + el.getAttribute("data-tag") + "]");
+    }
+    return parts.join("");
+  }
+
+  function isRealHoverLeave(evt) {
+    var root = hoverRootTarget || findTableRoot();
+    if (!root || root.nodeType !== 1) return true;
+    var relatedTarget = evt ? evt.relatedTarget : null;
+    if (!relatedTarget) return true;
+    try {
+      return relatedTarget !== root && !root.contains(relatedTarget);
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function onHoverLeave(evt) {
+    if (!isRealHoverLeave(evt)) {
+      bridgeLog("[Bridge] " + ts() + " table-leave ignored target=" +
+                elementSummary(evt && evt.target) + " related=" +
+                elementSummary(evt && evt.relatedTarget));
+      return;
+    }
+    bridgeLog("[Bridge] " + ts() + " table-leave target=" +
+              elementSummary(evt && evt.target) + " related=" +
+              elementSummary(evt && evt.relatedTarget));
+    clearHoverTooltip("table-leave");
+  }
+
+  function onHoverDocumentOut(evt) {
+    var root = hoverRootTarget || findTableRoot();
+    if (!root || root.nodeType !== 1) return;
+    var target = evt ? evt.target : null;
+    try {
+      if (target !== root && !root.contains(target)) return;
+    } catch (e) {
+      return;
+    }
+    onHoverLeave(evt);
+  }
+
+  function syncHoverRootListener(root) {
+    var pd = parentDocument();
+    if (!root || root.nodeType !== 1 || root === pd) {
+      detachHoverRootListener();
+      return;
+    }
+
+    if (hoverRootTarget === root && hoverLeaveListener) return;
+
+    detachHoverRootListener();
+    hoverRootTarget = root;
+    hoverLeaveListener = onHoverLeave;
+    bridgeLog("[Bridge] " + ts() + " table-leave attach root=" + elementSummary(root));
+    hoverRootTarget.addEventListener("pointerleave", hoverLeaveListener, true);
+    hoverRootTarget.addEventListener("mouseleave", hoverLeaveListener, true);
+    hoverRootTarget.addEventListener("mouseout", hoverLeaveListener, true);
+
+    if (pd && !hoverDocumentOutListener) {
+      hoverDocumentOutListener = onHoverDocumentOut;
+      pd.addEventListener("mouseout", hoverDocumentOutListener, true);
+    }
+  }
+
+  function detachHoverRootListener() {
+    if (!hoverRootTarget || !hoverLeaveListener) {
+      var pd0 = parentDocument();
+      if (pd0 && hoverDocumentOutListener) {
+        pd0.removeEventListener("mouseout", hoverDocumentOutListener, true);
+      }
+      hoverRootTarget = null;
+      hoverLeaveListener = null;
+      hoverDocumentOutListener = null;
+      return;
+    }
+
+    hoverRootTarget.removeEventListener("pointerleave", hoverLeaveListener, true);
+    hoverRootTarget.removeEventListener("mouseleave", hoverLeaveListener, true);
+    hoverRootTarget.removeEventListener("mouseout", hoverLeaveListener, true);
+    var pd = parentDocument();
+    if (pd && hoverDocumentOutListener) {
+      pd.removeEventListener("mouseout", hoverDocumentOutListener, true);
+    }
+    hoverRootTarget = null;
+    hoverLeaveListener = null;
+    hoverDocumentOutListener = null;
+  }
+
+  function attachHoverFallbackListeners(pd) {
+    if (!hoverWindowBlurListener) {
+      hoverWindowBlurListener = clearHoverTooltip;
+      window.addEventListener("blur", hoverWindowBlurListener, true);
+    }
+    if (pd && !hoverVisibilityListener) {
+      hoverVisibilityListener = clearHoverTooltip;
+      pd.addEventListener("visibilitychange", hoverVisibilityListener, true);
+    }
+  }
+
+  function detachHoverFallbackListeners() {
+    if (hoverWindowBlurListener) {
+      window.removeEventListener("blur", hoverWindowBlurListener, true);
+      hoverWindowBlurListener = null;
+    }
+
+    var pd = parentDocument();
+    if (pd && hoverVisibilityListener) {
+      pd.removeEventListener("visibilitychange", hoverVisibilityListener, true);
+    }
+    hoverVisibilityListener = null;
+  }
+
   function attachHover() {
     if (hoverListener) return;
     var pd = parentDocument();
     if (!pd) return;
     hoverListener = onHoverMove;
     pd.addEventListener("mouseover", hoverListener, true);
+    attachHoverFallbackListeners(pd);
+    syncHoverRootListener(findTableRoot());
   }
 
   function detachHover() {
@@ -1153,6 +1279,8 @@
 
   function cleanup() {
     detachHover();
+    detachHoverRootListener();
+    detachHoverFallbackListeners();
     detachMouseTracking();
     detachSpanScroll();
     if (resizeObserver) {

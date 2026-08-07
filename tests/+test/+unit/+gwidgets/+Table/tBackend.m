@@ -67,6 +67,77 @@ classdef tBackend < matlab.unittest.TestCase
             testCase.verifyEqual(bridgeGrid.RowHeight{4}, 2)
         end
 
+        function tUITableBridgeRegistersLocalTooltipDismissalHandlers(testCase)
+            import matlab.unittest.constraints.ContainsSubstring
+
+            html = string(fileread(test.unit.gwidgets.Table.tBackend.bridgeHtmlPath()));
+
+            testCase.verifyThat(html, ContainsSubstring('function clearHoverTooltip'))
+            testCase.verifyThat(html, ContainsSubstring('sendHover(0, 0);'))
+            testCase.verifyThat(html, ContainsSubstring('function isRealHoverLeave'))
+            testCase.verifyThat(html, ContainsSubstring('if (!relatedTarget) return true;'))
+            testCase.verifyThat(html, ContainsSubstring('hoverRootTarget.addEventListener("pointerleave"'))
+            testCase.verifyThat(html, ContainsSubstring('hoverRootTarget.addEventListener("mouseleave"'))
+            testCase.verifyThat(html, ContainsSubstring('hoverRootTarget.addEventListener("mouseout"'))
+            testCase.verifyThat(html, ContainsSubstring('pd.addEventListener("mouseout", hoverDocumentOutListener'))
+            testCase.verifyThat(html, ContainsSubstring('window.addEventListener("blur"'))
+            testCase.verifyThat(html, ContainsSubstring('pd.addEventListener("visibilitychange"'))
+            mouseMoveBlock = extractBetween(html, ...
+                "function onTableMouseMove(evt) {", ...
+                "function onTableMouseUp(evt)");
+            testCase.verifyLessThan( ...
+                strfind(mouseMoveBlock, "syncHoverRootListener(root);"), ...
+                strfind(mouseMoveBlock, "handleGroupSpanTooltipMove(evt)"))
+        end
+
+        function tJavaScriptBackendDoesNotClearUITableBridgeTooltip(testCase)
+            backendSource = string(fileread( ...
+                test.unit.gwidgets.Table.tBackend.jsBackendPath()));
+            bridgeSource = string(fileread( ...
+                test.unit.gwidgets.Table.tBackend.bridgeControllerPath()));
+
+            testCase.verifyFalse(contains(backendSource, "clearTooltip"))
+            testCase.verifyFalse(contains(bridgeSource, "function clearTooltip"))
+        end
+
+        function tUITableBridgeCellHoverZeroZeroSendsEmptyTooltip(testCase)
+            import matlab.unittest.constraints.ContainsSubstring
+
+            bridgeSource = string(fileread( ...
+                test.unit.gwidgets.Table.tBackend.bridgeControllerPath()));
+
+            testCase.verifyThat(bridgeSource, ContainsSubstring("if row == 0 && col == 0"))
+            testCase.verifyThat(bridgeSource, ContainsSubstring( ...
+                'this.send("SetTooltip", struct("blocks", {cell(1,0)}));'))
+        end
+
+        function tTransposedUITableUsesReadableDefaultGroupHeaderWidths(testCase)
+            fig = uifigure(Visible="off");
+            testCase.addTeardown(@()delete(fig));
+
+            data = table( ...
+                ["A"; "A"; "B"; "B"; "C"; "C"], ...
+                (1:6)', ...
+                [10; 20; 30; 40; 50; 60], ...
+                VariableNames=["Group", "Value", "Other"]);
+            t = gwidgets.Table(Parent=fig, Backend="UITable", Data=data);
+            t.GroupingVariable = "Group";
+            t.openAllGroups();
+            t.DisplayOrientation = "Transposed";
+            drawnow();
+
+            widths = t.UITable.Graphics.Backend.ColumnWidth;
+            groupColumns = t.UITable.Data.VisibleGroupHeaderRowIdx + 1;
+
+            testCase.verifyGreaterThanOrEqual(widths{1}, 64)
+            for iColumn = 1:numel(groupColumns)
+                testCase.verifyGreaterThanOrEqual(widths{groupColumns(iColumn)}, 64)
+            end
+            dataColumns = setdiff(2:numel(widths), groupColumns);
+            testCase.verifyNotEmpty(dataColumns)
+            testCase.verifyGreaterThanOrEqual(widths{dataColumns(1)}, 64)
+        end
+
         function tJavaScriptSelectionEventMapsRows(testCase)
             fig = uifigure(Visible="off");
             testCase.addTeardown(@()delete(fig));
@@ -124,6 +195,30 @@ classdef tBackend < matlab.unittest.TestCase
             testCase.verifyEqual(t.Sort.By, "Value")
             testCase.verifyEqual(t.Sort.Direction, "Ascend")
             testCase.verifyEqual(t.DisplayData.Value, [1; 2; 3])
+        end
+    end
+
+    methods (Static, Access = private)
+        function path = bridgeHtmlPath()
+            path = fullfile(test.unit.gwidgets.Table.tBackend.sourcePackagePath(), ...
+                "+internal", "table_bridge.html");
+        end
+
+        function path = jsBackendPath()
+            path = fullfile(test.unit.gwidgets.Table.tBackend.sourcePackagePath(), ...
+                "+internal", "+table", "+backend", "JSTableBackend.m");
+        end
+
+        function path = bridgeControllerPath()
+            path = fullfile(test.unit.gwidgets.Table.tBackend.sourcePackagePath(), ...
+                "+internal", "+table", "BridgeController.m");
+        end
+
+        function path = sourcePackagePath()
+            testFolder = fileparts(mfilename("fullpath"));
+            unitFolder = fileparts(fileparts(fileparts(fileparts(testFolder))));
+            projectFolder = fileparts(unitFolder);
+            path = fullfile(projectFolder, "src", "+gwidgets");
         end
     end
 end

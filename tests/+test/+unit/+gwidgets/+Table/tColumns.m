@@ -281,7 +281,8 @@ classdef tColumns < test.WithExampleTables
                 "columns", [2 3], ...
                 "columnWidths", [240 280]));
 
-            testCase.verifyEqual(t.DisplayTable.ColumnWidth(1:3), {'1x', 240, 280})
+            testCase.verifyGreaterThanOrEqual(t.DisplayTable.ColumnWidth{1}, 64)
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth(2:3), {240, 280})
             testCase.verifyEqual(t.DataColumnWidth, {"1x", "1x", "1x", "1x"})
         end
 
@@ -302,7 +303,7 @@ classdef tColumns < test.WithExampleTables
             end
 
             testCase.verifyTrue(all(isPixelWidth))
-            testCase.verifyGreaterThanOrEqual(pixelWidths, repelem(36, 1, numel(pixelWidths)))
+            testCase.verifyGreaterThanOrEqual(pixelWidths, repelem(64, 1, numel(pixelWidths)))
             testCase.verifyEqual(t.DataColumnWidth, {"1x", "1x", "1x", "1x"})
         end
 
@@ -344,7 +345,8 @@ classdef tColumns < test.WithExampleTables
 
             t.simulateBridgeDrag([90 260 320]);
 
-            testCase.verifyEqual(t.DisplayTable.ColumnWidth(1:3), {'1x', 260, 320})
+            testCase.verifyGreaterThanOrEqual(t.DisplayTable.ColumnWidth{1}, 64)
+            testCase.verifyEqual(t.DisplayTable.ColumnWidth(2:3), {260, 320})
             testCase.verifyEqual(t.DataColumnWidth, dataWidth)
             testCase.verifyEqual(t.ColumnWidth, columnWidth)
             testCase.verifyEqual(t.DataColumnWidthTypes, dataTypes)
