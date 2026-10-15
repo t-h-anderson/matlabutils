@@ -346,7 +346,7 @@ classdef FilterController < gwidgets.internal.Reparentable
                                     case num2cell(eqComp)
                                         res = (col == val);
                                     case num2cell(approxComp)
-                                        r = range(col);
+                                        r = max(col) - min(col); % range needs the Statistics Toolbox
                                         res = abs(col - val) < 0.05 * r;
                                     case num2cell(gtComp)
                                         res = (col > val);
