@@ -82,6 +82,7 @@ classdef Table < matlab.mixin.SetGet
         MetricLocation (1,1) string
         MetricDefinitions (1,:) gwidgets.table.MetricDefinition
         DisplayOrientation (1,1) string
+        Layout
         Parent
         Position
         Units
@@ -96,7 +97,6 @@ classdef Table < matlab.mixin.SetGet
     properties (Dependent, SetAccess = private)
         DisplayData (1,1) table
         DropSelection (1,1) struct
-        Layout
         RowFilterIndices (1,:) logical
         VisibleData (:,:) table
     end
@@ -424,6 +424,11 @@ classdef Table < matlab.mixin.SetGet
 
         function val = get.Layout(this)
             val = this.UITable_.Layout;
+        end
+
+        function set.Layout(this, val)
+            % Position the table in a parent grid, as for other components.
+            this.UITable_.Layout = val;
         end
 
         function val = get.Position(this)
