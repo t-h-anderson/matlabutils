@@ -63,7 +63,9 @@ cleanupDropListener = onCleanup(@()delete(dropListener));
 %[text] |TooltipRequested| can provide app-owned tooltip blocks by setting |Handled| and |TooltipBlocks|.
 tooltipListener = addlistener(tbl, "TooltipRequested", @(src, evt)setDynamicTooltip(evt));
 cleanupTooltipListener = onCleanup(@()delete(tooltipListener));
-%[text] Common events include |CellClicked|, |CellDoubleClicked|, |SelectionChanged|, |CellEditRequested|, |CellEdited|, |DisplayDataChangeRequested|, |DisplayDataChanged|, |FilterChangeRequested|, |FilterChanged|, |GroupingChangeRequested|, |GroupingChanged|, |GroupOpenStateChanged|, |SortChangeRequested|, |SortChanged|, |TooltipRequested|, |TooltipCleared|, |DragStarted|, |DropRequested|, |DropCompleted|, |CommandInvoked|, and |TableDataChanged|. Requested events are pre-action and may set |Cancel=true|; changed/completed events are notifications after work is applied.
+%[text] |KeyPressed| fires when a key is pressed while the table has focus, except while a cell is being edited. |Key|, |Character|, and |Modifier| use MATLAB key names such as |"delete"|, |"uparrow"|, and |"control"|, and |DataIndices| holds the current selection. |Callback.KeyPress| (or |KeyPressCallback|) receives the same event data.
+tbl.Callback.KeyPress = @(src, evt)setappdata(fig, "LastKey", [evt.Key, evt.Modifier]);
+%[text] Common events include |CellClicked|, |CellDoubleClicked|, |SelectionChanged|, |CellEditRequested|, |CellEdited|, |DisplayDataChangeRequested|, |DisplayDataChanged|, |FilterChangeRequested|, |FilterChanged|, |GroupingChangeRequested|, |GroupingChanged|, |GroupOpenStateChanged|, |SortChangeRequested|, |SortChanged|, |TooltipRequested|, |TooltipCleared|, |DragStarted|, |DropRequested|, |DropCompleted|, |CommandInvoked|, |TableDataChanged|, and |KeyPressed|. Requested events are pre-action and may set |Cancel=true|; changed/completed events are notifications after work is applied.
 %%
 %[text] ## Columns
 %[text] |Column.Width|, |Column.Visible|, |Column.Names|, |Column.Editable|, and |Column.Sortable| act on visible columns. The corresponding |Data| properties act on source data columns before visibility mapping.

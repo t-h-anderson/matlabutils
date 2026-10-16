@@ -7,6 +7,7 @@ classdef CallbackController < gwidgets.internal.table.TableController
         CellDoubleClick (1,:) function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
         CellEdit (1,:) function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
         DisplayDataChanged (1,:) function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
+        KeyPress (1,:) function_handle {mustBeScalarOrEmpty} = function_handle.empty(1,0)
     end
 
     properties (Dependent)
@@ -15,6 +16,7 @@ classdef CallbackController < gwidgets.internal.table.TableController
         CellDoubleClickCallback (1,:) function_handle
         CellEditCallback (1,:) function_handle
         DisplayDataChangedCallback (1,:) function_handle
+        KeyPressCallback (1,:) function_handle
     end
 
     methods
@@ -184,6 +186,37 @@ classdef CallbackController < gwidgets.internal.table.TableController
             end
         end
 
+        function onKeyPress(this, source, eventData)
+            arguments
+                this (1,1) gwidgets.internal.table.CallbackController
+                source
+                eventData
+            end
+
+            % eventData provides Key, Character and Modifier, as in
+            % matlab.ui.eventdata.KeyData. The event reports the current
+            % selection in the same form as SelectionChanged.
+            gwidgets.internal.table.CallbackController.ignoreCallbackSource(source);
+            owner = this.owner();
+            selectionType = string(owner.Selection.Type);
+            displayIdx = owner.Selection.DisplayValue;
+            dataIdx = owner.eventDisplayToData(displayIdx, selectionType);
+            keyEvent = owner.emitTableEvent("KeyPressed", gwidgets.table.TableEventData( ...
+                Action="keyPress", ...
+                DisplayIndices=displayIdx, ...
+                DataIndices=dataIdx, ...
+                SelectionType=selectionType, ...
+                Key=string(eventData.Key), ...
+                Character=string(eventData.Character), ...
+                Modifier=reshape(string(eventData.Modifier), 1, [])));
+
+            if isempty(this.KeyPress)
+                return
+            end
+
+            this.KeyPress(owner, keyEvent);
+        end
+
         function val = get.CellSelectionCallback(this)
             val = this.CellSelection;
         end
@@ -222,6 +255,14 @@ classdef CallbackController < gwidgets.internal.table.TableController
 
         function set.DisplayDataChangedCallback(this, val)
             this.DisplayDataChanged = val;
+        end
+
+        function val = get.KeyPressCallback(this)
+            val = this.KeyPress;
+        end
+
+        function set.KeyPressCallback(this, val)
+            this.KeyPress = val;
         end
     end
 

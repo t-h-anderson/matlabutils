@@ -517,6 +517,85 @@
     return tag === "input" || tag === "textarea";
   }
 
+  // Report key presses to MATLAB as KeyPressed. This only observes: keys keep
+  // their default handling, and keys typed into a cell editor are not reported.
+  function handleTableKeyDown(event) {
+    if (isEditingText(event.target)) return;
+
+    var key = matlabKeyName(event);
+    if (!key) return;
+    send({
+      event: "KeyPressed",
+      key: key,
+      character: matlabKeyCharacter(event),
+      modifier: matlabKeyModifiers(event)
+    });
+  }
+
+  var MATLAB_KEY_NAMES = {
+    "Delete": "delete",
+    "Backspace": "backspace",
+    "Enter": "return",
+    "Escape": "escape",
+    "Esc": "escape",
+    "ArrowUp": "uparrow",
+    "ArrowDown": "downarrow",
+    "ArrowLeft": "leftarrow",
+    "ArrowRight": "rightarrow",
+    "Up": "uparrow",
+    "Down": "downarrow",
+    "Left": "leftarrow",
+    "Right": "rightarrow",
+    "Tab": "tab",
+    " ": "space",
+    "Spacebar": "space",
+    "Home": "home",
+    "End": "end",
+    "PageUp": "pageup",
+    "PageDown": "pagedown",
+    "Insert": "insert",
+    "Control": "control",
+    "Shift": "shift",
+    "Alt": "alt",
+    "Meta": "command"
+  };
+
+  var MATLAB_KEY_CHARACTERS = {
+    "delete": "\u007f",
+    "backspace": "\b",
+    "return": "\r",
+    "escape": "\u001b",
+    "tab": "\t",
+    "space": " "
+  };
+
+  function matlabKeyName(event) {
+    var key = String(event.key || "");
+    if (Object.prototype.hasOwnProperty.call(MATLAB_KEY_NAMES, key)) return MATLAB_KEY_NAMES[key];
+
+    // Prefer the physical key for letters and digits so Shift+1 reports "1".
+    var codeMatch = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(String(event.code || ""));
+    if (codeMatch) return (codeMatch[1] || codeMatch[2]).toLowerCase();
+    return key.toLowerCase();
+  }
+
+  function matlabKeyCharacter(event) {
+    var key = String(event.key || "");
+    if (key.length === 1) return key;
+    var name = matlabKeyName(event);
+    return Object.prototype.hasOwnProperty.call(MATLAB_KEY_CHARACTERS, name) ?
+      MATLAB_KEY_CHARACTERS[name] : "";
+  }
+
+  function matlabKeyModifiers(event) {
+    var modifiers = [];
+    if (event.ctrlKey) modifiers.push("control");
+    if (event.shiftKey) modifiers.push("shift");
+    if (event.altKey) modifiers.push("alt");
+    if (event.metaKey) modifiers.push("command");
+    return modifiers;
+  }
+
   function selectionClipboardText() {
     return cellsToTabText(selectedClipboardCells());
   }
@@ -2485,6 +2564,10 @@
             clipboardText: selectionClipboardText()
           });
           break;
+        case "PressKey":
+          pressKey(payload);
+          sendDeferredProbeResult(request);
+          break;
         case "PasteText":
           pasteClipboardText(payload.text || "");
           sendDeferredProbeResult(request);
@@ -3107,6 +3190,24 @@
     cell.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
   }
 
+  function pressKey(payload) {
+    var target = document.getElementById("root");
+    if (payload.row !== undefined && payload.col !== undefined) {
+      target = cellAt(payload.row, payload.col);
+      if (!target) throw new Error("Cell not found");
+    }
+    target.dispatchEvent(new KeyboardEvent("keydown", {
+      key: String(payload.key || ""),
+      code: String(payload.code || ""),
+      ctrlKey: !!payload.ctrlKey,
+      shiftKey: !!payload.shiftKey,
+      altKey: !!payload.altKey,
+      metaKey: !!payload.metaKey,
+      bubbles: true,
+      cancelable: true
+    }));
+  }
+
   function clickHeader(payload) {
     var header = document.querySelector("thead th[data-col='" + Number(payload.col) + "']");
     if (!header) throw new Error("Header not found");
@@ -3252,6 +3353,7 @@
       root.addEventListener("copy", handleClipboardCopy, true);
       root.addEventListener("paste", handleClipboardPaste, true);
       root.addEventListener("keydown", handleClipboardKeyDown, true);
+      root.addEventListener("keydown", handleTableKeyDown);
       root.addEventListener("mousedown", function() {
         root.focus();
       }, true);

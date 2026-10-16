@@ -29,6 +29,7 @@ classdef UITableBackend < gwidgets.internal.table.backend.TableBackend
             this.Component.CellSelectionCallback = @(s, e)owner.Callback.onSelection(s, e);
             this.Component.CellEditCallback = @(s, e)owner.Callback.onCellEdit(s, e);
             this.Component.DisplayDataChangedFcn = @(s, e)owner.Callback.onDisplayDataChanged(s, e);
+            this.Component.KeyPressFcn = @(s, e)owner.Callback.onKeyPress(s, e);
         end
 
         function setupBridge(this, bridgeController)

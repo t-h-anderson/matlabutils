@@ -53,6 +53,7 @@ classdef Table < matlab.mixin.SetGet
         DropCompleted
         CommandInvoked
         TableDataChanged
+        KeyPressed
     end
 
     properties (Dependent, SetAccess = private)
@@ -92,6 +93,7 @@ classdef Table < matlab.mixin.SetGet
         CellDoubleClickCallback function_handle {mustBeScalarOrEmpty}
         CellEditCallback function_handle {mustBeScalarOrEmpty}
         DisplayDataChangedCallback function_handle {mustBeScalarOrEmpty}
+        KeyPressCallback function_handle {mustBeScalarOrEmpty}
     end
 
     properties (Dependent, SetAccess = private)
@@ -493,6 +495,14 @@ classdef Table < matlab.mixin.SetGet
 
         function set.DisplayDataChangedCallback(this, val)
             this.UITable_.Callback.DisplayDataChanged = val;
+        end
+
+        function val = get.KeyPressCallback(this)
+            val = this.UITable_.Callback.KeyPress;
+        end
+
+        function set.KeyPressCallback(this, val)
+            this.UITable_.Callback.KeyPress = val;
         end
 
         function val = get.RowFilterIndices(this)
@@ -1126,7 +1136,8 @@ classdef Table < matlab.mixin.SetGet
                 "DropRequested"
                 "DropCompleted"
                 "CommandInvoked"
-                "TableDataChanged"]';
+                "TableDataChanged"
+                "KeyPressed"]';
         end
 
         function g = gcdPixelWidths(px)
