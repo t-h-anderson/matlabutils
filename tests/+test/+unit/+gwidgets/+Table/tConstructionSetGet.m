@@ -9,6 +9,19 @@ classdef tConstructionSetGet < test.WithExampleTables
             testCase.verifyEqual(t.Data, table.empty(0,0));
         end
 
+        function tLayoutPositionsTableInParentGrid(testCase)
+            fig = uifigure(Visible="off");
+            testCase.addTeardown(@() delete(fig));
+            grid = uigridlayout(fig, [2, 2]);
+            t = gwidgets.Table(Parent=grid);
+
+            t.Layout.Row = 2;
+            t.Layout.Column = [1, 2];
+
+            testCase.verifyEqual(t.Layout.Row, 2);
+            testCase.verifyEqual(t.Layout.Column, [1, 2]);
+        end
+
         function tHeadlessConstructionSkipsForceRefresh(testCase)
             d = gwidgets.internal.Drawnow.make(true);
             d.IsEnabled = true;
