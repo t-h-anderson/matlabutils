@@ -68,9 +68,41 @@ disp(results)
 
 end
 
-function packageTask(~)
-%PACKAGETASK Package the MATLAB toolbox project.
+function packageTask(context)
+%PACKAGETASK Package src and doc as releases/<ShortName> <Version>.mltbx.
+%   Toolbox metadata, including the version, lives in deploy/tbxdescription.json.
 
-matlab.addons.toolbox.packageToolbox("MLUT.prj");
+projectRoot = context.Plan.RootFolder;
+prj = currentProject();
+
+meta = jsondecode(fileread(fullfile(projectRoot, "deploy", "tbxdescription.json")));
+meta.ToolboxMatlabPath = fullfile(projectRoot, meta.ToolboxMatlabPath);
+meta.ToolboxFolder = fullfile(projectRoot, meta.ToolboxFolder);
+meta.ToolboxGettingStartedGuide = fullfile(projectRoot, "doc", ...
+    meta.ToolboxGettingStartedGuide);
+% Releases are attached to GitHub releases, not committed (*.mltbx is ignored).
+releaseFolder = fullfile(projectRoot, "releases");
+if ~isfolder(releaseFolder)
+    mkdir(releaseFolder);
+end
+meta.OutputFile = fullfile(releaseFolder, ...
+    meta.ToolboxShortName + " " + meta.ToolboxVersion + ".mltbx");
+
+toolboxFolder = meta.ToolboxFolder;
+toolboxID = meta.Identifier;
+meta = rmfield(meta, ["Identifier", "ToolboxFolder", "ToolboxShortName"]);
+opts = matlab.addons.toolbox.ToolboxOptions(toolboxFolder, toolboxID, meta);
+
+% Ship only the source and documentation that belong to the project.
+isShipped = startsWith(opts.ToolboxFiles, fullfile(projectRoot, "src")) | ...
+    startsWith(opts.ToolboxFiles, fullfile(projectRoot, "doc"));
+opts.ToolboxFiles = opts.ToolboxFiles(isShipped);
+opts.ToolboxFiles = opts.ToolboxFiles(ismember(opts.ToolboxFiles, [prj.Files.Path]));
+
+matlab.addons.toolbox.packageToolbox(opts);
+fprintf(1, "[+] %s\n", opts.OutputFile);
+
+licenseText = fileread(fullfile(projectRoot, "license.txt"));
+mlAddonSetLicense(char(opts.OutputFile), struct("type", "Custom", "text", licenseText));
 
 end

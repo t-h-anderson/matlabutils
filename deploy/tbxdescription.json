@@ -1,0 +1,15 @@
+{
+    "ToolboxName":"MATLAB Utils",
+    "ToolboxShortName":"MatlabUtils",
+    "ToolboxVersion":"1.0.0",
+    "Identifier":"16084921-c785-4a2e-a476-c9b15267fdfc",
+    "Summary":"General-purpose MATLAB utilities and reusable UI widgets, including a filterable, sortable and groupable table",
+    "Description":"",
+    "AuthorCompany":"",
+    "AuthorName":"Tom Anderson",
+    "AuthorEmail":"tom.harper.anderson@gmail.com",
+    "ToolboxFolder":".",
+    "ToolboxMatlabPath":"src",
+    "ToolboxGettingStartedGuide":"TableUserGuide.m",
+    "MinimumMatlabRelease":"R2025a"
+}

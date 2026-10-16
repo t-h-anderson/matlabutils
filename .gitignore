@@ -34,3 +34,6 @@ codegen/
 
 # CI test artifacts
 test-results/
+
+# buildtool cache
+.buildtool/
