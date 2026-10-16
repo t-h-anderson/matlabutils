@@ -292,6 +292,8 @@ classdef tJavaScriptRender < matlab.unittest.TestCase
         end
 
         function tUsesFigureThemeStatus(testCase)
+            testCase.assumeFalse(isMATLABReleaseOlderThan("R2025a"), ...
+                "Figure themes need R2025a or newer.");
             data = table([1; 2], VariableNames="Value");
             [~, backend] = test.unit.gwidgets.Table.tJavaScriptRender.createTable( ...
                 testCase, data, Theme="dark");

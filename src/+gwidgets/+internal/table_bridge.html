@@ -257,7 +257,7 @@
       }
       if (row < 0) {
         var r = parseInt(node.getAttribute && node.getAttribute("aria-rowindex"), 10);
-        if (!isNaN(r)) { row = r; if (!rowEl) rowEl = node; }
+        if (!isNaN(r)) { row = r + ariaRowShift(root); if (!rowEl) rowEl = node; }
       }
       if (!rowEl && node.matches && node.matches(ROW_SELECTOR)) rowEl = node;
       if (row >= 0 && col >= 0) break;
@@ -298,6 +298,18 @@
     return { row: row, col: col, cell: cellEl, rowEl: rowEl };
   }
 
+  var hasZeroBasedAriaRows = false;
+
+  function ariaRowShift(root) {
+    // MATLAB R2024b numbers table body rows from 0 in aria-rowindex;
+    // later releases number them from 1, as display rows are. Row 0 can
+    // scroll out of the DOM, so remember once it has been seen.
+    if (!hasZeroBasedAriaRows && root && root.querySelector) {
+      hasZeroBasedAriaRows = !!root.querySelector("[aria-rowindex='0']");
+    }
+    return hasZeroBasedAriaRows ? 1 : 0;
+  }
+
   // ---- Group header row spanning --------------------------------
 
   function normaliseArray(value) {
@@ -327,6 +339,7 @@
 
   function rowElementForIndex(root, rowIndex) {
     if (!root) return null;
+    rowIndex -= ariaRowShift(root);
     var rows = Array.from(root.querySelectorAll(ROW_SELECTOR));
     for (var i = 0; i < rows.length; i++) {
       var rowEl = rows[i];
