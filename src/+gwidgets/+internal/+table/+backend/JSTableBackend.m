@@ -206,6 +206,8 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                     this.onCellEdited(data);
                 case "CellsPasted"
                     this.onCellsPasted(data);
+                case "KeyPressed"
+                    this.onKeyPressed(data);
                 case "DisplayDataChanged"
                     this.onDisplayDataChanged(data);
                 case "ColumnWidthChanged"
@@ -537,6 +539,28 @@ classdef JSTableBackend < gwidgets.internal.table.backend.TableBackend
                 "EditData", editData, ...
                 "NewData", newData);
             owner.Callback.onCellEdit([], eventData);
+        end
+
+        function onKeyPressed(this, data)
+            owner = this.owner();
+            if isempty(owner) || ~isfield(data, "key")
+                return
+            end
+
+            character = "";
+            if isfield(data, "character") && ~isempty(data.character)
+                character = string(data.character);
+            end
+            modifier = string.empty(1,0);
+            if isfield(data, "modifier") && ~isempty(data.modifier)
+                modifier = reshape(string(data.modifier), 1, []);
+            end
+
+            eventData = struct( ...
+                "Key", string(data.key), ...
+                "Character", character, ...
+                "Modifier", modifier);
+            owner.Callback.onKeyPress([], eventData);
         end
 
         function onDisplayDataChanged(this, data)

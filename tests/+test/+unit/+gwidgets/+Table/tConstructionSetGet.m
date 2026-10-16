@@ -54,6 +54,7 @@ classdef tConstructionSetGet < test.WithExampleTables
             testCase.verifyEmpty(t.CellEditCallback)
             testCase.verifyEmpty(t.CellDoubleClickCallback)
             testCase.verifyEmpty(t.DisplayDataChangedCallback)
+            testCase.verifyEmpty(t.KeyPressCallback)
 
             t.ShowGroupHeaderTooltips = false;
             testCase.verifyFalse(t.ShowGroupHeaderTooltips)

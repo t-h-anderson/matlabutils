@@ -46,6 +46,7 @@ classdef UITable < gwidgets.internal.Reparentable
         DropCompleted
         CommandInvoked
         TableDataChanged
+        KeyPressed
     end
 
     properties (Dependent, Access = private)

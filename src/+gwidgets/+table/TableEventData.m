@@ -37,6 +37,9 @@ classdef TableEventData < event.EventData
         Operation string = ""
         Placement string = ""
         Payload struct = struct()
+        Key string = ""
+        Character string = ""
+        Modifier string = string.empty(1,0)
         Timestamp = datetime.empty(0,0)
     end
 
@@ -85,6 +88,9 @@ classdef TableEventData < event.EventData
                 nvp.Operation = ""
                 nvp.Placement = ""
                 nvp.Payload = struct()
+                nvp.Key = ""
+                nvp.Character = ""
+                nvp.Modifier = string.empty(1,0)
                 nvp.Timestamp = datetime("now")
             end
 
