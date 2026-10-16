@@ -17,6 +17,8 @@ The main packages are:
 
 ## Getting Started
 
+Install a release by downloading `MatlabUtils <version>.mltbx` from the [GitHub releases](https://github.com/t-h-anderson/matlabutils/releases), or work from source:
+
 Open `MLUT.prj` in MATLAB, or add the source folder to the path manually:
 
 ```matlab
