@@ -20,12 +20,13 @@ classdef tKeyPress < matlab.unittest.TestCase
             testCase.verifyEqual(t.KeyPressCallback, callback)
             testCase.verifyEqual(t.Callback.KeyPress, callback)
             testCase.verifyEqual(log.Count, 1)
-            event = log.latest();
-            testCase.verifyClass(event, "gwidgets.table.TableEventData")
-            testCase.verifyEqual(event.Key, "delete")
-            testCase.verifyEqual(event.Character, string(char(127)))
-            testCase.verifyEqual(event.Modifier, "control")
-            testCase.verifyEqual(event.DataIndices, [2 1])
+            callbackData = log.latest();
+            testCase.verifyClass(callbackData, "gwidgets.internal.table.KeyPressData")
+            testCase.verifyEqual(callbackData.Key, "delete")
+            testCase.verifyEqual(callbackData.Character, string(char(127)))
+            testCase.verifyEqual(callbackData.Modifier, "control")
+            testCase.verifyEqual(callbackData.Indices, [2 1])
+            testCase.verifyEqual(callbackData.DisplayIndices, [2 1])
         end
 
         function tCallbackControllerKeyPressIsInvoked(testCase)
@@ -39,10 +40,11 @@ classdef tKeyPress < matlab.unittest.TestCase
             testCase.verifyEqual(t.KeyPressCallback, callback)
             testCase.verifyEqual(t.Callback.KeyPressCallback, callback)
             testCase.verifyEqual(log.Count, 1)
-            event = log.latest();
-            testCase.verifyEqual(event.Key, "a")
-            testCase.verifyEqual(event.Character, "a")
-            testCase.verifyEqual(event.Modifier, string.empty(1,0))
+            callbackData = log.latest();
+            testCase.verifyClass(callbackData, "gwidgets.internal.table.KeyPressData")
+            testCase.verifyEqual(callbackData.Key, "a")
+            testCase.verifyEqual(callbackData.Character, "a")
+            testCase.verifyEqual(callbackData.Modifier, string.empty(1,0))
         end
 
         function tKeyPressCallbackAliasesAreInterchangeable(testCase)

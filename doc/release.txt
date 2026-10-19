@@ -1,3 +1,8 @@
+Version 1.0.1
+- gwidgets.Table: KeyPressCallback receives KeyPressData (Indices,
+  DisplayIndices, Key, Character, Modifier), matching the other cell
+  callbacks, instead of the KeyPressed event data
+
 Version 1.0.0
 - First packaged release, as releases/MatlabUtils 1.0.0.mltbx
 - gwidgets.Table: filterable, sortable and groupable table with controller API
