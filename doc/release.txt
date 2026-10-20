@@ -1,3 +1,7 @@
+Version 1.0.2
+- gwidgets.Table: callback data accepts row and column selections, whose
+  indices are vectors, as well as N-by-2 cell selections
+
 Version 1.0.1
 - gwidgets.Table: KeyPressCallback receives KeyPressData (Indices,
   DisplayIndices, Key, Character, Modifier), matching the other cell

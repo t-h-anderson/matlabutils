@@ -59,6 +59,25 @@ classdef tKeyPress < matlab.unittest.TestCase
             testCase.verifyEqual(t.KeyPressCallback, second)
         end
 
+        function tKeyPressCallbackReceivesRowSelectionAsVector(testCase)
+            % Row selections are vectors of row indices, not N-by-2 cells.
+            log = test.unit.gwidgets.Table.EventLog();
+            t = test.unit.gwidgets.Table.tKeyPress.createTable(testCase, ...
+                KeyPressCallback=@(src, evt)log.record(src, evt));
+            t.SelectionType = "row";
+            t.Multiselect = "on";
+
+            t.Selection = [1 2 3];
+            test.unit.gwidgets.Table.tKeyPress.pressUITableKey(t, "delete", char(127), {});
+            t.Selection = 2;
+            test.unit.gwidgets.Table.tKeyPress.pressUITableKey(t, "delete", char(127), {});
+
+            testCase.assertEqual(log.Count, 2)
+            testCase.verifyEqual(log.Events{1}.Indices, [1 2 3])
+            testCase.verifyEqual(log.Events{2}.Indices, 2)
+            testCase.verifyEqual(log.Events{2}.DisplayIndices, 2)
+        end
+
         function tKeyPressedEventReportsKeyAndSelection(testCase)
             t = test.unit.gwidgets.Table.tKeyPress.createTable(testCase);
             log = test.unit.gwidgets.Table.EventLog();

@@ -1,8 +1,9 @@
 classdef CellInteractionData < event.EventData
    
     properties
-        Indices (:,2)
-        DisplayIndices (:,2)
+        % Row/column selections are vectors; cell selections are N-by-2.
+        Indices (:,:)
+        DisplayIndices (:,:)
     end
 
     methods
