@@ -1,3 +1,9 @@
+Version 1.0.4
+- gwidgets.Table: add Clipboard controller, Copy selection and Copy visible
+  table context-menu actions, and Ctrl+C without replacing user callbacks
+- Copy selected cells, rows or columns in displayed order, honoring filters,
+  folding and hidden columns; format tab-separated text for spreadsheets
+
 Version 1.0.3
 - gwidgets.Table: the all-columns search checkbox immediately reapplies the
   current text and emits FilterChanged when the search mode changes

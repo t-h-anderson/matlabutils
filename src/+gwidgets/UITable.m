@@ -14,6 +14,7 @@ classdef UITable < gwidgets.internal.Reparentable
         Tooltip (1,1) gwidgets.internal.table.TooltipController
         Metric (1,1) gwidgets.internal.table.MetricController
         Callback (1,1) gwidgets.internal.table.CallbackController
+        Clipboard (1,1) gwidgets.internal.table.ClipboardController
         Selection (1,1) gwidgets.internal.table.SelectionController
         Drag (1,1) gwidgets.internal.table.DragController
         Display (1,1) gwidgets.internal.table.DisplayController
@@ -91,6 +92,7 @@ classdef UITable < gwidgets.internal.Reparentable
         TooltipController_ (1,:) gwidgets.internal.table.TooltipController {mustBeScalarOrEmpty}
         MetricApi_ (1,:) gwidgets.internal.table.MetricController {mustBeScalarOrEmpty}
         CallbackApi_ (1,:) gwidgets.internal.table.CallbackController {mustBeScalarOrEmpty}
+        ClipboardApi_ (1,:) gwidgets.internal.table.ClipboardController {mustBeScalarOrEmpty}
         SelectionApi_ (1,:) gwidgets.internal.table.SelectionController {mustBeScalarOrEmpty}
         DragApi_ (1,:) gwidgets.internal.table.DragController {mustBeScalarOrEmpty}
         MenuApi_ (1,:) gwidgets.internal.table.ContextMenuController {mustBeScalarOrEmpty}
@@ -246,6 +248,10 @@ classdef UITable < gwidgets.internal.Reparentable
 
         function val = get.Callback(this)
             val = this.CallbackApi_;
+        end
+
+        function val = get.Clipboard(this)
+            val = this.ClipboardApi_;
         end
 
         function val = get.Selection(this)
@@ -581,6 +587,7 @@ classdef UITable < gwidgets.internal.Reparentable
             this.CallbackApi_ = gwidgets.internal.table.CallbackController(this);
             this.SelectionApi_ = gwidgets.internal.table.SelectionController(this);
             this.DragApi_ = gwidgets.internal.table.DragController(this);
+            this.ClipboardApi_ = gwidgets.internal.table.ClipboardController(this);
             this.initializeControllers();
         end
 

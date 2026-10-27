@@ -213,6 +213,8 @@ classdef CallbackController < gwidgets.internal.table.TableController
                 Character=character, ...
                 Modifier=modifier));
 
+            owner.Clipboard.handleKeyPress(key, modifier);
+
             if isempty(this.KeyPress)
                 return
             end
