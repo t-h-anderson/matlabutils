@@ -64,6 +64,19 @@ creating figures hidden, setting controller state, and showing the figure once s
 
 ## Testing
 
+### Searching table rows
+
+Column filters use the displayed header, including spaces:
+`Model Reference=ctrlDsp1` matches exactly and
+`GDS Target?="Pole 1"` searches for text within a column. Quote values
+containing spaces or operators. Exact column names take precedence over
+longer names sharing the same prefix.
+
+Enable **Apply filter to all text columns** for a plain-text search such as
+`ctrlDsp1`. Changing this checkbox immediately reapplies the current query.
+Invalid or ambiguous column filters show no rows and an **Invalid filter**
+message; clear or correct the query to restore the rows.
+
 The project uses class-based `matlab.unittest` tests under `tests/+test`.
 
 Run the full suite through the build tool:

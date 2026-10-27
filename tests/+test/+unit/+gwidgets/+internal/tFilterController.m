@@ -7,6 +7,41 @@ classdef tFilterController < matlab.unittest.TestCase
     end
 
     methods (Test)
+        function tQuotedValuesAndColumnNamesPreserveSpacesAndOperators(testCase)
+            data = table(["A & B"; "C"], [1; 2], ...
+                VariableNames=["Model Reference", "Value"]);
+
+            [idx, query, isOk] = gwidgets.internal.FilterController.filterIndices( ...
+                '"Model Reference"="A & B" & Value=1', data);
+            [roundTripIdx, ~, roundTripOk] = ...
+                gwidgets.internal.FilterController.filterIndices(query, data);
+
+            testCase.verifyEqual(idx, [true; false]);
+            testCase.verifyTrue(isOk);
+            testCase.verifyEqual(roundTripIdx, idx);
+            testCase.verifyTrue(roundTripOk);
+        end
+
+        function tExactColumnNameWinsOverLongerPrefix(testCase)
+            data = table(["A"; "B"], ["C"; "A"], ...
+                VariableNames=["Name", "Name Detail"]);
+
+            [idx, ~, isOk] = gwidgets.internal.FilterController.filterIndices("Name=A", data);
+
+            testCase.verifyEqual(idx, [true; false]);
+            testCase.verifyTrue(isOk);
+        end
+
+        function tQuotedContainsSearchPreservesSpaces(testCase)
+            data = table(["A & B"; "A B"; "C"], VariableNames="Model Reference");
+
+            [idx, ~, isOk] = gwidgets.internal.FilterController.filterIndices( ...
+                'Model Reference?="A "', data);
+
+            testCase.verifyEqual(idx, [true; true; false]);
+            testCase.verifyTrue(isOk);
+        end
+
         function tEmptyFilterReturnsAllRows(testCase)
             data = test.unit.gwidgets.internal.tFilterController.exampleData();
 
@@ -62,7 +97,7 @@ classdef tFilterController < matlab.unittest.TestCase
 
             [idx, str, isOk] = gwidgets.internal.FilterController.filterIndices("Flag=maybe", data);
 
-            testCase.verifyEqual(idx, true(height(data), 1))
+            testCase.verifyEqual(idx, false(height(data), 1))
             testCase.verifyFalse(isOk)
             testCase.verifyTrue(endsWith(str, "Flag=maybe"))
         end
@@ -103,7 +138,7 @@ classdef tFilterController < matlab.unittest.TestCase
 
             [idx, str, isOk, details] = gwidgets.internal.FilterController.filterIndices("Al>1", data);
 
-            testCase.verifyEqual(idx, true(height(data), 1))
+            testCase.verifyEqual(idx, false(height(data), 1))
             testCase.verifyFalse(isOk)
             testCase.verifyTrue(endsWith(str, "Al>1"))
             testCase.verifyEqual(nnz(details.ColumnIdx), 2)
@@ -114,7 +149,7 @@ classdef tFilterController < matlab.unittest.TestCase
 
             [idx, str, isOk] = gwidgets.internal.FilterController.filterIndices("Name>alpha", data);
 
-            testCase.verifyEqual(idx, true(height(data), 1))
+            testCase.verifyEqual(idx, false(height(data), 1))
             testCase.verifyFalse(isOk)
             testCase.verifyTrue(endsWith(str, "Name>alpha"))
         end

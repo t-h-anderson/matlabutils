@@ -2,6 +2,47 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
     % UI system tests for Table to test complex end-to-end workflows.
 
     methods (Test)
+        function tAllColumnsToggleReappliesExistingText(testCase)
+            fig = testCase.figureFixture(Type="uifigure");
+            fig.Position = [100 100 1000 600];
+            t = gwidgets.Table(Parent=uigridlayout(fig, [1 1]), Render="UITable", ...
+                Data=table(["B"; "A"; "C"], [20; 10; 30], ...
+                VariableNames=["Model Reference", "Value"]), ShowRowFilter=true);
+            testCase.addTeardown(@() delete(t));
+            t.UITable.Filter.expand();
+            drawnow;
+            t.Filter = "A";
+            toggle = t.UITable.Graphics.FilterComponent.AllColumnsCheckBox;
+
+            testCase.press(toggle);
+
+            testCase.verifyEqual(t.SortedVisibleToDataMap, 2);
+            t.Filter = "20";
+            testCase.verifyEqual(t.SortedVisibleToDataMap, 1);
+            testCase.press(toggle);
+            testCase.verifyEmpty(t.SortedVisibleToDataMap);
+        end
+
+        function tSearchModeChangeEmitsFilterChangedWithSameQuery(testCase)
+            fig = testCase.figureFixture(Type="uifigure");
+            fig.Position = [100 100 1000 600];
+            t = gwidgets.Table(Parent=uigridlayout(fig, [1 1]), Render="UITable", ...
+                Data=table(["B"; "A"; "C"], VariableNames="Name"), ShowRowFilter=true);
+            testCase.addTeardown(@() delete(t));
+            t.UITable.Filter.expand();
+            drawnow;
+            t.Filter = "Name=A";
+            setappdata(fig, "SearchModeFilterChanged", false);
+            changed = listener(t, "FilterChanged", ...
+                @(~, ~) setappdata(fig, "SearchModeFilterChanged", true));
+            testCase.addTeardown(@() delete(changed));
+
+            testCase.press(t.UITable.Graphics.FilterComponent.AllColumnsCheckBox);
+
+            testCase.verifyEmpty(t.SortedVisibleToDataMap);
+            testCase.verifyTrue(getappdata(fig, "SearchModeFilterChanged"));
+        end
+
 
         function tInstantiateTable(testCase)
             fh = testCase.figureFixture("Type", "uifigure");
@@ -61,7 +102,7 @@ classdef tTable < matlab.uitest.TestCase & test.WithFigureFixture & test.WithExa
             testCase.verifySize(tab.DisplayData, [53 10])
 
             testCase.type(t.FilterController.FilterDropDown, "IncorrectFilter")
-            testCase.verifySize(tab.DisplayData, [100 10])
+            testCase.verifySize(tab.DisplayData, [0 10])
 
             testCase.type(t.FilterController.FilterDropDown, "LastName=X")
             testCase.verifySize(tab.DisplayData, [0 10])
