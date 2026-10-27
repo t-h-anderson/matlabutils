@@ -64,6 +64,19 @@ creating figures hidden, setting controller state, and showing the figure once s
 
 ## Testing
 
+### Copying table data
+
+Use **Copy selection** in the table context menu or **Ctrl+C** to copy
+selected cells, rows or columns. **Copy visible table** copies the filtered,
+sorted and folded view with its displayed column headers. Hidden columns
+are omitted. The clipboard text is tab-separated for pasting into spreadsheets;
+tabs, newlines and quotes inside cells are quoted.
+
+Programmatically, use `t.Clipboard.copySelection()` or
+`t.Clipboard.copySelection(AllVisible=true, IncludeHeaders=true)`.
+`t.Clipboard.selectionText(...)` formats the same data without writing to the
+clipboard. Applications can supply `t.Clipboard.WriteFcn` to receive the text.
+
 ### Searching table rows
 
 Column filters use the displayed header, including spaces:

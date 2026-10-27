@@ -63,6 +63,7 @@ classdef Table < matlab.mixin.SetGet
         Style (1,1) gwidgets.internal.table.StyleController
         Menu (1,1) gwidgets.internal.table.ContextMenuController
         Callback (1,1) gwidgets.internal.table.CallbackController
+        Clipboard (1,1) gwidgets.internal.table.ClipboardController
         FilterControl (1,1) gwidgets.internal.table.FilterController
         SelectionControl (1,1) gwidgets.internal.table.SelectionController
         TooltipControl (1,1) gwidgets.internal.table.TooltipController
@@ -289,6 +290,10 @@ classdef Table < matlab.mixin.SetGet
 
         function val = get.Callback(this)
             val = this.UITable_.Callback;
+        end
+
+        function val = get.Clipboard(this)
+            val = this.UITable_.Clipboard;
         end
 
         function val = get.FilterControl(this)
