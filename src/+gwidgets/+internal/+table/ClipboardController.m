@@ -30,7 +30,7 @@ classdef ClipboardController < gwidgets.internal.table.TableController
             visible = uimenu(Parent=[], Text="Copy visible table", Tag="CopyVisibleTable", ...
                 MenuSelectedFcn=@(~,~) this.copySelection(AllVisible=true, IncludeHeaders=true));
             this.Menus = [selected, visible];
-            owner.Menu.addItem(this.Menus);
+            owner.Menu.setClipboardItems(this.Menus);
         end
 
         function delete(this)

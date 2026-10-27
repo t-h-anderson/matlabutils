@@ -17,6 +17,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
     properties (Access = private)
         CustomItems_ (1,:) matlab.ui.container.Menu = matlab.ui.container.Menu.empty(1,0)
+        ClipboardItems_ (1,:) matlab.ui.container.Menu = matlab.ui.container.Menu.empty(1,0)
         SupportedSelectionTypes_ (1,:) string { ...
             mustBeMember(SupportedSelectionTypes_, ["cell", "row", "column"])} = "cell"
         HasToggleFilter_ (1,1) logical = false
@@ -41,6 +42,7 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
         function delete(this)
             delete(this.CustomItems_);
+            delete(this.ClipboardItems_);
         end
 
         function addItem(this, menuItems)
@@ -50,6 +52,15 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             end
 
             this.CustomItems = [this.CustomItems_, menuItems];
+        end
+
+        function setClipboardItems(this, menuItems)
+            arguments
+                this (1,1) gwidgets.internal.table.ContextMenuController
+                menuItems (1,:) matlab.ui.container.Menu
+            end
+            this.ClipboardItems_ = menuItems;
+            this.refresh();
         end
 
         function initialize(this)
@@ -67,7 +78,8 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
 
             owner = this.owner();
             contextMenu = owner.Graphics.buildContextMenus( ...
-                owner.ContextMenu, this.CustomItems_, this.options(owner.Column.Sortable), this.callbacks());
+                owner.ContextMenu, [this.ClipboardItems_, this.CustomItems_], ...
+                this.options(owner.Column.Sortable), this.callbacks());
             gwidgets.internal.table.ContextMenuController.reparent(contextMenu, owner);
             owner.ContextMenu = contextMenu;
         end
@@ -90,7 +102,8 @@ classdef ContextMenuController < gwidgets.internal.table.TableController
             end
 
             contextMenu = gwidgets.internal.table.ContextMenuController.build( ...
-                displayTable, contextMenu, this.CustomItems_, this.options(columnSortable), this.callbacks());
+                displayTable, contextMenu, [this.ClipboardItems_, this.CustomItems_], ...
+                this.options(columnSortable), this.callbacks());
         end
 
         function val = get.CustomItems(this)
