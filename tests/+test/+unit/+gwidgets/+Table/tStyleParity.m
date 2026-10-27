@@ -3,6 +3,7 @@ classdef tStyleParity < matlab.unittest.TestCase
 
     properties (TestParameter)
         Backend = struct("UITable", "UITable", "JavaScript", "JavaScript")
+        HeaderLevel = struct("Top", 1, "Nested", 2, "Deep", 3)
     end
 
     methods (TestMethodSetup)
@@ -12,6 +13,28 @@ classdef tStyleParity < matlab.unittest.TestCase
     end
 
     methods (Test)
+        function tHeaderCallbackWorksWithoutDefiningClassContext(testCase, HeaderLevel)
+            data = table(["A"; "A"; "B"], ["x"; "y"; "x"], ...
+                ["i"; "j"; "k"], [1; 2; 3], ...
+                VariableNames=["G1", "G2", "G3", "Value"]);
+            t = test.unit.gwidgets.Table.tStyleParity.createTable(testCase, "UITable", data);
+            t.Group.By = ["G1", "G2", "G3"];
+            t.Group.Mode = "Nested";
+            t.Group.openAll();
+            headers = [gwidgets.internal.table.StyleController.defaultGroupHeaderStyle(), ...
+                gwidgets.internal.table.StyleController.defaultNestedGroupHeaderStyles()];
+            % A deferred callback must also work without its defining class scope.
+            callback = str2func(func2str(headers(HeaderLevel).TargetFunction));
+            owner = t.UITable;
+            expected = owner.Data.VisibleGroupHeaderRowIdx( ...
+                owner.Data.VisibleGroupHeaderLevels == HeaderLevel);
+
+            actual = callback(owner);
+
+            testCase.verifyNotEmpty(expected)
+            testCase.verifyEqual(actual, expected)
+        end
+
         function tCellStyleAfterFilterSort(testCase, Backend)
             data = table( ...
                 [3; 1; 4; 2], ...

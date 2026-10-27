@@ -168,7 +168,7 @@ classdef FilterController < gwidgets.internal.table.TableController
             previousFilter = this.FilterValue_;
             this.FilterValue_ = this.FilterValue;
             notify(this, "FilterChanged");
-            this.emitFilterChanged(previousFilter);
+            this.emitFilterChanged(previousFilter, Force=true);
         end
 
         function onFilterHelpRequested(this, ~, ~)
@@ -181,9 +181,14 @@ classdef FilterController < gwidgets.internal.table.TableController
     end
 
     methods (Access = private)
-        function emitFilterChanged(this, previousFilter)
+        function emitFilterChanged(this, previousFilter, nvp)
+            arguments
+                this (1,1) gwidgets.internal.table.FilterController
+                previousFilter (1,1) string
+                nvp.Force (1,1) logical = false
+            end
             owner = this.owner();
-            if isempty(owner) || string(previousFilter) == this.FilterValue
+            if isempty(owner) || (~nvp.Force && string(previousFilter) == this.FilterValue)
                 return
             end
 

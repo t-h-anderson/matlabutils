@@ -1,3 +1,12 @@
+Version 1.0.3
+- gwidgets.Table: the all-columns search checkbox immediately reapplies the
+  current text and emits FilterChanged when the search mode changes
+- Quoted filter values preserve spaces, operator characters and doubled quotes
+- Exact displayed column names take precedence over longer prefix matches
+- Invalid or ambiguous filters show no rows and an Invalid filter message
+- Deferred group-header callbacks can be reconstructed outside their class
+  without a private-method access error; row-selection behavior is unchanged
+
 Version 1.0.2
 - gwidgets.Table: callback data accepts row and column selections, whose
   indices are vectors, as well as N-by-2 cell selections

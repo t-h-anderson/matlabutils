@@ -379,6 +379,10 @@ classdef StyleController < gwidgets.internal.table.TableController
             end
         end
 
+    end
+
+    methods (Static)
+        % Deferred header callbacks can run outside this class's access context.
         function rowIdx = groupHeaderRowsAtLevel(tbl, level)
             arguments
                 tbl (1,1) gwidgets.UITable

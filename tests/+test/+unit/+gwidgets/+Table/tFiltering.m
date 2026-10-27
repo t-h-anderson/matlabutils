@@ -56,8 +56,8 @@ classdef tFiltering < test.WithExampleTables
 
             t.Filter = "Test!&'£";
 
-            testCase.verifyEqual(t.Data, t.DisplayData)
-            testCase.verifyEqual(t.RowFilterIndices, repelem(true, 1, 5))
+            testCase.verifyEmpty(t.DisplayData)
+            testCase.verifyEqual(t.RowFilterIndices, repelem(false, 1, 5))
         end
 
         function tAllEntriesFiltered(testCase)

@@ -106,6 +106,12 @@ classdef FilterController < gwidgets.internal.Reparentable
             % Update the number of matches label.
             this.MatchesLabel.Text = sprintf("%d/%d matches found", ...
                 nnz(idx), numel(idx));
+            if ~status
+                this.MatchesLabel.Text = "Invalid filter";
+                this.MatchesLabel.Tooltip = "Check column names and filter syntax.";
+            else
+                this.MatchesLabel.Tooltip = "Number of matching rows identified by the filter";
+            end
 
         end
 
@@ -175,6 +181,20 @@ classdef FilterController < gwidgets.internal.Reparentable
             filter = erase(filter, "⚡");
             filter = erase(filter, "❓");
 
+            % Protect quoted text from operator and whitespace parsing.
+            % Quoted column names and values may contain spaces or operators.
+            quoted = string(regexp(filter, '"(?:[^"]|"")*"', 'match'));
+            tokens = "gwidgetsQuoted" + string(1:numel(quoted));
+            for quotedIdx = 1:numel(quoted)
+                filter = replace(filter, quoted(quotedIdx), tokens(quotedIdx));
+            end
+            if contains(filter, '"')
+                idx(:) = false;
+                str = "❓" + filter;
+                isOk = false;
+                return
+            end
+
             % Split up the filter string on the semicolons.
             [splitParts, delim] = strsplit(filter, [andConj, orConj], "CollapseDelimiters", true);
             splitParts = strtrim(splitParts);
@@ -214,6 +234,12 @@ classdef FilterController < gwidgets.internal.Reparentable
                         "[^" + specials + "]+|[" + specials + "]+[^" + specials + "]*", ...
                         "match");
                     tag(1) = strtrim(tag(1));
+                    columnName = tag(1);
+                    for quotedIdx = 1:numel(quoted)
+                        columnName = replace(columnName, tokens(quotedIdx), ...
+                            replace(extractBetween(quoted(quotedIdx), 2, ...
+                            strlength(quoted(quotedIdx)) - 1), '""', '"'));
+                    end
 
                     assert(numel(tag) > 0, "FilterableTable:FilterError:Unknown", "Something went wrong");
 
@@ -222,12 +248,18 @@ classdef FilterController < gwidgets.internal.Reparentable
                     % Find a unique matching column
                     varNames = string(data.Properties.VariableNames);
 
-                    indCol = startsWith(varNames, tag(1), "IgnoreCase", false);
+                    indCol = strcmp(varNames, columnName);
+                    if ~any(indCol)
+                        indCol = strcmpi(varNames, columnName);
+                    end
+                    if ~any(indCol)
+                        indCol = startsWith(varNames, columnName, "IgnoreCase", false);
+                    end
                     if ~any(indCol)
                         % No identical column found, so try without
                         % capitalisation
                         indCol = startsWith(varNames, ...
-                            tag(1), "IgnoreCase", true);
+                            columnName, "IgnoreCase", true);
                     end
 
                     if nnz(indCol) ~= 1
@@ -264,6 +296,11 @@ classdef FilterController < gwidgets.internal.Reparentable
 
                         % Update the tag so it can be displayed as parsed
                         tag(iTag) = sprintf("%s%s", op, val);
+                        for quotedIdx = 1:numel(quoted)
+                            val = replace(val, tokens(quotedIdx), ...
+                                replace(extractBetween(quoted(quotedIdx), 2, ...
+                                strlength(quoted(quotedIdx)) - 1), '""', '"'));
+                        end
 
                         % If there are multiple parts to the statement,
                         % they are joined via conjunction which may omit
@@ -414,6 +451,12 @@ classdef FilterController < gwidgets.internal.Reparentable
 
             str = strjoin(splitParts + " " + delim, " ");
             str = strtrim(str);
+            for quotedIdx = 1:numel(quoted)
+                str = replace(str, tokens(quotedIdx), quoted(quotedIdx));
+            end
+            if ~isOk
+                idx(:) = false;
+            end
         end
 
     end
@@ -498,7 +541,8 @@ classdef FilterController < gwidgets.internal.Reparentable
                 "Tooltip", "Enable this setting when searching for " + ...
                 "matching text across all text columns in the table", ...
                 "Text", "Apply filter to all text columns", ...
-                "Value", false);
+                "Value", false, ...
+                "ValueChangedFcn", @this.onSearchModeChanged);
 
             % Add the help page.
             this.HelpPanel = uipanel("Parent", []);
@@ -596,6 +640,12 @@ classdef FilterController < gwidgets.internal.Reparentable
             % applyCurrentFilter
             this.FilterValue = this.FilterDropDown.Value;
             notify(this, "FilterChanged");
+        end
+
+        function onSearchModeChanged(this, ~, ~)
+            % Reapply the query immediately, without stale parser markers.
+            this.FilterDropDown.Value = erase(this.FilterValue, ["⚡", "❓"]);
+            this.onFilterEdited([], []);
         end
 
         function onClearHistoryButtonPushed(this, ~, ~)
