@@ -10,6 +10,16 @@ classdef tClipboard < matlab.unittest.TestCase
     end
 
     methods (Test)
+        function tDenseCellRangeMatchesVisibleCopy(testCase, Backend)
+            t = createTable(testCase, Backend);
+            t.SelectionType = "cell";
+            t.Selection = [1 1; 1 2; 2 1; 2 2; 3 1; 3 2];
+
+            text = t.Clipboard.selectionText();
+
+            testCase.verifyEqual(text, t.Clipboard.selectionText(AllVisible=true));
+        end
+
         function tSelectedRowsFollowDisplayedSortOrder(testCase, Backend)
             t = createTable(testCase, Backend);
             t.Sort.By = "Name";

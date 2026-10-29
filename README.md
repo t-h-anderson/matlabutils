@@ -11,6 +11,10 @@ The main packages are:
 
 ## Requirements
 
+Version 1.0.5 improves copying large cell selections by computing their selection
+mask once. Copy formatting, display order, filtering, and sparse selections retain
+their existing behavior.
+
 - MATLAB R2025a or newer is required.
 - Simulink is required for `mlut.sl` utilities and their tests.
 - Statistics and Machine Learning Toolbox is currently required by the source dependency graph.
