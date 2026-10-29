@@ -79,13 +79,9 @@ classdef ClipboardController < gwidgets.internal.table.TableController
                 values(index) = strjoin(reshape(parts, 1, []), " ");
             end
             if ~nvp.AllVisible && selectionType == "cell"
-                for row = 1:numel(rows)
-                    for column = 1:numel(columns)
-                        if ~ismember([rows(row), columns(column)], selection, "rows")
-                            values(row, column) = "";
-                        end
-                    end
-                end
+                [dataRows, dataColumns] = ndgrid(rows, columns);
+                selected = ismember([dataRows(:), dataColumns(:)], selection, "rows");
+                values(~reshape(selected, size(values))) = "";
             end
             if nvp.IncludeHeaders
                 values = [owner.Column.Names(columns); values];
